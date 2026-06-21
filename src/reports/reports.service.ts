@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
-import { CLICKUP_SPACES } from '../config/clickup-spaces.config';
+import { WorkspaceService } from '../workspaces/workspace.service';
 
 function defaultFrom(): Date {
   const d = new Date();
@@ -26,9 +26,12 @@ function parseDate(value: string | undefined, fallback: Date): Date {
 
 @Injectable()
 export class ReportsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly workspaces: WorkspaceService,
+  ) {}
 
-  async tasksSummary() {
+  async tasksSummary(workspaceId: string) {
     // `byStatusType` is added so the Overview KPIs can derive open/closed
     // counts reliably. The per-list `status` strings are unstable across
     // workspaces ('Closed' vs 'closed', 'done' vs 'complete'), but ClickUp's
@@ -49,12 +52,13 @@ export class ReportsService {
                COUNT(*)::bigint AS count
         FROM clickup_tasks
         WHERE is_deleted = false
+          AND workspace_id = ${workspaceId}
         GROUP BY space_id
         ORDER BY count DESC
       `),
-      this.prisma.clickupTask.groupBy({ by: ['status'], where: { isDeleted: false }, _count: { taskId: true } }),
-      this.prisma.clickupTask.groupBy({ by: ['statusType'], where: { isDeleted: false }, _count: { taskId: true } }),
-      this.prisma.clickupTask.count({ where: { isDeleted: false } }),
+      this.prisma.clickupTask.groupBy({ by: ['status'], where: { workspaceId, isDeleted: false }, _count: { taskId: true } }),
+      this.prisma.clickupTask.groupBy({ by: ['statusType'], where: { workspaceId, isDeleted: false }, _count: { taskId: true } }),
+      this.prisma.clickupTask.count({ where: { workspaceId, isDeleted: false } }),
     ]);
     return {
       bySpace: bySpaceRows.map(r => ({ spaceId: r.space_id, spaceName: r.space_name, count: Number(r.count) })),
@@ -64,10 +68,10 @@ export class ReportsService {
     };
   }
 
-  async tasksBySpaceStatus() {
+  async tasksBySpaceStatus(workspaceId: string) {
     const rows = await this.prisma.clickupTask.groupBy({
       by: ['spaceName', 'status'],
-      where: { isDeleted: false },
+      where: { workspaceId, isDeleted: false },
       _count: { taskId: true },
       orderBy: { spaceName: 'asc' },
     });
@@ -86,7 +90,7 @@ export class ReportsService {
    * pairing in a single pass; SQL beats Prisma here because Prisma can't
    * express ordinal-paired array unpacking.
    */
-  async tasksAssignees() {
+  async tasksAssignees(workspaceId: string) {
     type Row = { name: string; email: string | null; task_count: bigint };
     const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
       SELECT name, email, COUNT(*)::bigint AS task_count
@@ -100,6 +104,7 @@ export class ReportsService {
           string_to_array(COALESCE(assignees_emails, ''), ',')
         ) AS u(n, e)
         WHERE is_deleted = false
+          AND workspace_id = ${workspaceId}
       ) AS s
       WHERE name <> ''
       GROUP BY name, email
@@ -111,7 +116,7 @@ export class ReportsService {
   /** Distinct assignees that have at least one time entry. Feeds the
    *  "Exclude assignee" picker (all assignees with tracked time, so an admin
    *  can pre-emptively exclude someone who currently has a rate). */
-  async timeEntriesAssignees() {
+  async timeEntriesAssignees(workspaceId: string) {
     type Row = { user_id: string; user_name: string | null; user_email: string | null };
     const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
       SELECT user_id,
@@ -119,18 +124,20 @@ export class ReportsService {
              MAX(user_email) AS user_email
       FROM clickup_time_entries
       WHERE user_id IS NOT NULL
+        AND workspace_id = ${workspaceId}
       GROUP BY user_id
       ORDER BY MAX(user_name) NULLS LAST
     `);
     return rows.map((r) => ({ id: r.user_id, name: r.user_name, email: r.user_email }));
   }
 
-  async tasksClients() {
+  async tasksClients(workspaceId: string) {
     type Row = { client: string; task_count: bigint };
     const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
       SELECT client, COUNT(*)::bigint AS task_count
       FROM clickup_tasks
       WHERE is_deleted = false
+        AND workspace_id = ${workspaceId}
         AND client IS NOT NULL
         AND client <> ''
       GROUP BY client
@@ -139,12 +146,13 @@ export class ReportsService {
     return rows.map((r) => ({ client: r.client, taskCount: Number(r.task_count) }));
   }
 
-  async tasksLists(spaceId?: string) {
+  async tasksLists(workspaceId: string, spaceId?: string) {
     type Row = { list_id: string; list_name: string; space_name: string | null; task_count: bigint };
     const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
       SELECT list_id, list_name, MAX(space_name) AS space_name, COUNT(*)::bigint AS task_count
       FROM clickup_tasks
       WHERE is_deleted = false
+        AND workspace_id = ${workspaceId}
         AND list_id IS NOT NULL
         AND list_name <> ''
         ${spaceId ? Prisma.sql`AND space_id = ${spaceId}` : Prisma.empty}
@@ -159,12 +167,13 @@ export class ReportsService {
     }));
   }
 
-  async tasksFolders(spaceId?: string) {
+  async tasksFolders(workspaceId: string, spaceId?: string) {
     type Row = { folder_id: string; folder_name: string; space_name: string | null; task_count: bigint };
     const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
       SELECT folder_id, folder_name, MAX(space_name) AS space_name, COUNT(*)::bigint AS task_count
       FROM clickup_tasks
       WHERE is_deleted = false
+        AND workspace_id = ${workspaceId}
         AND folder_id IS NOT NULL
         AND folder_name <> ''
         ${spaceId ? Prisma.sql`AND space_id = ${spaceId}` : Prisma.empty}
@@ -180,6 +189,7 @@ export class ReportsService {
   }
 
   async tasks(
+    workspaceId: string,
     spaceId?: string,
     status?: string,
     search?: string,
@@ -200,7 +210,7 @@ export class ReportsService {
     // filtered set in one shot. The page UI never offers > 100 rows/page, so
     // this only matters for export requests.
     const safeLimit = Math.min(limit, 5000);
-    const where: Prisma.ClickupTaskWhereInput = {};
+    const where: Prisma.ClickupTaskWhereInput = { workspaceId };
     // ClickUp `archived` flag (exclude / include / only). Always hide soft-deleted rows unless we add a separate flag later.
     where.isDeleted = false;
     if (archived === 'only') {
@@ -285,12 +295,12 @@ export class ReportsService {
     };
   }
 
-  async timeEntriesByUser(fromParam?: string, toParam?: string) {
+  async timeEntriesByUser(workspaceId: string, fromParam?: string, toParam?: string) {
     const from = parseDate(fromParam, defaultFrom());
     const to = parseDate(toParam, new Date());
     const rows = await this.prisma.clickupTimeEntry.groupBy({
       by: ['userId', 'userName', 'userEmail'],
-      where: { startTime: { gte: from, lte: to } },
+      where: { workspaceId, startTime: { gte: from, lte: to } },
       _sum: { durationHours: true, costCents: true },
     });
     return rows
@@ -312,7 +322,7 @@ export class ReportsService {
    *
    * Soft-deleted tasks are excluded from both windows.
    */
-  async overviewDeltas(fromParam?: string, toParam?: string) {
+  async overviewDeltas(workspaceId: string, fromParam?: string, toParam?: string) {
     const from = parseDate(fromParam, defaultFrom());
     const to = parseDate(toParam, new Date());
     const spanMs = to.getTime() - from.getTime();
@@ -330,6 +340,7 @@ export class ReportsService {
         FROM clickup_time_entries e
         JOIN clickup_tasks t ON e.task_id = t.task_id
         WHERE e.start_time IS NOT NULL
+          AND e.workspace_id = ${workspaceId}
           AND e.start_time >= ${winFrom}
           AND ${upper}
           AND t.is_deleted = false
@@ -355,7 +366,7 @@ export class ReportsService {
     };
   }
 
-  async timeEntriesByClient(fromParam?: string, toParam?: string) {
+  async timeEntriesByClient(workspaceId: string, fromParam?: string, toParam?: string) {
     const from = parseDate(fromParam, defaultFrom());
     const to = parseDate(toParam, new Date());
     type Row = { client: string; total_hours: number; total_cost_cents: number };
@@ -365,7 +376,8 @@ export class ReportsService {
         COALESCE(SUM(e.cost_cents), 0)::float AS total_cost_cents
       FROM clickup_time_entries e
       JOIN clickup_tasks t ON e.task_id = t.task_id
-      WHERE e.start_time >= ${from} AND e.start_time <= ${to}
+      WHERE e.workspace_id = ${workspaceId}
+        AND e.start_time >= ${from} AND e.start_time <= ${to}
         AND t.is_deleted = false
         AND t.client IS NOT NULL AND t.client <> ''
       GROUP BY t.client
@@ -374,7 +386,7 @@ export class ReportsService {
     return rows.map(r => ({ client: r.client, totalHours: Number(r.total_hours), totalCostAud: Number(r.total_cost_cents) / 100 }));
   }
 
-  async timeEntriesByDepartment(fromParam?: string, toParam?: string) {
+  async timeEntriesByDepartment(workspaceId: string, fromParam?: string, toParam?: string) {
     const from = parseDate(fromParam, defaultFrom());
     const to = parseDate(toParam, new Date());
     type Row = { department: string; total_hours: number; total_cost_cents: number };
@@ -384,7 +396,8 @@ export class ReportsService {
         COALESCE(SUM(e.cost_cents), 0)::float AS total_cost_cents
       FROM clickup_time_entries e
       JOIN clickup_tasks t ON e.task_id = t.task_id
-      WHERE e.start_time >= ${from} AND e.start_time <= ${to}
+      WHERE e.workspace_id = ${workspaceId}
+        AND e.start_time >= ${from} AND e.start_time <= ${to}
         AND t.department IS NOT NULL AND t.department <> ''
       GROUP BY t.department
       ORDER BY total_cost_cents DESC
@@ -392,12 +405,12 @@ export class ReportsService {
     return rows.map(r => ({ department: r.department, totalHours: Number(r.total_hours), totalCostAud: Number(r.total_cost_cents) / 100 }));
   }
 
-  async timeEntriesBillableSummary(fromParam?: string, toParam?: string) {
+  async timeEntriesBillableSummary(workspaceId: string, fromParam?: string, toParam?: string) {
     const from = parseDate(fromParam, defaultFrom());
     const to = parseDate(toParam, new Date());
     const rows = await this.prisma.clickupTimeEntry.groupBy({
       by: ['billable'],
-      where: { startTime: { gte: from, lte: to } },
+      where: { workspaceId, startTime: { gte: from, lte: to } },
       _sum: { durationHours: true, costCents: true },
     });
     const b = rows.find(r => r.billable);
@@ -420,6 +433,7 @@ export class ReportsService {
    * either endpoint diverge without breaking the other.
    */
   async timeEntriesAggregates(
+    workspaceId: string,
     userId?: string,
     fromParam?: string,
     toParam?: string,
@@ -434,7 +448,7 @@ export class ReportsService {
   ) {
     const from = parseDate(fromParam, defaultFrom());
     const to = parseDate(toParam, new Date());
-    const where: Prisma.ClickupTimeEntryWhereInput = { startTime: { gte: from, lte: to } };
+    const where: Prisma.ClickupTimeEntryWhereInput = { workspaceId, startTime: { gte: from, lte: to } };
     const and: Prisma.ClickupTimeEntryWhereInput[] = [];
     if (spaceId) and.push({ task: { spaceId, isDeleted: false } });
     // Intentionally no `isDeleted: false` here (unlike the spaceId clause):
@@ -512,6 +526,7 @@ export class ReportsService {
   }
 
   async timeEntriesList(
+    workspaceId: string,
     userId?: string,
     fromParam?: string,
     toParam?: string,
@@ -531,7 +546,7 @@ export class ReportsService {
     const safeLimit = Math.min(limit, 5000);
     const from = parseDate(fromParam, defaultFrom());
     const to = parseDate(toParam, new Date());
-    const where: Prisma.ClickupTimeEntryWhereInput = { startTime: { gte: from, lte: to } };
+    const where: Prisma.ClickupTimeEntryWhereInput = { workspaceId, startTime: { gte: from, lte: to } };
     const and: Prisma.ClickupTimeEntryWhereInput[] = [];
     if (spaceId) and.push({ task: { spaceId, isDeleted: false } });
     // Intentionally no `isDeleted: false` here (unlike the spaceId clause):
@@ -606,8 +621,8 @@ export class ReportsService {
     };
   }
 
-  async sprintPoints(spaceId?: string) {
-    const where: Prisma.ClickupTaskWhereInput = { isDeleted: false };
+  async sprintPoints(workspaceId: string, spaceId?: string) {
+    const where: Prisma.ClickupTaskWhereInput = { workspaceId, isDeleted: false };
     if (spaceId) where.spaceId = spaceId;
     const rows = await this.prisma.clickupTask.groupBy({
       by: ['spaceName', 'status'],
@@ -618,8 +633,23 @@ export class ReportsService {
     return rows.map(r => ({ spaceName: r.spaceName, status: r.status, totalPoints: r._sum.sprintPoints ?? 0 }));
   }
 
-  async syncHealth() {
-    const checkpoints = await this.prisma.syncCheckpoint.findMany({ orderBy: { scopeId: 'asc' } });
+  async syncHealth(workspaceId: string) {
+    const checkpoints = await this.prisma.syncCheckpoint.findMany({ where: { workspaceId }, orderBy: { scopeId: 'asc' } });
+    const spaces = this.workspaces.getSpaces(workspaceId);
+    // Longest backfill lookback (in days) actually run for each space — taken
+    // from the recorded `lookbackDays` on each backfill job log. Lets the UI
+    // show "synced up to Nd back" so an empty-but-synced space reads clearly.
+    type LookbackRow = { space_id: string; max_lookback: number };
+    const lookbackRows = await this.prisma.$queryRaw<LookbackRow[]>(Prisma.sql`
+      SELECT entity_id AS space_id, MAX((payload->>'lookbackDays')::int) AS max_lookback
+      FROM sync_job_logs
+      WHERE workspace_id = ${workspaceId}
+        AND queue_name = 'clickup-backfills'
+        AND entity_type = 'space'
+        AND payload->>'lookbackDays' ~ '^[0-9]+$'
+      GROUP BY entity_id
+    `);
+    const maxLookbackByScope = new Map(lookbackRows.map(r => [r.space_id, Number(r.max_lookback)]));
     const now = Date.now();
     // A space is "Stale" once its last successful sync is older than this. Set
     // comfortably above the reconcile/safety-net interval so a normal quiet gap
@@ -627,17 +657,17 @@ export class ReportsService {
     // essentially every idle hour).
     const STALE_AFTER_MINUTES = 12 * 60;
     return checkpoints.map(cp => {
-      const space = CLICKUP_SPACES.find(s => s.id === cp.scopeId);
+      const space = spaces.find(s => s.spaceId === cp.scopeId);
       const ageMs = cp.lastSuccessfulSyncAt ? now - cp.lastSuccessfulSyncAt.getTime() : null;
       const ageMinutes = ageMs !== null ? Math.round(ageMs / 60000) : null;
       const status = ageMinutes === null ? 'Unknown' : ageMinutes > STALE_AFTER_MINUTES ? 'Stale' : 'Fresh';
-      return { scopeId: cp.scopeId, spaceName: space?.name ?? cp.scopeId, lastSuccessfulSyncAt: cp.lastSuccessfulSyncAt, ageMinutes, status };
+      return { scopeId: cp.scopeId, spaceName: space?.name ?? cp.scopeId, lastSuccessfulSyncAt: cp.lastSuccessfulSyncAt, ageMinutes, status, maxLookbackDays: maxLookbackByScope.get(cp.scopeId) ?? null };
     });
   }
 
-  async webhookEvents(limit = 50, offset = 0, status?: string, eventType?: string, search?: string) {
+  async webhookEvents(workspaceId: string, limit = 50, offset = 0, status?: string, eventType?: string, search?: string) {
     const safeLimit = Math.min(limit, 200);
-    const where: Prisma.ClickupWebhookEventWhereInput = {};
+    const where: Prisma.ClickupWebhookEventWhereInput = { workspaceId };
     if (status && status !== 'all') where.status = status;
     if (eventType && eventType !== 'all') where.eventType = eventType;
     const q = search?.trim();
@@ -662,7 +692,7 @@ export class ReportsService {
       // Distinct event types across ALL events (not the filtered set) so the
       // filter dropdown stays stable regardless of the active filter.
       this.prisma.clickupWebhookEvent.findMany({
-        where: { eventType: { not: null } },
+        where: { workspaceId, eventType: { not: null } },
         distinct: ['eventType'],
         select: { eventType: true },
         orderBy: { eventType: 'asc' },
@@ -675,7 +705,7 @@ export class ReportsService {
     };
   }
 
-  async jobLogs(queueName?: string, status?: string, limit = 50, offset = 0) {
+  async jobLogs(workspaceId: string, queueName?: string, status?: string, limit = 50, offset = 0) {
     const safeLimit = Math.min(limit, 200);
     // Raw SQL because we need a per-row `recovered` flag for failed jobs:
     // a failure is considered "recovered" if a later successful run for the
@@ -697,6 +727,9 @@ export class ReportsService {
       recovered: boolean | null;
     };
     const filters: Prisma.Sql[] = [];
+    // Always scope to this workspace (sync_job_logs.workspace_id is nullable for
+    // global jobs; the reports view only ever shows this workspace's rows).
+    filters.push(Prisma.sql`workspace_id = ${workspaceId}`);
     if (queueName) filters.push(Prisma.sql`queue_name = ${queueName}`);
     if (status) filters.push(Prisma.sql`status = ${status}`);
     const whereClause = filters.length > 0
@@ -716,6 +749,7 @@ export class ReportsService {
                 AND s.entity_id = j.entity_id
                 AND s.status = 'completed'
                 AND s.finished_at > j.finished_at
+                AND s.workspace_id = ${workspaceId}
             )
           END AS recovered
         FROM sync_job_logs j
@@ -750,29 +784,30 @@ export class ReportsService {
     };
   }
 
-  async deadLetters(limit = 50, offset = 0) {
+  async deadLetters(workspaceId: string, limit = 50, offset = 0) {
     const safeLimit = Math.min(limit, 200);
     const [items, total] = await Promise.all([
       this.prisma.deadLetterJob.findMany({
-        where: { retriedAt: null, resolvedAt: null },
+        where: { workspaceId, retriedAt: null, resolvedAt: null },
         orderBy: { failedAt: 'desc' },
         take: safeLimit,
         skip: offset,
         select: { id: true, queueName: true, jobName: true, entityId: true, errorMessage: true, failedAt: true },
       }),
-      this.prisma.deadLetterJob.count({ where: { retriedAt: null, resolvedAt: null } }),
+      this.prisma.deadLetterJob.count({ where: { workspaceId, retriedAt: null, resolvedAt: null } }),
     ]);
     return { items: items.map(i => ({ ...i, id: i.id.toString() })), total };
   }
 
-  async stats(excludedIds: string[] = []) {
+  async stats(workspaceId: string, excludedIds: string[] = []) {
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const [failedJobsLast24h, deadLetterPending, webhooksLast24h, missingRateEntries, lastWebhookEvent] = await Promise.all([
-      this.prisma.syncJobLog.count({ where: { status: 'failed', finishedAt: { gte: since24h } } }),
-      this.prisma.deadLetterJob.count({ where: { retriedAt: null, resolvedAt: null } }),
-      this.prisma.clickupWebhookEvent.count({ where: { receivedAt: { gte: since24h } } }),
+      this.prisma.syncJobLog.count({ where: { workspaceId, status: 'failed', finishedAt: { gte: since24h } } }),
+      this.prisma.deadLetterJob.count({ where: { workspaceId, retriedAt: null, resolvedAt: null } }),
+      this.prisma.clickupWebhookEvent.count({ where: { workspaceId, receivedAt: { gte: since24h } } }),
       this.prisma.clickupTimeEntry.count({
         where: {
+          workspaceId,
           status: { notIn: ['COST_CALCULATED', 'COST_EXCLUDED'] },
           ...(excludedIds.length ? { OR: [{ userId: null }, { userId: { notIn: excludedIds } }] } : {}),
         },
@@ -781,6 +816,7 @@ export class ReportsService {
       // delivery health (last event + whether any arrived in the last 24h)
       // instead of inferring it from sync-checkpoint freshness.
       this.prisma.clickupWebhookEvent.findFirst({
+        where: { workspaceId },
         orderBy: { receivedAt: 'desc' },
         select: { receivedAt: true },
       }),
@@ -794,7 +830,7 @@ export class ReportsService {
     };
   }
 
-  async missingRates(excludedIds: string[] = []) {
+  async missingRates(workspaceId: string, excludedIds: string[] = []) {
     type Row = {
       user_id: string;
       user_name: string;
@@ -817,6 +853,7 @@ export class ReportsService {
           e.start_time
         FROM clickup_time_entries e
         WHERE e.user_id IS NOT NULL
+          AND e.workspace_id = ${workspaceId}
           ${excludedIds.length ? Prisma.sql`AND e.user_id <> ALL(array[${Prisma.join(excludedIds)}]::text[])` : Prisma.empty}
           AND NOT EXISTS (
             -- Inclusive closed-closed interval [valid_from, valid_to], matching
@@ -907,7 +944,7 @@ export class ReportsService {
     }));
   }
 
-  async spaces() {
+  async spaces(workspaceId: string) {
     type Row = {
       space_id: string;
       space_name: string;
@@ -938,6 +975,7 @@ export class ReportsService {
       FROM clickup_tasks t
       LEFT JOIN clickup_time_entries e ON e.task_id = t.task_id
       WHERE t.is_deleted = false
+        AND t.workspace_id = ${workspaceId}
       GROUP BY t.space_id, t.space_name
       ORDER BY task_count DESC
     `);
@@ -964,6 +1002,7 @@ export class ReportsService {
    * so the chart shows a continuous timeline instead of gaps.
    */
   async costTrend(
+    workspaceId: string,
     bucket: 'day' | 'week' | 'month',
     fromParam?: string,
     toParam?: string,
@@ -1017,6 +1056,7 @@ export class ReportsService {
         FROM clickup_time_entries e
         JOIN clickup_tasks t ON e.task_id = t.task_id
         WHERE e.start_time IS NOT NULL
+          AND e.workspace_id = ${workspaceId}
           AND e.start_time >= ${from}
           AND e.start_time <= ${to}
           AND t.is_deleted = false
@@ -1054,6 +1094,7 @@ export class ReportsService {
    * ordered `segments`, and a per-bucket cost map in dollars.
    */
   private async costTrendBySegment(
+    workspaceId: string,
     bucket: 'day' | 'week' | 'month',
     fromParam: string | undefined,
     toParam: string | undefined,
@@ -1101,6 +1142,7 @@ export class ReportsService {
       FROM clickup_time_entries e
       JOIN clickup_tasks t ON e.task_id = t.task_id
       WHERE e.start_time IS NOT NULL
+        AND e.workspace_id = ${workspaceId}
         AND e.start_time >= ${from}
         AND e.start_time <= ${to}
         AND t.is_deleted = false
@@ -1146,13 +1188,14 @@ export class ReportsService {
    * the entry's logger name (falling back to user id, then "Unknown").
    */
   async costTrendByAssignee(
+    workspaceId: string,
     bucket: 'day' | 'week' | 'month',
     fromParam?: string,
     toParam?: string,
     topN?: number,
   ) {
     const { buckets, segments, points } = await this.costTrendBySegment(
-      bucket, fromParam, toParam, topN,
+      workspaceId, bucket, fromParam, toParam, topN,
       Prisma.sql`COALESCE(NULLIF(e.user_name, ''), e.user_id, 'Unknown')`,
     );
     return { buckets, assignees: segments, points };
@@ -1165,13 +1208,14 @@ export class ReportsService {
    * "No client".
    */
   async costTrendByClient(
+    workspaceId: string,
     bucket: 'day' | 'week' | 'month',
     fromParam?: string,
     toParam?: string,
     topN?: number,
   ) {
     const { buckets, segments, points } = await this.costTrendBySegment(
-      bucket, fromParam, toParam, topN,
+      workspaceId, bucket, fromParam, toParam, topN,
       Prisma.sql`COALESCE(NULLIF(t.client, ''), 'No client')`,
     );
     return { buckets, clients: segments, points };
@@ -1196,7 +1240,7 @@ export class ReportsService {
    * (done → in-progress → done) use first-open to last-done, i.e. end-to-end
    * calendar time. Window filters by the task's *last done* occurredAt.
    */
-  async cycleTime(args: { from: Date; to: Date; groupBy: 'week' | 'client' | 'department' }) {
+  async cycleTime(workspaceId: string, args: { from: Date; to: Date; groupBy: 'week' | 'client' | 'department' }) {
     const { from, to, groupBy } = args;
     const bucketExpr =
       groupBy === 'week'
@@ -1217,6 +1261,7 @@ export class ReportsService {
             MAX(e.occurred_at) FILTER (WHERE (e.after->>'type') = 'done') AS last_done
           FROM clickup_task_events e
           WHERE e.event_type = 'taskStatusUpdated'
+            AND e.workspace_id = ${workspaceId}
           GROUP BY e.task_id
         )
         SELECT
@@ -1242,6 +1287,7 @@ export class ReportsService {
         SELECT MIN(occurred_at) AS min_occurred_at
         FROM clickup_task_events
         WHERE event_type = 'taskStatusUpdated'
+          AND workspace_id = ${workspaceId}
       `),
     ]);
 
@@ -1265,7 +1311,7 @@ export class ReportsService {
    * active status (last event without a successor) attributes hours up to `to`.
    * Bar by status with its captured `color`.
    */
-  async timeInStatus(args: { from: Date; to: Date }) {
+  async timeInStatus(workspaceId: string, args: { from: Date; to: Date }) {
     const { from, to } = args;
     type Row = { status: string; color: string | null; total_hours: number; task_count: bigint };
     type MetaRow = { min_occurred_at: Date | null };
@@ -1280,6 +1326,7 @@ export class ReportsService {
             LEAD(e.occurred_at) OVER (PARTITION BY e.task_id ORDER BY e.occurred_at) AS next_at
           FROM clickup_task_events e
           WHERE e.event_type = 'taskStatusUpdated'
+            AND e.workspace_id = ${workspaceId}
             AND e.occurred_at <= ${to}
         ),
         intervals AS (
@@ -1307,6 +1354,7 @@ export class ReportsService {
         SELECT MIN(occurred_at) AS min_occurred_at
         FROM clickup_task_events
         WHERE event_type = 'taskStatusUpdated'
+          AND workspace_id = ${workspaceId}
       `),
     ]);
 
@@ -1330,7 +1378,7 @@ export class ReportsService {
    * selected window, floored to a 14-day minimum so a short pick does not
    * produce a noisy median that flags nearly every day.
    */
-  async hourSpikes(cap: number, fromParam?: string, toParam?: string, limit = 20, includeResolved = false) {
+  async hourSpikes(workspaceId: string, cap: number, fromParam?: string, toParam?: string, limit = 20, includeResolved = false) {
     const TZ = Prisma.raw(`'Asia/Dhaka'`);
     // `start_time` is `timestamp without time zone` holding a UTC instant. To
     // bucket by Dhaka calendar day we must first label it UTC, THEN convert:
@@ -1361,6 +1409,7 @@ export class ReportsService {
       FROM clickup_time_entries e
       JOIN clickup_tasks t ON e.task_id = t.task_id
       WHERE e.start_time IS NOT NULL
+        AND e.workspace_id = ${workspaceId}
         AND e.start_time >= ${baselineFrom}
         AND e.start_time <= ${to}
         AND t.is_deleted = false
@@ -1374,6 +1423,7 @@ export class ReportsService {
       FROM clickup_time_entries e
       JOIN clickup_tasks t ON e.task_id = t.task_id
       WHERE e.start_time IS NOT NULL
+        AND e.workspace_id = ${workspaceId}
         AND e.start_time >= ${from}
         AND e.start_time <= ${to}
         AND t.is_deleted = false
@@ -1464,7 +1514,7 @@ export class ReportsService {
     // One range query (not a big OR); recover YYYY-MM-DD from the @db.Date the
     // same way the notified-enrichment below does.
     const resolutions = await this.prisma.spikeResolution.findMany({
-      where: { spikeDate: { gte: new Date(`${buckets[0] ?? '1970-01-01'}T00:00:00.000Z`), lte: new Date(`${buckets[buckets.length - 1] ?? '1970-01-01'}T00:00:00.000Z`) } },
+      where: { workspaceId, spikeDate: { gte: new Date(`${buckets[0] ?? '1970-01-01'}T00:00:00.000Z`), lte: new Date(`${buckets[buckets.length - 1] ?? '1970-01-01'}T00:00:00.000Z`) } },
       select: { clickupUserId: true, spikeDate: true },
     });
     const resolvedSet = new Set(
@@ -1481,6 +1531,7 @@ export class ReportsService {
     if (top.length > 0) {
       const notifs = await this.prisma.spikeNotification.findMany({
         where: {
+          workspaceId,
           OR: top.map((w) => ({
             clickupUserId: w.userId,
             spikeDate: new Date(`${w.date}T00:00:00.000Z`),
@@ -1502,7 +1553,7 @@ export class ReportsService {
     return { cap, watchlist: enriched, watchlistTotal, byUser: { buckets, users } };
   }
 
-  async anomalies() {
+  async anomalies(workspaceId: string) {
     const TZ = Prisma.raw("'Asia/Dhaka'");
     type DailyRow = {
       date: string;
@@ -1526,6 +1577,7 @@ export class ReportsService {
           FROM clickup_time_entries e
           JOIN clickup_tasks t ON e.task_id = t.task_id
           WHERE e.start_time IS NOT NULL
+            AND e.workspace_id = ${workspaceId}
             AND e.start_time >= now() - interval '30 days'
             AND t.is_deleted = false
           GROUP BY 1
@@ -1553,6 +1605,7 @@ export class ReportsService {
           FROM clickup_time_entries e
           JOIN clickup_tasks t ON e.task_id = t.task_id
           WHERE e.start_time IS NOT NULL
+            AND e.workspace_id = ${workspaceId}
             AND e.start_time >= now() - interval '7 days'
             AND t.client IS NOT NULL AND t.client <> ''
             AND t.is_deleted = false
@@ -1565,6 +1618,7 @@ export class ReportsService {
           FROM clickup_time_entries e
           JOIN clickup_tasks t ON e.task_id = t.task_id
           WHERE e.start_time IS NOT NULL
+            AND e.workspace_id = ${workspaceId}
             AND e.start_time >= now() - interval '90 days'
             AND e.start_time <  now() - interval '7 days'
             AND t.client IS NOT NULL AND t.client <> ''

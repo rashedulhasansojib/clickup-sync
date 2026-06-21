@@ -4,6 +4,7 @@ import { AssigneeReplacementService, ReplacementJobData } from '../src/time-entr
 // (which is how ClickUp surfaces these in the live data) and a non-agency
 // originalUserId, so that the service exercise mirrors real traffic shape.
 const SAMPLE_JOB: ReplacementJobData = {
+  workspaceId: 'ws1',
   timeEntryId: 'entry-123',
   taskId: 'task-456',
   startMs: 1700000000000,
@@ -119,7 +120,7 @@ describe('AssigneeReplacementService.replaceEntry', () => {
     expect(getTask).not.toHaveBeenCalled();
     expect(createTimeEntry).not.toHaveBeenCalled(); // no second ClickUp entry
     expect(createReplacement).not.toHaveBeenCalled(); // no second audit row
-    expect(deleteTimeEntry).toHaveBeenCalledWith('3450636', SAMPLE_JOB.timeEntryId); // delete retried
+    expect(deleteTimeEntry).toHaveBeenCalledWith(SAMPLE_JOB.workspaceId, SAMPLE_JOB.timeEntryId); // delete retried
     expect(deleteByTimeEntryId).toHaveBeenCalledWith(SAMPLE_JOB.timeEntryId); // local original removed
   });
 
@@ -201,12 +202,11 @@ describe('AssigneeReplacementService.replaceEntry', () => {
   });
 
   it('passes correct payload to createTimeEntry', async () => {
-    const teamId = process.env.CLICKUP_TEAM_ID || '3450636';
     const { service, createTimeEntry } = buildMocks();
 
     await service.replaceEntry(SAMPLE_JOB);
 
-    expect(createTimeEntry).toHaveBeenCalledWith(teamId, {
+    expect(createTimeEntry).toHaveBeenCalledWith(SAMPLE_JOB.workspaceId, {
       start: SAMPLE_JOB.startMs,
       stop: SAMPLE_JOB.endMs,
       description: SAMPLE_JOB.description,
@@ -223,6 +223,7 @@ describe('AssigneeReplacementService.replaceEntry', () => {
 
     expect(createReplacement).toHaveBeenCalledWith(
       expect.objectContaining({
+        workspaceId: SAMPLE_JOB.workspaceId,
         originalEntryId: SAMPLE_JOB.timeEntryId,
         replacementEntryId: 'new-entry-789',
         taskId: SAMPLE_JOB.taskId,
@@ -234,13 +235,12 @@ describe('AssigneeReplacementService.replaceEntry', () => {
     );
   });
 
-  it('calls deleteTimeEntry with team id and original entry id', async () => {
-    const teamId = process.env.CLICKUP_TEAM_ID || '3450636';
+  it('calls deleteTimeEntry with workspace id and original entry id', async () => {
     const { service, deleteTimeEntry } = buildMocks();
 
     await service.replaceEntry(SAMPLE_JOB);
 
-    expect(deleteTimeEntry).toHaveBeenCalledWith(teamId, SAMPLE_JOB.timeEntryId);
+    expect(deleteTimeEntry).toHaveBeenCalledWith(SAMPLE_JOB.workspaceId, SAMPLE_JOB.timeEntryId);
   });
 
   it('upserts replacement entry into local DB after deletion', async () => {
@@ -260,6 +260,7 @@ describe('AssigneeReplacementService.replaceEntry', () => {
         description: SAMPLE_JOB.description,
       }),
       expect.objectContaining({ status: 'NO_RATE_FOUND' }),
+      SAMPLE_JOB.workspaceId,
     );
   });
 
@@ -272,6 +273,7 @@ describe('AssigneeReplacementService.replaceEntry', () => {
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({ timeEntryId: 'new-entry-789' }),
       expect.anything(),
+      SAMPLE_JOB.workspaceId,
     );
     // ...and the ORIGINAL local row must be removed, otherwise SUM(hours)/SUM(cost)
     // in reports counts both the original and the replacement.

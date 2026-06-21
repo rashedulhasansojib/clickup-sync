@@ -5,10 +5,11 @@ import { PrismaService } from '../database/prisma.service';
 export class DeadLetterRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  create(data: { queueName: string; jobName: string; entityType?: string; entityId?: string; payload: unknown; error: unknown; attemptsMade?: number }) {
+  create(data: { workspaceId?: string | null; queueName: string; jobName: string; entityType?: string; entityId?: string; payload: unknown; error: unknown; attemptsMade?: number }) {
     const e = data.error as any;
     return this.prisma.deadLetterJob.create({
       data: {
+        workspaceId: data.workspaceId ?? null,
         queueName: data.queueName,
         jobName: data.jobName,
         entityType: data.entityType,

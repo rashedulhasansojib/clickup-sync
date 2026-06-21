@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { CommandPalette } from './CommandPalette';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { WorkspaceProvider } from '../../hooks/useActiveWorkspace';
 
 export function AppLayout() {
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -39,6 +40,7 @@ export function AppLayout() {
   }, [isMobile]);
 
   return (
+    <WorkspaceProvider>
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--page-bg)' }}>
       <Sidebar
         onCommandPalette={() => setCmdOpen(true)}
@@ -69,5 +71,6 @@ export function AppLayout() {
       </div>
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
     </div>
+    </WorkspaceProvider>
   );
 }

@@ -7,12 +7,14 @@ describe('WebhookSignatureGuard', () => {
   const body = Buffer.from('{"event":"taskCreated","task_id":"abc"}');
 
   function makeGuard(secret: string) {
-    return new WebhookSignatureGuard({ getWebhookSecret: () => secret } as any);
+    return new WebhookSignatureGuard({ hasWorkspace: () => true, getWebhookSecret: () => secret } as any);
   }
 
   function makeCtx(rawBody: Buffer | undefined, signature: string | undefined) {
     return {
-      switchToHttp: () => ({ getRequest: () => ({ headers: { 'x-signature': signature }, rawBody }) }),
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: { 'x-signature': signature }, rawBody, params: { workspaceId: 'ws1' } }),
+      }),
     } as any;
   }
 

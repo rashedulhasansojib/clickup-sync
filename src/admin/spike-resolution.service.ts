@@ -8,22 +8,22 @@ const dayStart = (date: string) => new Date(`${date}T00:00:00.000Z`);
 export class SpikeResolutionService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async resolve(args: { userId: string; date: string; userName?: string; note?: string; resolvedBy?: string }) {
-    const { userId, date, userName, note, resolvedBy } = args;
+  async resolve(args: { workspaceId: string; userId: string; date: string; userName?: string; note?: string; resolvedBy?: string }) {
+    const { workspaceId, userId, date, userName, note, resolvedBy } = args;
     if (!DATE_RE.test(date)) throw new BadRequestException('date must be YYYY-MM-DD');
     await this.prisma.spikeResolution.upsert({
-      where: { clickupUserId_spikeDate: { clickupUserId: userId, spikeDate: dayStart(date) } },
-      create: { clickupUserId: userId, spikeDate: dayStart(date), userName: userName ?? null, note: note ?? null, resolvedBy: resolvedBy ?? null },
+      where: { workspaceId_clickupUserId_spikeDate: { workspaceId, clickupUserId: userId, spikeDate: dayStart(date) } },
+      create: { workspaceId, clickupUserId: userId, spikeDate: dayStart(date), userName: userName ?? null, note: note ?? null, resolvedBy: resolvedBy ?? null },
       update: { userName: userName ?? null, note: note ?? null, resolvedBy: resolvedBy ?? null },
     });
     return { resolved: true as const, date };
   }
 
-  async unresolve(args: { userId: string; date: string }) {
-    const { userId, date } = args;
+  async unresolve(args: { workspaceId: string; userId: string; date: string }) {
+    const { workspaceId, userId, date } = args;
     if (!DATE_RE.test(date)) throw new BadRequestException('date must be YYYY-MM-DD');
     await this.prisma.spikeResolution.deleteMany({
-      where: { clickupUserId: userId, spikeDate: dayStart(date) },
+      where: { workspaceId, clickupUserId: userId, spikeDate: dayStart(date) },
     });
     return { resolved: false as const, date };
   }

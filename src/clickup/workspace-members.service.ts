@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { ClickupClient } from './clickup.client';
-import { SettingsService } from '../settings/settings.service';
 
 const TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -23,21 +22,21 @@ export interface MemberDto {
  */
 @Injectable()
 export class WorkspaceMembersService {
-  private cache?: { members: MemberDto[]; expiresAt: number };
-  private inFlight?: Promise<MemberDto[]>;
+  // Cache + in-flight promise are keyed by workspaceId so each connected
+  // workspace resolves its own member directory independently.
+  private cache = new Map<string, { members: MemberDto[]; expiresAt: number }>();
+  private inFlight = new Map<string, Promise<MemberDto[]>>();
 
-  constructor(
-    private readonly clickup: ClickupClient,
-    private readonly settings: SettingsService,
-  ) {}
+  constructor(private readonly clickup: ClickupClient) {}
 
-  async getDirectory(): Promise<MemberDto[]> {
-    if (this.cache && Date.now() < this.cache.expiresAt) return this.cache.members;
-    if (this.inFlight) return this.inFlight;
-    this.inFlight = (async () => {
+  async getDirectory(workspaceId: string): Promise<MemberDto[]> {
+    const cached = this.cache.get(workspaceId);
+    if (cached && Date.now() < cached.expiresAt) return cached.members;
+    const existing = this.inFlight.get(workspaceId);
+    if (existing) return existing;
+    const promise = (async () => {
       try {
-        const teamId = this.settings.getTeamId();
-        const raw = await this.clickup.getTeamMembers(teamId);
+        const raw = await this.clickup.getTeamMembers(workspaceId);
         const members: MemberDto[] = raw
           .filter((m) => m?.user?.id !== null && m?.user?.id !== undefined)
           .map((m) => ({
@@ -48,16 +47,17 @@ export class WorkspaceMembersService {
             color: m.user.color ?? null,
             initials: m.user.initials ?? null,
           }));
-        this.cache = { members, expiresAt: Date.now() + TTL_MS };
+        this.cache.set(workspaceId, { members, expiresAt: Date.now() + TTL_MS });
         return members;
       } finally {
-        this.inFlight = undefined;
+        this.inFlight.delete(workspaceId);
       }
     })();
-    return this.inFlight;
+    this.inFlight.set(workspaceId, promise);
+    return promise;
   }
 
-  async getMemberIds(): Promise<string[]> {
-    return (await this.getDirectory()).map((m) => m.id);
+  async getMemberIds(workspaceId: string): Promise<string[]> {
+    return (await this.getDirectory(workspaceId)).map((m) => m.id);
   }
 }

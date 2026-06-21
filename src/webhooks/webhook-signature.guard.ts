@@ -8,16 +8,19 @@ import {
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import type { Request } from 'express';
-import { SettingsService } from '../settings/settings.service';
+import { WorkspaceService } from '../workspaces/workspace.service';
 
 @Injectable()
 export class WebhookSignatureGuard implements CanActivate {
   private readonly logger = new Logger(WebhookSignatureGuard.name);
-  constructor(private readonly settings: SettingsService) {}
+  constructor(private readonly workspaces: WorkspaceService) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const req = context.switchToHttp().getRequest<Request & { rawBody?: Buffer }>();
-    const secret = this.settings.getWebhookSecret();
+    const req = context.switchToHttp().getRequest<Request & { rawBody?: Buffer; params?: Record<string, string> }>();
+    // The :workspaceId route param selects which workspace's signing secret to
+    // verify against. Unknown/missing → no secret → handled below.
+    const workspaceId = req.params?.workspaceId;
+    const secret = workspaceId && this.workspaces.hasWorkspace(workspaceId) ? this.workspaces.getWebhookSecret(workspaceId) : '';
 
     if (!secret) {
       if (process.env.NODE_ENV === 'production') {

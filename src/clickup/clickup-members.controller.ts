@@ -1,12 +1,16 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { WorkspaceMembersService, type MemberDto } from './workspace-members.service';
+import { WorkspaceService } from '../workspaces/workspace.service';
 
 @ApiTags('clickup')
 @ApiSecurity('x-admin-key')
 @Controller('clickup')
 export class ClickupMembersController {
-  constructor(private readonly members: WorkspaceMembersService) {}
+  constructor(
+    private readonly members: WorkspaceMembersService,
+    private readonly workspaces: WorkspaceService,
+  ) {}
 
   // Deliberately NOT role-gated: every authenticated user (including read-only
   // MEMBERs) renders ClickUp avatars across time entries, tasks, and rates, so
@@ -16,7 +20,7 @@ export class ClickupMembersController {
   // time-entries endpoints, so this exposes nothing new in this internal app.
   @Get('members')
   @ApiOperation({ summary: 'Workspace member directory (id, name, email, profilePicture) for rendering avatars. Cached ~10 min.' })
-  list(): Promise<MemberDto[]> {
-    return this.members.getDirectory();
+  list(@Query('workspaceId') workspaceId?: string): Promise<MemberDto[]> {
+    return this.members.getDirectory(this.workspaces.resolveWorkspaceId(workspaceId));
   }
 }

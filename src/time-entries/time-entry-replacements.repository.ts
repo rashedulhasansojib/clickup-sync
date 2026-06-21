@@ -10,6 +10,7 @@ export class TimeEntryReplacementsRepository {
   }
 
   create(data: {
+    workspaceId: string;
     originalEntryId: string;
     replacementEntryId?: string;
     taskId?: string;

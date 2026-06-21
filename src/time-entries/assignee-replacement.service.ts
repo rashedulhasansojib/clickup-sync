@@ -9,6 +9,7 @@ import { SettingsService } from '../settings/settings.service';
 import { PrismaService } from '../database/prisma.service';
 
 export interface ReplacementJobData {
+  workspaceId: string;
   timeEntryId: string;
   taskId: string;
   startMs: number;
@@ -48,7 +49,7 @@ export class AssigneeReplacementService {
   ) {}
 
   async replaceEntry(data: ReplacementJobData): Promise<{ status: 'replaced' | 'skipped' | 'no_mapping' }> {
-    const teamId = this.settings.getTeamId();
+    const workspaceId = data.workspaceId;
 
     // 1. Idempotency / resume. An audit row is written ONLY after the ClickUp
     //    replacement entry is created (step 5), so its existence proves the
@@ -62,7 +63,7 @@ export class AssigneeReplacementService {
     //    double-counted hours forever.
     const existing = await this.replacements.findByOriginalEntryId(data.timeEntryId);
     if (existing) {
-      await this.deleteOriginal(teamId, data.timeEntryId);
+      await this.deleteOriginal(workspaceId, data.timeEntryId);
       await this.timeEntries.deleteByTimeEntryId(data.timeEntryId);
       this.logger.log(
         `Time entry ${data.timeEntryId} already replaced → ${existing.replacementEntryId ?? '(unknown)'} — ensured original removed`,
@@ -90,7 +91,7 @@ export class AssigneeReplacementService {
     const realUserId = mapping.clickupUserId;
 
     // 4. Create replacement entry in ClickUp
-    const created = await this.clickup.createTimeEntry(teamId, {
+    const created = await this.clickup.createTimeEntry(workspaceId, {
       start: data.startMs,
       stop: data.endMs,
       description: data.description,
@@ -104,6 +105,7 @@ export class AssigneeReplacementService {
     //    account — so the audit trail correctly attributes provenance even
     //    when the tag-routing is invoked outside the agency-user flow.
     await this.replacements.create({
+      workspaceId,
       originalEntryId: data.timeEntryId,
       replacementEntryId: created.id,
       taskId: data.taskId,
@@ -116,7 +118,7 @@ export class AssigneeReplacementService {
     // 6. Delete original entry only after audit row committed (404-tolerant;
     //    any other failure throws so the job retries — the resume branch above
     //    will then re-attempt the delete on the next run).
-    await this.deleteOriginal(teamId, data.timeEntryId);
+    await this.deleteOriginal(workspaceId, data.timeEntryId);
 
     // 7. Upsert replacement entry into local DB with recalculated cost
     const startTime = new Date(data.startMs);
@@ -139,7 +141,7 @@ export class AssigneeReplacementService {
       description: data.description ?? null,
       raw: created,
     };
-    await this.timeEntries.upsert(normalized, cost);
+    await this.timeEntries.upsert(normalized, cost, workspaceId);
 
     // 8. Remove the local original row. The original was already deleted in
     //    ClickUp (step 6) and re-inserted under the replacement's new id (step
@@ -162,9 +164,9 @@ export class AssigneeReplacementService {
    * we must NOT treat a transient delete failure as success, or the original
    * lingers alongside the replacement and reports double-count.
    */
-  private async deleteOriginal(teamId: string, entryId: string): Promise<void> {
+  private async deleteOriginal(workspaceId: string, entryId: string): Promise<void> {
     try {
-      await this.clickup.deleteTimeEntry(teamId, entryId);
+      await this.clickup.deleteTimeEntry(workspaceId, entryId);
     } catch (err: any) {
       if (err?.response?.status === 404) {
         this.logger.log(`Original time entry ${entryId} already gone in ClickUp (404) — treating delete as done`);

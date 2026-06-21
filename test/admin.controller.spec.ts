@@ -86,14 +86,50 @@ describe('AdminController', () => {
     return { findMany: jest.fn().mockResolvedValue({ items: [], total: 0 }) } as any;
   }
 
-  function makeSettings(excludedAssignees: any[] = [], maxBackfillLookbackDays = 1095) {
+  // App-global settings only — per-connection ClickUp settings (teamId, token,
+  // spaces, backfill cap) moved to WorkspaceService (see makeWorkspaces).
+  function makeSettings(excludedAssignees: any[] = []) {
     return {
-      getTeamId: () => '3450636',
-      getMasked: jest.fn().mockReturnValue({ teamId: '3450636', encryptionEnabled: true }),
-      update: jest.fn().mockResolvedValue({ teamId: '3450636' }),
+      getGlobal: jest.fn().mockReturnValue({
+        preferences: { cost: { autoRecalcOnRateChange: true, excludedAssignees } },
+        updatedAt: null,
+        updatedBy: null,
+      }),
+      update: jest.fn().mockResolvedValue({ cost: { excludedAssignees } }),
       getPreferences: () => ({ sync: { backfillOnConnect: false }, cost: { autoRecalcOnRateChange: true, excludedAssignees } }),
-      getBackfillMaxLookbackDays: () => maxBackfillLookbackDays,
-      isSpaceEnabled: () => true,
+    } as any;
+  }
+
+  // Three seed spaces (Digital Marketing / R&D Apps / Projects), 30-day lookback.
+  const SPACES = [
+    { spaceId: '3577824', name: 'Digital Marketing', backfillLookbackDays: 30, enabled: true },
+    { spaceId: '3589129', name: 'R&D Apps', backfillLookbackDays: 30, enabled: true },
+    { spaceId: '3525433', name: 'Projects', backfillLookbackDays: 30, enabled: true },
+  ];
+
+  function makeWorkspaces(overrides: Partial<{ maxBackfillLookbackDays: number; spaces: any[] }> = {}) {
+    const spaces = overrides.spaces ?? SPACES;
+    return {
+      resolveWorkspaceId: jest.fn((id?: string) => id ?? 'ws1'),
+      getTeamId: () => '123',
+      getApiToken: () => 'tok',
+      getWebhookSecret: () => 'sec',
+      getSpikeHoursCap: () => 12,
+      getBackfillMaxLookbackDays: () => overrides.maxBackfillLookbackDays ?? 1095,
+      getSpaces: jest.fn(() => spaces),
+      getSpace: jest.fn((_ws: string, id: string) => spaces.find((s) => s.spaceId === id)),
+      getSyncPreferences: () => ({ reconcileLookbackDays: 365, realtimeWebhooks: true, backfillOnConnect: true, maxBackfillLookbackDays: 1095 }),
+      hasWorkspace: () => true,
+      listActiveWorkspaceIds: () => ['ws1'],
+      getMasked: jest.fn().mockReturnValue({ id: 'ws1', name: 'Default', teamId: '123', apiTokenSet: true }),
+      listMasked: jest.fn().mockReturnValue([{ id: 'ws1', name: 'Default', teamId: '123', apiTokenSet: true }]),
+      createWorkspace: jest.fn().mockResolvedValue({ id: 'ws2' }),
+      updateWorkspace: jest.fn().mockResolvedValue({ id: 'ws1' }),
+      deleteWorkspace: jest.fn().mockResolvedValue(undefined),
+      setWebhook: jest.fn().mockResolvedValue(undefined),
+      upsertSpace: jest.fn().mockResolvedValue({ id: 'ws1' }),
+      deleteSpace: jest.fn().mockResolvedValue({ id: 'ws1' }),
+      encryptionEnabled: jest.fn().mockReturnValue(true),
     } as any;
   }
 
@@ -122,7 +158,7 @@ describe('AdminController', () => {
     } as any;
   }
 
-  function makeCtrl(queues?: any, deadLetters?: any, webhooks?: any, timeEntriesRepo?: any, webhookEvents?: any, webhookParser?: any, prisma?: any, settings?: any) {
+  function makeCtrl(queues?: any, deadLetters?: any, webhooks?: any, timeEntriesRepo?: any, webhookEvents?: any, webhookParser?: any, prisma?: any, workspaces?: any, settings?: any) {
     return new AdminController(
       queues ?? makeQueues(),
       deadLetters ?? makeDeadLetters(),
@@ -139,6 +175,7 @@ describe('AdminController', () => {
       prisma ?? makePrisma(),
       makeAuditLog(),
       settings ?? makeSettings(),
+      workspaces ?? makeWorkspaces(),
       makeSpikeNotifications(),
       makeSpikeResolutions(),
       { search: jest.fn() } as any,
@@ -194,12 +231,12 @@ describe('AdminController', () => {
     });
 
     it('rejects lookbackDays above the configured cap', () => {
-      const ctrl = makeCtrl(undefined, undefined, undefined, undefined, undefined, undefined, undefined, makeSettings([], 1095));
+      const ctrl = makeCtrl(undefined, undefined, undefined, undefined, undefined, undefined, undefined, makeWorkspaces({ maxBackfillLookbackDays: 1095 }));
       expect(() => ctrl.backfill({ spaceId: '3589129', lookbackDays: 2000 })).toThrow(BadRequestException);
     });
 
     it('accepts lookbackDays at or below the configured cap', () => {
-      const ctrl = makeCtrl(undefined, undefined, undefined, undefined, undefined, undefined, undefined, makeSettings([], 3650));
+      const ctrl = makeCtrl(undefined, undefined, undefined, undefined, undefined, undefined, undefined, makeWorkspaces({ maxBackfillLookbackDays: 3650 }));
       const result = ctrl.backfill({ spaceId: '3589129', lookbackDays: 2000 });
       expect(result).toEqual({ queued: true, spaceId: '3589129', lookbackDays: 2000 });
     });
@@ -223,7 +260,7 @@ describe('AdminController', () => {
 
     it('reports backfill phase as "fetching" with no total', async () => {
       const queues = makeQueuesWithJobs({
-        'clickup-backfills': [{ data: { spaceId: '3589129' } }],
+        'clickup-backfills': [{ data: { workspaceId: 'ws1', spaceId: '3589129' } }],
         'clickup-time-entries': [],
       });
       const result = await makeCtrl(queues).backfillActive();
@@ -246,9 +283,9 @@ describe('AdminController', () => {
       const queues = makeQueuesWithJobs({
         'clickup-backfills': [],
         'clickup-time-entries': [
-          { data: { taskId: 't1' } },
-          { data: { taskId: 't2' } },
-          { data: { taskId: 't3' } },
+          { data: { workspaceId: 'ws1', taskId: 't1' } },
+          { data: { workspaceId: 'ws1', taskId: 't2' } },
+          { data: { workspaceId: 'ws1', taskId: 't3' } },
         ],
       });
       const result = await makeCtrl(queues, undefined, undefined, undefined, undefined, undefined, prisma).backfillActive();
@@ -263,7 +300,7 @@ describe('AdminController', () => {
       prisma.syncJobLog.findMany.mockResolvedValue([{ entityId: 'X', tasksSynced: 0, finishedAt: new Date() }]);
       const queues = makeQueuesWithJobs({
         'clickup-backfills': [],
-        'clickup-time-entries': [{ data: { taskId: 't1' } }],
+        'clickup-time-entries': [{ data: { workspaceId: 'ws1', taskId: 't1' } }],
       });
       const result = await makeCtrl(queues, undefined, undefined, undefined, undefined, undefined, prisma).backfillActive();
       // total=0, remaining=1 → would compute done=-1 if not clamped; we fall back to total=remaining=1.
@@ -274,8 +311,8 @@ describe('AdminController', () => {
       const prisma = makePrisma();
       prisma.clickupTask.findMany.mockResolvedValue([{ taskId: 't1', spaceId: '3589129' }]);
       const queues = makeQueuesWithJobs({
-        'clickup-backfills': [{ data: { spaceId: '3589129' } }],
-        'clickup-time-entries': [{ data: { taskId: 't1' } }],
+        'clickup-backfills': [{ data: { workspaceId: 'ws1', spaceId: '3589129' } }],
+        'clickup-time-entries': [{ data: { workspaceId: 'ws1', taskId: 't1' } }],
       });
       const result = await makeCtrl(queues, undefined, undefined, undefined, undefined, undefined, prisma).backfillActive();
       expect(result.spaces).toHaveLength(1);
@@ -376,7 +413,7 @@ describe('AdminController', () => {
       const result = await makeCtrl(queues, undefined, undefined, repo).backfillReplacement({ limit: 10 });
 
       expect(result).toEqual({ queued: 1, scanned: 1, limit: 10 });
-      expect(repo.findUnreplacedTaggedEntries).toHaveBeenCalledWith(10);
+      expect(repo.findUnreplacedTaggedEntries).toHaveBeenCalledWith('ws1', 10);
       // The job must carry tags + the actual logger so the worker can route
       // without re-fetching anything from ClickUp.
       const add = (queues.get as jest.Mock).mock.results[0].value.add as jest.Mock;
@@ -408,7 +445,7 @@ describe('AdminController', () => {
     it('clamps limit to 2000', async () => {
       const repo = { findUnreplacedTaggedEntries: jest.fn().mockResolvedValue([]) } as any;
       const result = await makeCtrl(makeQueues(), undefined, undefined, repo).backfillReplacement({ limit: 9999 });
-      expect(repo.findUnreplacedTaggedEntries).toHaveBeenCalledWith(2000);
+      expect(repo.findUnreplacedTaggedEntries).toHaveBeenCalledWith('ws1', 2000);
       expect(result.limit).toBe(2000);
     });
   });
@@ -435,6 +472,7 @@ describe('AdminController', () => {
       makePrisma(),
       makeAuditLog(),
       makeSettings(),
+      makeWorkspaces(),
       makeSpikeNotifications(),
       overrides.resolutions ?? makeSpikeResolutions(),
       { search: jest.fn() } as any,
@@ -476,7 +514,7 @@ describe('AdminController', () => {
 
     it('refuses to start a second sweep while a reconcile is in flight (no enqueue)', async () => {
       const add = jest.fn();
-      const getJobs = jest.fn().mockResolvedValue([{ name: 'reconcile-clickup-task' }]);
+      const getJobs = jest.fn().mockResolvedValue([{ name: 'reconcile-clickup-task', data: { workspaceId: 'ws1' } }]);
       const queues = { get: jest.fn().mockReturnValue({ add, getJobs }), defaultJobOptions: jest.fn().mockReturnValue({}), webhookJobOptions: jest.fn().mockReturnValue({}) } as any;
       const tasksRepo = { findAllIds: jest.fn() } as any;
 
@@ -490,7 +528,7 @@ describe('AdminController', () => {
 
   describe('reconcileActive', () => {
     // clickup-tasks queue carrying a mix of job names; only reconcile jobs count.
-    function makeQueuesWithTaskJobs(jobs: Array<{ name: string }>) {
+    function makeQueuesWithTaskJobs(jobs: Array<{ name: string; data?: any }>) {
       const getJobs = jest.fn().mockResolvedValue(jobs);
       const get = jest.fn((name: string) => (name === 'clickup-tasks' ? { getJobs, add: jest.fn() } : { getJobs: jest.fn().mockResolvedValue([]), add: jest.fn() }));
       return { get, defaultJobOptions: jest.fn().mockReturnValue({}), webhookJobOptions: jest.fn().mockReturnValue({}) } as any;
@@ -498,10 +536,10 @@ describe('AdminController', () => {
 
     it('reports remaining reconcile jobs (ignoring other clickup-tasks jobs) with total from stored task count', async () => {
       const queues = makeQueuesWithTaskJobs([
-        { name: 'reconcile-clickup-task' },
-        { name: 'reconcile-clickup-task' },
+        { name: 'reconcile-clickup-task', data: { workspaceId: 'ws1' } },
+        { name: 'reconcile-clickup-task', data: { workspaceId: 'ws1' } },
         { name: 'sync-clickup-task' }, // must be ignored
-        { name: 'reconcile-clickup-task' },
+        { name: 'reconcile-clickup-task', data: { workspaceId: 'ws1' } },
       ]);
       const tasksRepo = { findAllIds: jest.fn(), countActive: jest.fn().mockResolvedValue(10) } as any;
       const result = await makeCtrlWithOverride({ queues, tasksRepo }).reconcileActive();
@@ -518,8 +556,8 @@ describe('AdminController', () => {
 
     it('clamps done to >= 0 when tasks were deleted mid-run (remaining > current total)', async () => {
       const queues = makeQueuesWithTaskJobs([
-        { name: 'reconcile-clickup-task' },
-        { name: 'reconcile-clickup-task' },
+        { name: 'reconcile-clickup-task', data: { workspaceId: 'ws1' } },
+        { name: 'reconcile-clickup-task', data: { workspaceId: 'ws1' } },
       ]);
       const tasksRepo = { findAllIds: jest.fn(), countActive: jest.fn().mockResolvedValue(1) } as any;
       const result = await makeCtrlWithOverride({ queues, tasksRepo }).reconcileActive();
@@ -527,7 +565,7 @@ describe('AdminController', () => {
     });
   });
 
-  function ctrlWithSettings(settings: any) {
+  function ctrlWithSettings(settings: any, workspaces?: any) {
     return new AdminController(
       makeQueues(),
       makeDeadLetters(),
@@ -544,6 +582,7 @@ describe('AdminController', () => {
       makePrisma(),
       makeAuditLog(),
       settings,
+      workspaces ?? makeWorkspaces(),
       makeSpikeNotifications(),
       makeSpikeResolutions(),
       { search: jest.fn() } as any,
@@ -552,25 +591,45 @@ describe('AdminController', () => {
   }
 
   describe('settings', () => {
-    it('getSettings returns masked settings from the service', () => {
-      const masked = { teamId: '1', apiTokenSet: true, encryptionEnabled: true };
-      const settings = { getMasked: jest.fn().mockReturnValue(masked) } as any;
-      expect(ctrlWithSettings(settings).getSettings()).toBe(masked);
+    it('getSettings merges app-global prefs with encryption flag + masked workspaces', () => {
+      const global = { preferences: { cost: { excludedAssignees: [] } }, updatedAt: null, updatedBy: null };
+      const settings = { getGlobal: jest.fn().mockReturnValue(global) } as any;
+      const ws = [{ id: 'ws1', name: 'Default', teamId: '123', apiTokenSet: true }];
+      const workspaces = makeWorkspaces();
+      workspaces.listMasked.mockReturnValue(ws);
+      workspaces.encryptionEnabled.mockReturnValue(true);
+      expect(ctrlWithSettings(settings, workspaces).getSettings()).toEqual({
+        ...global,
+        encryptionEnabled: true,
+        workspaces: ws,
+      });
     });
 
-    it('updateSettings rejects secret writes when encryption is disabled', () => {
-      const settings = { getMasked: jest.fn().mockReturnValue({ encryptionEnabled: false }), update: jest.fn() } as any;
-      expect(() => ctrlWithSettings(settings).updateSettings({ apiToken: 'pk_x' }, { email: 'me@test.com', isMachine: false } as any)).toThrow(/APP_ENCRYPTION_KEY/);
-      expect(settings.update).not.toHaveBeenCalled();
+    // The encryption guard moved off this endpoint: app-global settings no longer
+    // carry secrets, so updateSettings just persists preferences. The secret-write
+    // guard now lives on the workspace CRUD endpoints (createWorkspace /
+    // updateWorkspace), so we assert that delegation here instead.
+    it('createWorkspace delegates dto + session actor to WorkspaceService', async () => {
+      const workspaces = makeWorkspaces();
+      const ctrl = ctrlWithSettings(makeSettings(), workspaces);
+      const dto = { name: 'New', teamId: '999', apiToken: 'pk_x' } as any;
+      await ctrl.createWorkspace(dto, { email: 'me@test.com', isMachine: false } as any);
+      expect(workspaces.createWorkspace).toHaveBeenCalledWith(dto, 'me@test.com');
     });
 
-    it('updateSettings delegates non-secret fields with the session actor (not a spoofable header)', async () => {
-      const settings = {
-        getMasked: jest.fn().mockReturnValue({ encryptionEnabled: true }),
-        update: jest.fn().mockResolvedValue({ teamId: '9' }),
-      } as any;
-      await ctrlWithSettings(settings).updateSettings({ teamId: '9' }, { email: 'me@test.com', isMachine: false } as any);
-      expect(settings.update).toHaveBeenCalledWith({ teamId: '9' }, 'me@test.com');
+    it('updateWorkspace delegates id + dto + session actor to WorkspaceService', async () => {
+      const workspaces = makeWorkspaces();
+      const ctrl = ctrlWithSettings(makeSettings(), workspaces);
+      const dto = { apiToken: 'pk_x' } as any;
+      await ctrl.updateWorkspace('ws1', dto, { email: 'me@test.com', isMachine: false } as any);
+      expect(workspaces.updateWorkspace).toHaveBeenCalledWith('ws1', dto, 'me@test.com');
+    });
+
+    it('updateSettings delegates preferences with the session actor (not a spoofable header)', async () => {
+      const settings = { update: jest.fn().mockResolvedValue({}) } as any;
+      const dto = { preferences: { cost: { nonBillableZero: true } } } as any;
+      await ctrlWithSettings(settings).updateSettings(dto, { email: 'me@test.com', isMachine: false } as any);
+      expect(settings.update).toHaveBeenCalledWith(dto, 'me@test.com');
     });
   });
 
@@ -614,13 +673,13 @@ describe('AdminController', () => {
     const user = { email: 'admin@x.com' } as any;
 
     it('GET returns the stored list', () => {
-      const ctrl = makeCtrl(undefined, undefined, undefined, undefined, undefined, undefined, undefined, makeSettings([{ id: 'u1', name: 'A', email: null }]));
+      const ctrl = makeCtrl(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, makeSettings([{ id: 'u1', name: 'A', email: null }]));
       expect(ctrl.listExcludedAssignees()).toEqual({ assignees: [{ id: 'u1', name: 'A', email: null }] });
     });
 
     it('PUT add-only enqueues the added id', async () => {
       const { queues, add } = makeQueuesWithAdd();
-      const ctrl = makeCtrl(queues, undefined, undefined, undefined, undefined, undefined, undefined, makeSettings([]));
+      const ctrl = makeCtrl(queues, undefined, undefined, undefined, undefined, undefined, undefined, undefined, makeSettings([]));
       const result = await ctrl.updateExcludedAssignees({ assignees: [{ id: 'u1' }] } as any, user);
       expect(add).toHaveBeenCalledTimes(1);
       expect(add).toHaveBeenCalledWith(expect.any(String), { assigneeId: 'u1' }, expect.any(Object));
@@ -629,7 +688,7 @@ describe('AdminController', () => {
 
     it('PUT remove-only enqueues the removed id', async () => {
       const { queues, add } = makeQueuesWithAdd();
-      const ctrl = makeCtrl(queues, undefined, undefined, undefined, undefined, undefined, undefined, makeSettings([{ id: 'u1', name: 'A', email: null }]));
+      const ctrl = makeCtrl(queues, undefined, undefined, undefined, undefined, undefined, undefined, undefined, makeSettings([{ id: 'u1', name: 'A', email: null }]));
       const result = await ctrl.updateExcludedAssignees({ assignees: [] } as any, user);
       expect(add).toHaveBeenCalledTimes(1);
       expect(add).toHaveBeenCalledWith(expect.any(String), { assigneeId: 'u1' }, expect.any(Object));
@@ -639,7 +698,7 @@ describe('AdminController', () => {
 
     it('PUT mixed enqueues only the added + removed ids, not the unchanged one', async () => {
       const { queues, add } = makeQueuesWithAdd();
-      const ctrl = makeCtrl(queues, undefined, undefined, undefined, undefined, undefined, undefined, makeSettings([{ id: 'u1' }, { id: 'u2' }]));
+      const ctrl = makeCtrl(queues, undefined, undefined, undefined, undefined, undefined, undefined, undefined, makeSettings([{ id: 'u1' }, { id: 'u2' }]));
       await ctrl.updateExcludedAssignees({ assignees: [{ id: 'u2' }, { id: 'u3' }] } as any, user);
       expect(add).toHaveBeenCalledTimes(2);
       const enqueuedIds = new Set(add.mock.calls.map((c) => c[1].assigneeId));
@@ -648,7 +707,7 @@ describe('AdminController', () => {
 
     it('PUT no-op (unchanged list) enqueues nothing', async () => {
       const { queues, add } = makeQueuesWithAdd();
-      const ctrl = makeCtrl(queues, undefined, undefined, undefined, undefined, undefined, undefined, makeSettings([{ id: 'u1', name: 'A', email: null }]));
+      const ctrl = makeCtrl(queues, undefined, undefined, undefined, undefined, undefined, undefined, undefined, makeSettings([{ id: 'u1', name: 'A', email: null }]));
       const result = await ctrl.updateExcludedAssignees({ assignees: [{ id: 'u1', name: 'A', email: null }] } as any, user);
       expect(add).not.toHaveBeenCalled();
       expect(result.recalculated).toEqual([]);
@@ -670,7 +729,7 @@ describe('AdminController', () => {
       const resolutions = { resolve: jest.fn(), unresolve: jest.fn().mockResolvedValue({ resolved: false, date: '2026-06-10' }) } as any;
       const ctrl = makeCtrlWithOverride({ resolutions });
       await ctrl.unresolveSpike({ userId: 'u1', date: '2026-06-10' } as any);
-      expect(resolutions.unresolve).toHaveBeenCalledWith({ userId: 'u1', date: '2026-06-10' });
+      expect(resolutions.unresolve).toHaveBeenCalledWith({ workspaceId: 'ws1', userId: 'u1', date: '2026-06-10' });
     });
   });
 });

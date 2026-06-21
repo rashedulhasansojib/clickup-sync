@@ -2,8 +2,7 @@ import { SettingsService } from './settings.service';
 
 function makeService(prefs: any) {
   const repo = { get: jest.fn().mockResolvedValue({ preferences: prefs }), upsert: jest.fn() } as any;
-  const crypto = { isEnabled: false, encrypt: (s: string) => s, decrypt: (s: string) => s } as any;
-  return new SettingsService(repo, crypto);
+  return new SettingsService(repo);
 }
 
 describe('SettingsService.getExcludedAssigneeIds', () => {

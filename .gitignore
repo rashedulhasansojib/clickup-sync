@@ -8,3 +8,5 @@ coverage
 /logs
 .DS_Store
 # /design
+# Local DB backup dumps (e.g. pre-migration snapshots) — never commit
+clickup_sync_backup_*.sql

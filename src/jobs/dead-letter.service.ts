@@ -21,6 +21,7 @@ export class DeadLetterService {
 
     try {
       await this.repo.create({
+        workspaceId: this.workspaceId(job.data),
         queueName: job.queueName,
         jobName: job.name,
         entityId: this.entityId(job.data),
@@ -44,5 +45,11 @@ export class DeadLetterService {
     const d = data as Record<string, unknown>;
     const candidate = d.taskId ?? d.timeEntryId ?? d.spaceId ?? d.assigneeId;
     return typeof candidate === 'string' ? candidate : undefined;
+  }
+
+  private workspaceId(data: unknown): string | null {
+    if (!data || typeof data !== 'object') return null;
+    const w = (data as Record<string, unknown>).workspaceId;
+    return typeof w === 'string' ? w : null;
   }
 }

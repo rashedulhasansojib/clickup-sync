@@ -1,40 +1,31 @@
 import { apiClient } from './client';
+import type { MaskedWorkspace } from './workspaces';
 
+/**
+ * App-GLOBAL preferences only. Per-connection ClickUp settings (token, team id,
+ * webhook secret/endpoint/events, spike cap) and per-workspace sync prefs + space
+ * scope now live on the Workspace and are managed via the workspaces API.
+ */
 export interface SettingsPreferences {
   notifications: {
     alerts: { syncFail: boolean; webhookSpike: boolean; missingRate: boolean; tokenExpiring: boolean };
     channels: { email: boolean; slack: boolean; pagerduty: boolean };
   };
-  sync: { reconcileLookbackDays: number; realtimeWebhooks: boolean; backfillOnConnect: boolean; maxBackfillLookbackDays: number };
   cost: { autoRecalcOnRateChange: boolean; rateMatching: 'start' | 'due'; nonBillableZero: boolean; excludedAssignees: { id: string; name: string | null; email: string | null }[] };
   failure: { webhookRetryAttempts: number };
-  spaces: Record<string, { enabled: boolean }>;
 }
 
 type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
 
 export interface AppSettings {
-  apiTokenSet: boolean;
-  apiTokenLast4: string | null;
-  teamId: string;
-  webhookEndpoint: string;
-  webhookEvents: string;
-  webhookSecretSet: boolean;
-  spikeHoursCap: number;
-  encryptionEnabled: boolean;
+  preferences: SettingsPreferences;
   updatedAt: string | null;
   updatedBy: string | null;
-  preferences: SettingsPreferences;
-  configuredSpaces: { id: string; name: string }[];
+  encryptionEnabled: boolean;
+  workspaces: MaskedWorkspace[];
 }
 
 export interface SettingsPatch {
-  apiToken?: string;
-  teamId?: string;
-  webhookEndpoint?: string;
-  webhookEvents?: string;
-  webhookSecret?: string;
-  spikeHoursCap?: number;
   preferences?: DeepPartial<SettingsPreferences>;
 }
 

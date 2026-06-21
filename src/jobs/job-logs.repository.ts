@@ -4,7 +4,7 @@ import { PrismaService } from '../database/prisma.service';
 @Injectable()
 export class JobLogsRepository {
   constructor(private readonly prisma: PrismaService) {}
-  started(data: { jobId?: string; queueName: string; jobName: string; entityType?: string; entityId?: string; attemptsMade?: number; payload?: unknown }) {
+  started(data: { workspaceId?: string | null; jobId?: string; queueName: string; jobName: string; entityType?: string; entityId?: string; attemptsMade?: number; payload?: unknown }) {
     return this.prisma.syncJobLog.create({ data: { ...data, status: 'started', payload: data.payload as any, startedAt: new Date() } });
   }
   finished(id: bigint, counts?: { tasksSynced?: number; timeEntriesSynced?: number }, status = 'completed') {

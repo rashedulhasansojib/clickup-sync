@@ -19,6 +19,7 @@ describe('TimeEntriesRepository', () => {
     it('deletes only rows in-scope (task, fetched users, within window) that ClickUp did not return', async () => {
       const { repo, deleteMany } = makeRepo(2);
       const deleted = await repo.pruneTaskEntriesOutsideSet({
+        workspaceId: 'ws1',
         taskId: 't1',
         userIds: ['u9'],
         startMs: 1000,
@@ -29,6 +30,7 @@ describe('TimeEntriesRepository', () => {
       expect(deleted).toBe(2);
       expect(deleteMany).toHaveBeenCalledWith({
         where: {
+          workspaceId: 'ws1',
           taskId: 't1',
           userId: { in: ['u9'] },
           startTime: { gte: new Date(1000), lte: new Date(2000) },

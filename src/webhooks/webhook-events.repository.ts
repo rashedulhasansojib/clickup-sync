@@ -6,10 +6,10 @@ import { ParsedWebhook } from './webhook-parser.service';
 export class WebhookEventsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async saveReceived(parsed: ParsedWebhook): Promise<{ duplicate: boolean; id?: bigint }> {
+  async saveReceived(parsed: ParsedWebhook, workspaceId: string): Promise<{ duplicate: boolean; id?: bigint }> {
     try {
-      const event = await this.prisma.clickupWebhookEvent.create({ data: { fingerprint: parsed.fingerprint, eventType: parsed.eventType, taskId: parsed.taskId, rawPayload: parsed.payload as any } });
-      await this.prisma.clickupWebhookSeen.create({ data: { fingerprint: parsed.fingerprint } }).catch(() => undefined);
+      const event = await this.prisma.clickupWebhookEvent.create({ data: { workspaceId, fingerprint: parsed.fingerprint, eventType: parsed.eventType, taskId: parsed.taskId, rawPayload: parsed.payload as any } });
+      await this.prisma.clickupWebhookSeen.create({ data: { workspaceId, fingerprint: parsed.fingerprint } }).catch(() => undefined);
       return { duplicate: false, id: event.id };
     } catch (error: any) {
       if (error?.code === 'P2002') return { duplicate: true };
@@ -27,7 +27,7 @@ export class WebhookEventsRepository {
       where: { status: 'failed' },
       orderBy: { receivedAt: 'asc' },
       take: Math.min(limit, 2000),
-      select: { id: true, fingerprint: true, rawPayload: true },
+      select: { id: true, fingerprint: true, rawPayload: true, workspaceId: true },
     });
   }
 

@@ -2,6 +2,7 @@ import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { BudgetsService } from '../budgets/budgets.service';
 import { SettingsService } from '../settings/settings.service';
+import { WorkspaceService } from '../workspaces/workspace.service';
 import { ReportsService } from './reports.service';
 
 @ApiTags('reports')
@@ -12,35 +13,57 @@ export class ReportsController {
     private readonly reports: ReportsService,
     private readonly settings: SettingsService,
     private readonly budgets: BudgetsService,
+    private readonly workspaces: WorkspaceService,
   ) {}
 
   @Get('tasks/summary')
   @ApiOperation({ summary: 'Task count summary by space and status' })
-  tasksSummary() { return this.reports.tasksSummary(); }
+  tasksSummary(@Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.tasksSummary(wsId);
+  }
 
   @Get('tasks/by-space-status')
   @ApiOperation({ summary: 'Task counts grouped by space+status for stacked bar chart' })
-  tasksBySpaceStatus() { return this.reports.tasksBySpaceStatus(); }
+  tasksBySpaceStatus(@Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.tasksBySpaceStatus(wsId);
+  }
 
   @Get('tasks/assignees')
   @ApiOperation({ summary: 'Distinct task assignees for the Tasks page filter dropdown. Drawn from clickup_tasks.assignees_names so assignees with zero time entries (e.g. expense-only tasks) still appear.' })
-  tasksAssignees() { return this.reports.tasksAssignees(); }
+  tasksAssignees(@Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.tasksAssignees(wsId);
+  }
 
   @Get('time-entries/assignees')
   @ApiOperation({ summary: 'Distinct assignees that have time entries. Feeds the exclude-from-costing picker.' })
-  timeEntriesAssignees() { return this.reports.timeEntriesAssignees(); }
+  timeEntriesAssignees(@Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.timeEntriesAssignees(wsId);
+  }
 
   @Get('clients')
   @ApiOperation({ summary: 'Distinct task clients for the Tasks and Time Entries page filter dropdowns. Drawn from clickup_tasks.client (non-empty, non-deleted), with per-client task counts.' })
-  tasksClients() { return this.reports.tasksClients(); }
+  tasksClients(@Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.tasksClients(wsId);
+  }
 
   @Get('lists')
   @ApiOperation({ summary: 'Distinct ClickUp lists for the Tasks and Time Entries page filter dropdowns. Drawn from clickup_tasks (list_id/list_name, non-empty, non-deleted) with per-list task counts. Pass spaceId to scope to one space.' })
-  tasksLists(@Query('spaceId') spaceId?: string) { return this.reports.tasksLists(spaceId); }
+  tasksLists(@Query('spaceId') spaceId?: string, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.tasksLists(wsId, spaceId);
+  }
 
   @Get('folders')
   @ApiOperation({ summary: 'Distinct ClickUp folders for the Tasks and Time Entries page filter dropdowns. Drawn from clickup_tasks (folder_id/folder_name, non-empty, non-deleted) with per-folder task counts. Pass spaceId to scope to one space.' })
-  tasksFolders(@Query('spaceId') spaceId?: string) { return this.reports.tasksFolders(spaceId); }
+  tasksFolders(@Query('spaceId') spaceId?: string, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.tasksFolders(wsId, spaceId);
+  }
 
   @Get('tasks')
   @ApiOperation({ summary: 'Paginated task list with filters. `archived`: exclude (default, hide archived) | include | only (archived tasks). Soft-deleted rows are always excluded.' })
@@ -60,14 +83,17 @@ export class ReportsController {
     @Query('taskIds') taskIds?: string,
     @Query('listId') listId?: string,
     @Query('folderId') folderId?: string,
+    @Query('workspaceId') workspaceId?: string,
   ) {
-    return this.reports.tasks(spaceId, status, search, from, to, Number(limit) || 50, Number(offset) || 0, priority, assigneeId, type, archived, client, taskIds, listId, folderId);
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.tasks(wsId, spaceId, status, search, from, to, Number(limit) || 50, Number(offset) || 0, priority, assigneeId, type, archived, client, taskIds, listId, folderId);
   }
 
   @Get('anomalies')
   @ApiOperation({ summary: 'Spend-spike anomalies for the Overview panel — daily totals and per-client weekly totals exceeding their median baselines.' })
-  anomalies() {
-    return this.reports.anomalies();
+  anomalies(@Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.anomalies(wsId);
   }
 
   @Get('time-entries/hour-spikes')
@@ -77,32 +103,38 @@ export class ReportsController {
     @Query('to') to?: string,
     @Query('limit') limit?: string,
     @Query('includeResolved') includeResolved?: string,
+    @Query('workspaceId') workspaceId?: string,
   ) {
-    return this.reports.hourSpikes(this.settings.getSpikeHoursCap(), from, to, Number(limit) || 20, includeResolved === 'true');
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.hourSpikes(wsId, this.workspaces.getSpikeHoursCap(wsId), from, to, Number(limit) || 20, includeResolved === 'true');
   }
 
   @Get('time-entries/by-user')
   @ApiOperation({ summary: 'Total hours and cost per assignee' })
-  timeEntriesByUser(@Query('from') from?: string, @Query('to') to?: string) {
-    return this.reports.timeEntriesByUser(from, to);
+  timeEntriesByUser(@Query('from') from?: string, @Query('to') to?: string, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.timeEntriesByUser(wsId, from, to);
   }
 
   @Get('time-entries/by-client')
   @ApiOperation({ summary: 'Total hours and cost per client' })
-  timeEntriesByClient(@Query('from') from?: string, @Query('to') to?: string) {
-    return this.reports.timeEntriesByClient(from, to);
+  timeEntriesByClient(@Query('from') from?: string, @Query('to') to?: string, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.timeEntriesByClient(wsId, from, to);
   }
 
   @Get('time-entries/by-department')
   @ApiOperation({ summary: 'Total hours and cost per department' })
-  timeEntriesByDepartment(@Query('from') from?: string, @Query('to') to?: string) {
-    return this.reports.timeEntriesByDepartment(from, to);
+  timeEntriesByDepartment(@Query('from') from?: string, @Query('to') to?: string, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.timeEntriesByDepartment(wsId, from, to);
   }
 
   @Get('time-entries/billable-summary')
   @ApiOperation({ summary: 'Billable vs non-billable hours and cost' })
-  timeEntriesBillableSummary(@Query('from') from?: string, @Query('to') to?: string) {
-    return this.reports.timeEntriesBillableSummary(from, to);
+  timeEntriesBillableSummary(@Query('from') from?: string, @Query('to') to?: string, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.timeEntriesBillableSummary(wsId, from, to);
   }
 
   @Get('time-entries/aggregates')
@@ -119,8 +151,10 @@ export class ReportsController {
     @Query('client') client?: string,
     @Query('listId') listId?: string,
     @Query('folderId') folderId?: string,
+    @Query('workspaceId') workspaceId?: string,
   ) {
-    return this.reports.timeEntriesAggregates(userId, from, to, status, billable, search, spaceId, missingOnly, client, listId, folderId);
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.timeEntriesAggregates(wsId, userId, from, to, status, billable, search, spaceId, missingOnly, client, listId, folderId);
   }
 
   @Get('time-entries/cost-trend')
@@ -129,11 +163,13 @@ export class ReportsController {
     @Query('bucket') bucket?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('workspaceId') workspaceId?: string,
   ) {
     if (bucket !== 'day' && bucket !== 'week' && bucket !== 'month') {
       throw new BadRequestException(`Invalid bucket "${bucket ?? ''}" (expected day|week|month)`);
     }
-    return this.reports.costTrend(bucket, from, to);
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.costTrend(wsId, bucket, from, to);
   }
 
   @Get('time-entries/cost-trend-by-assignee')
@@ -142,11 +178,13 @@ export class ReportsController {
     @Query('bucket') bucket?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('workspaceId') workspaceId?: string,
   ) {
     if (bucket !== 'day' && bucket !== 'week' && bucket !== 'month') {
       throw new BadRequestException(`Invalid bucket "${bucket ?? ''}" (expected day|week|month)`);
     }
-    return this.reports.costTrendByAssignee(bucket, from, to);
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.costTrendByAssignee(wsId, bucket, from, to);
   }
 
   @Get('time-entries/cost-trend-by-client')
@@ -155,11 +193,13 @@ export class ReportsController {
     @Query('bucket') bucket?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('workspaceId') workspaceId?: string,
   ) {
     if (bucket !== 'day' && bucket !== 'week' && bucket !== 'month') {
       throw new BadRequestException(`Invalid bucket "${bucket ?? ''}" (expected day|week|month)`);
     }
-    return this.reports.costTrendByClient(bucket, from, to);
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.costTrendByClient(wsId, bucket, from, to);
   }
 
   @Get('budgets/status')
@@ -170,8 +210,9 @@ export class ReportsController {
 
   @Get('overview-deltas')
   @ApiOperation({ summary: 'Current-period totals (hours, cost) and equal-length prior-period totals for the Overview KPI deltas.' })
-  overviewDeltas(@Query('from') from?: string, @Query('to') to?: string) {
-    return this.reports.overviewDeltas(from, to);
+  overviewDeltas(@Query('from') from?: string, @Query('to') to?: string, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.overviewDeltas(wsId, from, to);
   }
 
   @Get('time-entries')
@@ -190,21 +231,27 @@ export class ReportsController {
     @Query('client') client?: string,
     @Query('listId') listId?: string,
     @Query('folderId') folderId?: string,
+    @Query('workspaceId') workspaceId?: string,
   ) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
     return this.reports.timeEntriesList(
-      userId, from, to, status, Number(limit) || 50, Number(offset) || 0, billable, search, spaceId, missingOnly, client, listId, folderId,
+      wsId, userId, from, to, status, Number(limit) || 50, Number(offset) || 0, billable, search, spaceId, missingOnly, client, listId, folderId,
     );
   }
 
   @Get('sprint-points')
   @ApiOperation({ summary: 'Sprint points by space and status' })
-  sprintPoints(@Query('spaceId') spaceId?: string) {
-    return this.reports.sprintPoints(spaceId);
+  sprintPoints(@Query('spaceId') spaceId?: string, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.sprintPoints(wsId, spaceId);
   }
 
   @Get('ops/sync-health')
   @ApiOperation({ summary: 'Sync checkpoint freshness per space (Fresh / Stale / Unknown)' })
-  syncHealth() { return this.reports.syncHealth(); }
+  syncHealth(@Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.syncHealth(wsId);
+  }
 
   @Get('ops/webhook-events')
   @ApiOperation({ summary: 'Recent webhook events with optional filters (status, eventType, search)' })
@@ -214,8 +261,10 @@ export class ReportsController {
     @Query('status') status?: string,
     @Query('eventType') eventType?: string,
     @Query('search') search?: string,
+    @Query('workspaceId') workspaceId?: string,
   ) {
-    return this.reports.webhookEvents(Number(limit) || 50, Number(offset) || 0, status, eventType, search);
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.webhookEvents(wsId, Number(limit) || 50, Number(offset) || 0, status, eventType, search);
   }
 
   @Get('ops/job-logs')
@@ -225,27 +274,39 @@ export class ReportsController {
     @Query('status') status?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Query('workspaceId') workspaceId?: string,
   ) {
-    return this.reports.jobLogs(queueName, status, Number(limit) || 50, Number(offset) || 0);
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.jobLogs(wsId, queueName, status, Number(limit) || 50, Number(offset) || 0);
   }
 
   @Get('ops/dead-letters')
   @ApiOperation({ summary: 'Pending dead-letter jobs' })
-  deadLetters(@Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.reports.deadLetters(Number(limit) || 50, Number(offset) || 0);
+  deadLetters(@Query('limit') limit?: string, @Query('offset') offset?: string, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.deadLetters(wsId, Number(limit) || 50, Number(offset) || 0);
   }
 
   @Get('ops/stats')
   @ApiOperation({ summary: 'Dashboard overview stats (failures, dead-letters, webhooks, missing rates)' })
-  stats() { return this.reports.stats([...this.settings.getExcludedAssigneeIds()]); }
+  stats(@Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.stats(wsId, [...this.settings.getExcludedAssigneeIds()]);
+  }
 
   @Get('ops/missing-rates')
   @ApiOperation({ summary: 'Assignees with NO_RATE_FOUND time entries, grouped by user' })
-  missingRates() { return this.reports.missingRates([...this.settings.getExcludedAssigneeIds()]); }
+  missingRates(@Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.missingRates(wsId, [...this.settings.getExcludedAssigneeIds()]);
+  }
 
   @Get('spaces')
   @ApiOperation({ summary: 'Per-space task, hour, and cost aggregates' })
-  spaces() { return this.reports.spaces(); }
+  spaces(@Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    return this.reports.spaces(wsId);
+  }
 
   @Get('cycle-time')
   @ApiOperation({ summary: 'Cycle-time aggregates (first open → last done) bucketed by week, client, or department.' })
@@ -253,18 +314,21 @@ export class ReportsController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('groupBy') groupBy?: string,
+    @Query('workspaceId') workspaceId?: string,
   ) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
     const groupByVal = groupBy === 'client' || groupBy === 'department' ? groupBy : 'week';
     const fromDate = from ? new Date(from) : new Date(Date.now() - 90 * 86400000);
     const toDate = to ? new Date(to) : new Date();
-    return this.reports.cycleTime({ from: fromDate, to: toDate, groupBy: groupByVal });
+    return this.reports.cycleTime(wsId, { from: fromDate, to: toDate, groupBy: groupByVal });
   }
 
   @Get('time-in-status')
   @ApiOperation({ summary: 'Total hours each task spent in each status, over the window.' })
-  timeInStatus(@Query('from') from?: string, @Query('to') to?: string) {
+  timeInStatus(@Query('from') from?: string, @Query('to') to?: string, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
     const fromDate = from ? new Date(from) : new Date(Date.now() - 90 * 86400000);
     const toDate = to ? new Date(to) : new Date();
-    return this.reports.timeInStatus({ from: fromDate, to: toDate });
+    return this.reports.timeInStatus(wsId, { from: fromDate, to: toDate });
   }
 }

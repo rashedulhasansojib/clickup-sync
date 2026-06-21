@@ -4,9 +4,8 @@ import { TasksService } from '../tasks/tasks.service';
 import { SyncCheckpointsRepository } from './sync-checkpoints.repository';
 import { QueueService } from '../queues/queue.service';
 import { JOBS, QUEUES } from '../queues/queue.constants';
-import { CLICKUP_SPACES } from '../config/clickup-spaces.config';
 import { subtractDays } from '../common/utils/date-utils';
-import { SettingsService } from '../settings/settings.service';
+import { WorkspaceService } from '../workspaces/workspace.service';
 
 @Injectable()
 export class BackfillService {
@@ -16,17 +15,15 @@ export class BackfillService {
     private readonly tasks: TasksService,
     private readonly checkpoints: SyncCheckpointsRepository,
     private readonly queues: QueueService,
-    private readonly settings: SettingsService,
+    private readonly workspaces: WorkspaceService,
   ) {}
 
-  async backfillSpace(spaceId: string, lookbackDays?: number, timeEntryLookbackDays?: number) {
-    const space = CLICKUP_SPACES.find((s) => s.id === spaceId);
+  async backfillSpace(workspaceId: string, spaceId: string, lookbackDays?: number, timeEntryLookbackDays?: number) {
+    const space = this.workspaces.getSpace(workspaceId, spaceId);
     const days = lookbackDays ?? space?.backfillLookbackDays ?? 7;
-    const teamId = this.settings.getTeamId();
-    await this.checkpoints.markAttempt('clickup', 'space', spaceId);
+    await this.checkpoints.markAttempt(workspaceId, 'clickup', 'space', spaceId);
 
-    const { tasks: rawTasks, truncated } = await this.clickup.getAllTasksBySpace(spaceId, {
-      teamId,
+    const { tasks: rawTasks, truncated } = await this.clickup.getAllTasksBySpace(workspaceId, spaceId, {
       dateUpdatedGt: subtractDays(days).getTime(),
       includeClosed: true,
       subtasks: true,
@@ -34,7 +31,7 @@ export class BackfillService {
 
     const parentTasks = rawTasks.filter((t) => !t.parent);
     const subtasks = rawTasks.filter((t) => !!t.parent);
-    await this.tasks.syncTasks(parentTasks);
+    await this.tasks.syncTasks(workspaceId, parentTasks);
 
     // Subtasks may reference a parent that wasn't updated within the lookback
     // window and so isn't in `rawTasks`. Fetch+insert those (if not already
@@ -49,13 +46,13 @@ export class BackfillService {
           .filter((p): p is string => !!p && !presentIds.has(p)),
       ),
     ];
-    await this.tasks.syncMissingParents(referencedParentIds);
+    await this.tasks.syncMissingParents(workspaceId, referencedParentIds);
 
-    await this.tasks.syncTasks(subtasks);
+    await this.tasks.syncTasks(workspaceId, subtasks);
 
     // The team-level tasks endpoint omits space.name — patch it from config
     if (space?.name) {
-      await this.tasks.patchSpaceNames(spaceId, space.name);
+      await this.tasks.patchSpaceNames(workspaceId, spaceId, space.name);
     }
 
     // Enqueue time entry sync for every task that was backfilled.
@@ -84,11 +81,11 @@ export class BackfillService {
         // The time-entry worker resolves all-workspace-members as the
         // `assignee` filter when no specific assignee is provided, which
         // captures tracked time on tasks regardless of who logged it.
-        await queue.add(JOBS.SYNC_TASK_TIME_ENTRIES, { taskId, startDate: teStartDate, endDate }, jobOpts);
+        await queue.add(JOBS.SYNC_TASK_TIME_ENTRIES, { workspaceId, taskId, startDate: teStartDate, endDate }, jobOpts);
       }
     }
 
-    await this.checkpoints.markSuccess('clickup', 'space', spaceId);
+    await this.checkpoints.markSuccess(workspaceId, 'clickup', 'space', spaceId);
     if (truncated) {
       this.logger.warn(`Backfill of ${space?.name || spaceId} hit the task pagination cap — the result is incomplete and tasks beyond the cap were not synced`);
     }

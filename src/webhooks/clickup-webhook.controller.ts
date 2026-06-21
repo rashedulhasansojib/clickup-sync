@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Logger, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, HttpCode, Logger, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { QueueService } from '../queues/queue.service';
 import { JOBS, QUEUES } from '../queues/queue.constants';
@@ -6,7 +6,7 @@ import { WebhookParserService } from './webhook-parser.service';
 import { WebhookEventsRepository } from './webhook-events.repository';
 import { WebhookSignatureGuard } from './webhook-signature.guard';
 import { Public } from '../auth/decorators';
-import { SettingsService } from '../settings/settings.service';
+import { WorkspaceService } from '../workspaces/workspace.service';
 
 @ApiTags('webhooks')
 @Controller('webhooks')
@@ -17,18 +17,24 @@ export class ClickupWebhookController {
     private readonly parser: WebhookParserService,
     private readonly repo: WebhookEventsRepository,
     private readonly queues: QueueService,
-    private readonly settings: SettingsService,
+    private readonly workspaces: WorkspaceService,
   ) {}
 
+  // Each connected workspace registers its ClickUp webhook at its OWN URL so the
+  // signature guard can verify against that workspace's secret and every event
+  // is attributed to the right workspace.
   @Public()
-  @Post('clickup')
+  @Post('clickup/:workspaceId')
   @HttpCode(200)
-  async receive(@Body() payload: unknown) {
-    if (!this.settings.getPreferences().sync.realtimeWebhooks) {
+  async receive(@Param('workspaceId') workspaceId: string, @Body() payload: unknown) {
+    if (!this.workspaces.hasWorkspace(workspaceId)) {
+      throw new BadRequestException(`Unknown workspace: ${workspaceId}`);
+    }
+    if (!this.workspaces.getSyncPreferences(workspaceId).realtimeWebhooks) {
       return { success: true, skipped: true };
     }
     const parsed = this.parser.parse(payload);
-    const saved = await this.repo.saveReceived(parsed);
+    const saved = await this.repo.saveReceived(parsed, workspaceId);
     if (saved.duplicate) return { success: true, duplicate: true };
 
     // The event row + dedupe row are now committed. If enqueue fails here
@@ -39,7 +45,7 @@ export class ClickupWebhookController {
     try {
       await this.queues
         .get(QUEUES.CLICKUP_WEBHOOKS)
-        .add(JOBS.PROCESS_CLICKUP_EVENT, parsed, this.queues.webhookJobOptions());
+        .add(JOBS.PROCESS_CLICKUP_EVENT, { ...parsed, workspaceId }, this.queues.webhookJobOptions());
     } catch (err: any) {
       const message = err?.message ?? String(err);
       this.logger.error(`Failed to enqueue ClickUp webhook ${parsed.fingerprint}: ${message}`);

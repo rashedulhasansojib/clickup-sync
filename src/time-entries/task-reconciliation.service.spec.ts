@@ -24,10 +24,10 @@ describe('TaskReconciliationService.reconcileTask', () => {
     const task = { id: 't1', name: 'Still here' };
     getTask.mockResolvedValue(task);
 
-    const res = await svc.reconcileTask('t1', 1000, 2000);
+    const res = await svc.reconcileTask('ws1', 't1', 1000, 2000);
 
-    expect(syncTasks).toHaveBeenCalledWith([task]); // reuses the fetched task — no second API call
-    expect(syncTaskTimeEntries).toHaveBeenCalledWith('t1', undefined, 1000, 2000);
+    expect(syncTasks).toHaveBeenCalledWith('ws1', [task]); // reuses the fetched task — no second API call
+    expect(syncTaskTimeEntries).toHaveBeenCalledWith('ws1', 't1', undefined, 1000, 2000);
     expect(softDeleteTask).not.toHaveBeenCalled();
     expect(deleteByTaskId).not.toHaveBeenCalled();
     expect(res).toEqual({ taskId: 't1', deleted: false, timeEntriesSynced: 3 });
@@ -37,10 +37,10 @@ describe('TaskReconciliationService.reconcileTask', () => {
     const { svc, getTask, deleteByTaskId, softDeleteTask, syncTaskTimeEntries, syncTasks } = makeService();
     getTask.mockRejectedValue(httpError(404));
 
-    const res = await svc.reconcileTask('gone', 1000, 2000);
+    const res = await svc.reconcileTask('ws1', 'gone', 1000, 2000);
 
     expect(deleteByTaskId).toHaveBeenCalledWith('gone');
-    expect(softDeleteTask).toHaveBeenCalledWith('gone');
+    expect(softDeleteTask).toHaveBeenCalledWith('gone', 'ws1');
     expect(syncTaskTimeEntries).not.toHaveBeenCalled();
     expect(syncTasks).not.toHaveBeenCalled();
     expect(res).toEqual({ taskId: 'gone', deleted: true });
@@ -51,7 +51,7 @@ describe('TaskReconciliationService.reconcileTask', () => {
       const { svc, getTask, deleteByTaskId, softDeleteTask } = makeService();
       getTask.mockRejectedValue(httpError(status));
 
-      await expect(svc.reconcileTask('t1', 1000, 2000)).rejects.toThrow(`HTTP ${status}`);
+      await expect(svc.reconcileTask('ws1', 't1', 1000, 2000)).rejects.toThrow(`HTTP ${status}`);
       expect(deleteByTaskId).not.toHaveBeenCalled();
       expect(softDeleteTask).not.toHaveBeenCalled();
     }

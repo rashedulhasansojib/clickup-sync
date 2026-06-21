@@ -8,6 +8,7 @@ datasource db {
 
 model ClickupTask {
   taskId          String   @id @map("task_id")
+  workspaceId     String   @map("workspace_id")
   parentTaskId    String?  @map("parent_task_id")
   taskName        String   @map("task_name")
   description     String?
@@ -57,11 +58,13 @@ model ClickupTask {
   @@index([parentTaskId])
   @@index([spaceId])
   @@index([updatedDate])
+  @@index([workspaceId, spaceId])
   @@map("clickup_tasks")
 }
 
 model ClickupTimeEntry {
   timeEntryId      String   @id @map("time_entry_id")
+  workspaceId      String   @map("workspace_id")
   taskId           String?  @map("task_id")
   userId           String?  @map("user_id")
   userName         String?  @map("user_name")
@@ -85,6 +88,7 @@ model ClickupTimeEntry {
   @@index([taskId])
   @@index([userId])
   @@index([startTime])
+  @@index([workspaceId, startTime])
   @@map("clickup_time_entries")
 }
 
@@ -123,6 +127,7 @@ model ClientBudget {
 
 model ClickupWebhookEvent {
   id           BigInt   @id @default(autoincrement())
+  workspaceId  String   @map("workspace_id")
   fingerprint  String   @unique
   eventType    String?  @map("event_type")
   taskId       String?  @map("task_id")
@@ -135,34 +140,34 @@ model ClickupWebhookEvent {
   @@index([eventType])
   @@index([taskId])
   @@index([receivedAt])
+  @@index([workspaceId, receivedAt])
   @@map("clickup_webhook_events")
 }
 
 model ClickupWebhookSeen {
   fingerprint String   @id
+  workspaceId String   @map("workspace_id")
   seenAt      DateTime @default(now()) @map("seen_at")
   @@map("clickup_webhook_seen")
 }
 
-// Single-row table (id = "singleton") holding UI-managed ClickUp connection
-// settings. Secret columns hold AES-256-GCM ciphertext (see CryptoService).
+// Single-row table (id = "singleton") holding APP-GLOBAL, non-connection
+// preferences only (notifications, cost/costing rules, failure-retry). The
+// per-connection ClickUp settings (team id, API token, webhook secret/endpoint/
+// events, spike-hours cap, per-space scope) moved to the per-workspace
+// `Workspace` / `WorkspaceSpace` tables when multi-workspace support landed.
 model AppSettings {
-  id                 String   @id @default("singleton")
-  clickupApiTokenEnc String?  @map("clickup_api_token_enc")
-  webhookSecretEnc   String?  @map("webhook_secret_enc")
-  clickupTeamId      String?  @map("clickup_team_id")
-  webhookEndpoint    String?  @map("webhook_endpoint")
-  webhookEvents      String?  @map("webhook_events")
-  spikeHoursCap      Int      @default(12) @map("spike_hours_cap")
-  preferences        Json?    @map("preferences")
-  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at")
-  updatedBy          String?  @map("updated_by")
+  id          String   @id @default("singleton")
+  preferences Json?    @map("preferences")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedBy   String?  @map("updated_by")
 
   @@map("app_settings")
 }
 
 model SyncCheckpoint {
   id                     BigInt   @id @default(autoincrement())
+  workspaceId            String   @map("workspace_id")
   source                 String
   scopeType              String   @map("scope_type")
   scopeId                String   @map("scope_id")
@@ -170,12 +175,13 @@ model SyncCheckpoint {
   lastAttemptedSyncAt    DateTime? @map("last_attempted_sync_at")
   updatedAt              DateTime @default(now()) @updatedAt @map("updated_at")
 
-  @@unique([source, scopeType, scopeId])
+  @@unique([workspaceId, source, scopeType, scopeId])
   @@map("sync_checkpoints")
 }
 
 model SyncJobLog {
   id           BigInt   @id @default(autoincrement())
+  workspaceId  String?  @map("workspace_id") // nullable: global/maintenance jobs (e.g. cost recalc) span all workspaces
   jobId        String?  @map("job_id")
   queueName    String   @map("queue_name")
   jobName      String   @map("job_name")
@@ -195,11 +201,13 @@ model SyncJobLog {
   @@index([queueName, jobName])
   @@index([status])
   @@index([entityType, entityId])
+  @@index([workspaceId, createdAt])
   @@map("sync_job_logs")
 }
 
 model DeadLetterJob {
   id           BigInt   @id @default(autoincrement())
+  workspaceId  String?  @map("workspace_id") // nullable: global/maintenance jobs span all workspaces
   queueName    String   @map("queue_name")
   jobName      String   @map("job_name")
   entityType   String?  @map("entity_type")
@@ -214,6 +222,7 @@ model DeadLetterJob {
 
   @@index([queueName, jobName])
   @@index([entityType, entityId])
+  @@index([workspaceId, failedAt])
   @@map("dead_letter_jobs")
 }
 
@@ -232,6 +241,7 @@ model TagAssigneeMap {
 
 model TimeEntryReplacement {
   id                 BigInt   @id @default(autoincrement())
+  workspaceId        String   @map("workspace_id")
   originalEntryId    String   @unique @map("original_entry_id")
   replacementEntryId String?  @map("replacement_entry_id")
   taskId             String?  @map("task_id")
@@ -249,6 +259,7 @@ model TimeEntryReplacement {
 
 model SpikeNotification {
   id             BigInt   @id @default(autoincrement())
+  workspaceId    String   @map("workspace_id")
   clickupUserId  String   @map("clickup_user_id")
   spikeDate      DateTime @map("spike_date") @db.Date
   recipientEmail String   @map("recipient_email")
@@ -259,12 +270,13 @@ model SpikeNotification {
   sentBy         String?  @map("sent_by")
   sentAt         DateTime @default(now()) @map("sent_at")
 
-  @@unique([clickupUserId, spikeDate])
+  @@unique([workspaceId, clickupUserId, spikeDate])
   @@map("spike_notifications")
 }
 
 model SpikeResolution {
   id            BigInt   @id @default(autoincrement())
+  workspaceId   String   @map("workspace_id")
   clickupUserId String   @map("clickup_user_id")
   spikeDate     DateTime @map("spike_date") @db.Date
   userName      String?  @map("user_name")
@@ -272,7 +284,7 @@ model SpikeResolution {
   resolvedBy    String?  @map("resolved_by")
   resolvedAt    DateTime @default(now()) @map("resolved_at")
 
-  @@unique([clickupUserId, spikeDate])
+  @@unique([workspaceId, clickupUserId, spikeDate])
   @@map("spike_resolutions")
 }
 
@@ -298,6 +310,7 @@ model AdminAuditLog {
 
 model ClickupTaskEvent {
   id                BigInt   @id @default(autoincrement())
+  workspaceId       String   @map("workspace_id")
   taskId            String   @map("task_id")
   eventType         String   @map("event_type")
   occurredAt        DateTime @map("occurred_at")
@@ -310,6 +323,7 @@ model ClickupTaskEvent {
 
   @@index([taskId, occurredAt])
   @@index([eventType, occurredAt])
+  @@index([workspaceId, occurredAt])
   @@map("clickup_task_events")
 }
 
@@ -343,8 +357,61 @@ model Organization {
 
   users       User[]
   invitations Invitation[]
+  workspaces  Workspace[]
 
   @@map("organizations")
+}
+
+enum WorkspaceStatus {
+  ACTIVE
+  DISABLED
+}
+
+// A connected ClickUp workspace (sync source). One org can connect many; each
+// renders as its own isolated dashboard. Holds the per-workspace ClickUp
+// connection settings that previously lived in the singleton `app_settings` row.
+// Secret columns hold AES-256-GCM ciphertext (see CryptoService), same as before.
+model Workspace {
+  id                 String          @id @default(cuid())
+  orgId              String          @map("org_id")
+  name               String
+  clickupTeamId      String          @map("clickup_team_id")
+  clickupApiTokenEnc String?         @map("clickup_api_token_enc")
+  webhookSecretEnc   String?         @map("webhook_secret_enc")
+  webhookEndpoint    String?         @map("webhook_endpoint")
+  webhookEvents      String?         @map("webhook_events")
+  webhookId          String?         @map("webhook_id")
+  spikeHoursCap      Int             @default(12) @map("spike_hours_cap")
+  preferences        Json?
+  isDefault          Boolean         @default(false) @map("is_default")
+  status             WorkspaceStatus @default(ACTIVE)
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @default(now()) @updatedAt @map("updated_at")
+  updatedBy          String?         @map("updated_by")
+
+  org    Organization     @relation(fields: [orgId], references: [id])
+  spaces WorkspaceSpace[]
+
+  @@index([orgId])
+  @@map("workspaces")
+}
+
+// Per-workspace ClickUp space scope. Replaces the hardcoded CLICKUP_SPACES config.
+model WorkspaceSpace {
+  id                   String   @id @default(cuid())
+  workspaceId          String   @map("workspace_id")
+  spaceId              String   @map("space_id")
+  name                 String
+  backfillLookbackDays Int      @default(30) @map("backfill_lookback_days")
+  enabled              Boolean  @default(true)
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, spaceId])
+  @@index([workspaceId])
+  @@map("workspace_spaces")
 }
 
 model User {

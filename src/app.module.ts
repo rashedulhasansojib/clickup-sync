@@ -9,6 +9,7 @@ import { validateEnv } from './config/env.validation';
 import { buildBullConnection } from './config/connection.config';
 import { DatabaseModule } from './database/database.module';
 import { SettingsModule } from './settings/settings.module';
+import { WorkspaceModule } from './workspaces/workspace.module';
 import { ClickupModule } from './clickup/clickup.module';
 import { QueuesModule } from './queues/queues.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
@@ -41,6 +42,7 @@ import { HealthModule } from './health/health.module';
     }),
     DatabaseModule,
     SettingsModule,
+    WorkspaceModule,
     ClickupModule,
     QueuesModule,
     WebhooksModule,

@@ -14,22 +14,25 @@ function build(overrides: { add?: jest.Mock; saveReceived?: jest.Mock; markFaile
     webhookJobOptions: jest.fn().mockReturnValue({}),
   } as any;
   const realtimeWebhooks = overrides.realtimeWebhooks ?? true;
-  const settings = { getPreferences: () => ({ sync: { realtimeWebhooks } }) } as any;
-  const controller = new ClickupWebhookController(parser, repo, queues, settings);
+  const workspaces = {
+    hasWorkspace: () => true,
+    getSyncPreferences: () => ({ realtimeWebhooks }),
+  } as any;
+  const controller = new ClickupWebhookController(parser, repo, queues, workspaces);
   return { controller, add, saveReceived, markFailed };
 }
 
 describe('ClickupWebhookController.receive', () => {
   it('enqueues a job for a fresh event', async () => {
     const { controller, add } = build();
-    const res = await controller.receive({});
+    const res = await controller.receive('ws1', {});
     expect(add).toHaveBeenCalled();
     expect(res).toEqual({ success: true, queued: true });
   });
 
   it('does not enqueue for a duplicate event', async () => {
     const { controller, add } = build({ saveReceived: jest.fn().mockResolvedValue({ duplicate: true }) });
-    const res = await controller.receive({});
+    const res = await controller.receive('ws1', {});
     expect(add).not.toHaveBeenCalled();
     expect(res).toEqual({ success: true, duplicate: true });
   });
@@ -39,7 +42,7 @@ describe('ClickupWebhookController.receive', () => {
       add: jest.fn().mockRejectedValue(new Error('redis down')),
     });
 
-    const res = await controller.receive({});
+    const res = await controller.receive('ws1', {});
 
     // The event row is already written; if we let this throw, ClickUp's retry
     // would be deduped and the event lost. Instead flag it failed so the admin

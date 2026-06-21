@@ -53,12 +53,12 @@ export class ClickupEventProcessor extends WorkerHost {
   }
 
   async process(job: Job<any>) {
-    const { eventType, taskId, fingerprint, loggedUserId, payload } = job.data;
+    const { eventType, taskId, fingerprint, loggedUserId, payload, workspaceId } = job.data;
 
     // Record field-change history (status / priority / assignee / move) into
     // clickup_task_events. Safe for null taskId (persist no-ops).
     if (eventType && HISTORY_FIELDS[eventType]) {
-      await this.persistFieldChanges(taskId, eventType, HISTORY_FIELDS[eventType], payload);
+      await this.persistFieldChanges(workspaceId, taskId, eventType, HISTORY_FIELDS[eventType], payload);
     }
 
     // taskStatusUpdated is treated as history-only here; current-state refresh
@@ -81,22 +81,23 @@ export class ClickupEventProcessor extends WorkerHost {
       return;
     }
     if (eventType === 'taskDeleted') {
-      await this.queues.get(QUEUES.CLICKUP_TASKS).add(JOBS.DELETE_CLICKUP_TASK, { taskId }, this.queues.defaultJobOptions());
+      await this.queues.get(QUEUES.CLICKUP_TASKS).add(JOBS.DELETE_CLICKUP_TASK, { workspaceId, taskId }, this.queues.defaultJobOptions());
     } else if (eventType === 'taskTimeTrackedUpdated') {
       // Belt-and-braces: also enqueue a task sync so the parent task row is
       // present before the time-entry worker tries to upsert FKs against it.
       // The time-entry worker itself also self-heals (see TimeEntriesService),
       // but enqueueing both decouples the two paths and makes either able to
       // recover on its own. Both jobs are idempotent.
-      await this.queues.get(QUEUES.CLICKUP_TASKS).add(JOBS.SYNC_CLICKUP_TASK, { taskId }, this.queues.defaultJobOptions());
-      await this.queues.get(QUEUES.CLICKUP_TIME_ENTRIES).add(JOBS.SYNC_TASK_TIME_ENTRIES, { taskId, assigneeIds: loggedUserId ? [loggedUserId] : undefined }, this.queues.defaultJobOptions());
+      await this.queues.get(QUEUES.CLICKUP_TASKS).add(JOBS.SYNC_CLICKUP_TASK, { workspaceId, taskId }, this.queues.defaultJobOptions());
+      await this.queues.get(QUEUES.CLICKUP_TIME_ENTRIES).add(JOBS.SYNC_TASK_TIME_ENTRIES, { workspaceId, taskId, assigneeIds: loggedUserId ? [loggedUserId] : undefined }, this.queues.defaultJobOptions());
     } else {
-      await this.queues.get(QUEUES.CLICKUP_TASKS).add(JOBS.SYNC_CLICKUP_TASK, { taskId }, this.queues.defaultJobOptions());
+      await this.queues.get(QUEUES.CLICKUP_TASKS).add(JOBS.SYNC_CLICKUP_TASK, { workspaceId, taskId }, this.queues.defaultJobOptions());
     }
     await this.events.markProcessed(fingerprint).catch((e) => this.logger.warn(e.message));
   }
 
   private async persistFieldChanges(
+    workspaceId: string,
     taskId: string | null,
     eventType: string,
     fields: string[],
@@ -123,6 +124,7 @@ export class ClickupEventProcessor extends WorkerHost {
         await this.prisma.clickupTaskEvent.upsert({
           where: { fingerprint: fp },
           create: {
+            workspaceId,
             taskId,
             eventType,
             occurredAt: r.occurredAt,

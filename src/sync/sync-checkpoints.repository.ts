@@ -4,10 +4,10 @@ import { PrismaService } from '../database/prisma.service';
 @Injectable()
 export class SyncCheckpointsRepository {
   constructor(private readonly prisma: PrismaService) {}
-  markAttempt(source: string, scopeType: string, scopeId: string) {
-    return this.prisma.syncCheckpoint.upsert({ where: { source_scopeType_scopeId: { source, scopeType, scopeId } }, create: { source, scopeType, scopeId, lastAttemptedSyncAt: new Date() }, update: { lastAttemptedSyncAt: new Date() } });
+  markAttempt(workspaceId: string, source: string, scopeType: string, scopeId: string) {
+    return this.prisma.syncCheckpoint.upsert({ where: { workspaceId_source_scopeType_scopeId: { workspaceId, source, scopeType, scopeId } }, create: { workspaceId, source, scopeType, scopeId, lastAttemptedSyncAt: new Date() }, update: { lastAttemptedSyncAt: new Date() } });
   }
-  markSuccess(source: string, scopeType: string, scopeId: string, when = new Date()) {
-    return this.prisma.syncCheckpoint.upsert({ where: { source_scopeType_scopeId: { source, scopeType, scopeId } }, create: { source, scopeType, scopeId, lastAttemptedSyncAt: when, lastSuccessfulSyncAt: when }, update: { lastSuccessfulSyncAt: when, lastAttemptedSyncAt: when } });
+  markSuccess(workspaceId: string, source: string, scopeType: string, scopeId: string, when = new Date()) {
+    return this.prisma.syncCheckpoint.upsert({ where: { workspaceId_source_scopeType_scopeId: { workspaceId, source, scopeType, scopeId } }, create: { workspaceId, source, scopeType, scopeId, lastAttemptedSyncAt: when, lastSuccessfulSyncAt: when }, update: { lastSuccessfulSyncAt: when, lastAttemptedSyncAt: when } });
   }
 }

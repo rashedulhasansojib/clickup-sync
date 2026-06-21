@@ -4,14 +4,8 @@ import { PrismaService } from '../database/prisma.service';
 
 export const SETTINGS_ID = 'singleton';
 
-/** Writable columns of the single app_settings row. */
+/** Writable columns of the single app_settings row (app-global prefs only). */
 export interface SettingsWrite {
-  clickupApiTokenEnc?: string | null;
-  webhookSecretEnc?: string | null;
-  clickupTeamId?: string | null;
-  webhookEndpoint?: string | null;
-  webhookEvents?: string | null;
-  spikeHoursCap?: number;
   updatedBy?: string | null;
   preferences?: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput;
 }

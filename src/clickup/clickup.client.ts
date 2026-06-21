@@ -10,7 +10,7 @@ import {
   CreateTimeEntryPayload,
 } from "./clickup.types";
 import { buildTimeEntriesQuery, resolveTimeEntriesWindow } from "./time-entries.util";
-import { SettingsService } from "../settings/settings.service";
+import { WorkspaceService } from "../workspaces/workspace.service";
 
 const MAX_429_RETRIES = 3;
 const MAX_BACKOFF_MS = 60_000;
@@ -28,15 +28,16 @@ export class ClickupClient {
 
   constructor(
     private readonly http: HttpService,
-    private readonly settings: SettingsService,
+    private readonly workspaces: WorkspaceService,
   ) {}
 
-  private headers() {
-    return { Authorization: this.settings.getApiToken() };
+  private headers(workspaceId: string) {
+    return { Authorization: this.workspaces.getApiToken(workspaceId) };
   }
 
   private async request<T>(
     method: "GET" | "POST" | "PUT" | "DELETE",
+    workspaceId: string,
     path: string,
     data?: unknown,
     attempt = 0,
@@ -47,7 +48,7 @@ export class ClickupClient {
           method,
           url: `${this.baseUrl}${path}`,
           data,
-          headers: this.headers(),
+          headers: this.headers(workspaceId),
           timeout: 30000,
         }),
       );
@@ -63,7 +64,7 @@ export class ClickupClient {
           `ClickUp ${method} ${path} rate-limited (429); retrying in ${waitMs}ms (attempt ${attempt + 1}/${MAX_429_RETRIES})`,
         );
         await this.sleep(waitMs);
-        return this.request<T>(method, path, data, attempt + 1);
+        return this.request<T>(method, workspaceId, path, data, attempt + 1);
       }
       // Surface ClickUp's actual response body. Axios's error.message is just
       // "Request failed with status code 400" — the real reason (e.g.
@@ -98,14 +99,14 @@ export class ClickupClient {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  getTask(taskId: string): Promise<ClickUpTask> {
-    return this.request("GET", `/task/${taskId}?include_subtasks=true`);
+  getTask(workspaceId: string, taskId: string): Promise<ClickUpTask> {
+    return this.request("GET", workspaceId, `/task/${taskId}?include_subtasks=true`);
   }
 
   getTasksBySpace(
+    workspaceId: string,
     spaceId: string,
     options: {
-      teamId: string;
       dateUpdatedGt?: number;
       page?: number;
       includeClosed?: boolean;
@@ -113,6 +114,7 @@ export class ClickupClient {
       limit?: number;
     },
   ): Promise<ClickUpTaskPage> {
+    const teamId = this.workspaces.getTeamId(workspaceId);
     const params = new URLSearchParams();
     params.append("space_ids[]", spaceId);
     if (options.dateUpdatedGt)
@@ -123,14 +125,15 @@ export class ClickupClient {
     params.append("limit", String(options.limit ?? 100));
     return this.request(
       "GET",
-      `/team/${options.teamId}/task?${params.toString()}`,
+      workspaceId,
+      `/team/${teamId}/task?${params.toString()}`,
     );
   }
 
   async getAllTasksBySpace(
+    workspaceId: string,
     spaceId: string,
     options: {
-      teamId: string;
       dateUpdatedGt?: number;
       includeClosed?: boolean;
       subtasks?: boolean;
@@ -144,7 +147,7 @@ export class ClickupClient {
     let truncated = false;
     let page = 0;
     for (; page < MAX_PAGES; page++) {
-      const res = await this.getTasksBySpace(spaceId, {
+      const res = await this.getTasksBySpace(workspaceId, spaceId, {
         ...options,
         page,
         limit: 100,
@@ -167,10 +170,11 @@ export class ClickupClient {
   }
 
   async getTimeEntries(
-    teamId: string,
+    workspaceId: string,
     taskId: string,
     options?: { assigneeIds?: string[]; startDate?: number; endDate?: number },
   ): Promise<ClickUpTimeEntry[]> {
+    const teamId = this.workspaces.getTeamId(workspaceId);
     // Resolve the window once, then fetch it in <=1-year slices (one request per
     // slice) and concatenate. The union is still authoritative for the full
     // window, so the caller's delete-reconciliation stays correct.
@@ -186,6 +190,7 @@ export class ClickupClient {
       });
       const res: any = await this.request(
         "GET",
+        workspaceId,
         `/team/${teamId}/time_entries?${qs}`,
       );
       const entries: ClickUpTimeEntry[] = res.data || res.entries || [];
@@ -203,21 +208,33 @@ export class ClickupClient {
     return out;
   }
 
-  async getTeamMembers(teamId: string): Promise<ClickUpMember[]> {
-    const res: any = await this.request("GET", `/team/${teamId}`);
+  async getTeamMembers(workspaceId: string): Promise<ClickUpMember[]> {
+    const teamId = this.workspaces.getTeamId(workspaceId);
+    const res: any = await this.request("GET", workspaceId, `/team/${teamId}`);
     return res.team?.members || [];
   }
 
-  async getWebhooks(teamId: string): Promise<ClickUpWebhook[]> {
-    const res: any = await this.request("GET", `/team/${teamId}/webhook`);
+  /** List the workspace's (non-archived) ClickUp spaces — used by the Settings
+   *  "Discover spaces" picker so admins pick spaces to sync instead of typing
+   *  raw space ids. */
+  async listSpaces(workspaceId: string): Promise<{ id: string; name: string }[]> {
+    const teamId = this.workspaces.getTeamId(workspaceId);
+    const res: any = await this.request("GET", workspaceId, `/team/${teamId}/space?archived=false`);
+    return (res.spaces ?? []).map((s: any) => ({ id: String(s.id), name: s.name ?? String(s.id) }));
+  }
+
+  async getWebhooks(workspaceId: string): Promise<ClickUpWebhook[]> {
+    const teamId = this.workspaces.getTeamId(workspaceId);
+    const res: any = await this.request("GET", workspaceId, `/team/${teamId}/webhook`);
     return res.webhooks || [];
   }
   async createWebhook(
-    teamId: string,
+    workspaceId: string,
     endpoint: string,
     events: string[],
   ): Promise<{ id: string; secret: string }> {
-    const res: any = await this.request("POST", `/team/${teamId}/webhook`, {
+    const teamId = this.workspaces.getTeamId(workspaceId);
+    const res: any = await this.request("POST", workspaceId, `/team/${teamId}/webhook`, {
       endpoint,
       events,
     });
@@ -227,35 +244,39 @@ export class ClickupClient {
     };
   }
   async updateWebhook(
+    workspaceId: string,
     webhookId: string,
     update: { endpoint: string; events: string[]; status?: "active" },
   ): Promise<void> {
     // PUT /webhook/{id} updates the subscribed events / endpoint in place and
     // leaves the signing secret unchanged (only POST returns a secret), so
     // signature verification keeps working without re-storing anything.
-    await this.request("PUT", `/webhook/${webhookId}`, {
+    await this.request("PUT", workspaceId, `/webhook/${webhookId}`, {
       endpoint: update.endpoint,
       events: update.events,
       status: update.status ?? "active",
     });
   }
-  async deleteWebhook(webhookId: string): Promise<void> {
-    await this.request("DELETE", `/webhook/${webhookId}`);
+  async deleteWebhook(workspaceId: string, webhookId: string): Promise<void> {
+    await this.request("DELETE", workspaceId, `/webhook/${webhookId}`);
   }
 
   async createTimeEntry(
-    teamId: string,
+    workspaceId: string,
     payload: CreateTimeEntryPayload,
   ): Promise<ClickUpTimeEntry> {
+    const teamId = this.workspaces.getTeamId(workspaceId);
     const res: any = await this.request(
       "POST",
+      workspaceId,
       `/team/${teamId}/time_entries`,
       payload,
     );
     return res.data;
   }
 
-  async deleteTimeEntry(teamId: string, entryId: string): Promise<void> {
-    await this.request("DELETE", `/team/${teamId}/time_entries/${entryId}`);
+  async deleteTimeEntry(workspaceId: string, entryId: string): Promise<void> {
+    const teamId = this.workspaces.getTeamId(workspaceId);
+    await this.request("DELETE", workspaceId, `/team/${teamId}/time_entries/${entryId}`);
   }
 }

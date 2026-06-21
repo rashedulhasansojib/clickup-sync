@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Logger } from '@nes
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { MailerService } from '../auth/mailer.service';
-import { SettingsService } from '../settings/settings.service';
+import { WorkspaceService } from '../workspaces/workspace.service';
 
 export type SpikeRule = 'absolute' | 'relative' | 'both';
 
@@ -31,7 +31,7 @@ export class SpikeNotificationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailer: MailerService,
-    private readonly settings: SettingsService,
+    private readonly workspaces: WorkspaceService,
   ) {}
 
   /**
@@ -39,7 +39,7 @@ export class SpikeNotificationService {
    * Mirrors the watchlist's bucketing/join exactly (UTC→Dhaka, is_deleted=false,
    * COALESCE(user_id,'unknown')) so totals match the Time Spikes row.
    */
-  async breakdown(userId: string, date: string): Promise<SpikeBreakdown> {
+  async breakdown(workspaceId: string, userId: string, date: string): Promise<SpikeBreakdown> {
     if (!DATE_RE.test(date)) throw new BadRequestException('date must be YYYY-MM-DD');
     const rows = await this.prisma.$queryRaw<BreakdownRow[]>(Prisma.sql`
       SELECT e.task_id                                   AS task_id,
@@ -50,6 +50,7 @@ export class SpikeNotificationService {
       FROM clickup_time_entries e
       JOIN clickup_tasks t ON e.task_id = t.task_id
       WHERE e.start_time IS NOT NULL
+        AND e.workspace_id = ${workspaceId}
         AND t.is_deleted = false
         AND COALESCE(e.user_id, 'unknown') = ${userId}
         AND to_char(date_trunc('day', e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Dhaka'), 'YYYY-MM-DD') = ${date}
@@ -67,15 +68,16 @@ export class SpikeNotificationService {
     return { recipientEmail, userName, totalHours, tasks };
   }
 
-  async preview(userId: string, date: string) {
-    const b = await this.breakdown(userId, date);
+  async preview(workspaceId: string, userId: string, date: string) {
+    const b = await this.breakdown(workspaceId, userId, date);
     const existing = await this.prisma.spikeNotification.findUnique({
-      where: { clickupUserId_spikeDate: { clickupUserId: userId, spikeDate: dayStart(date) } },
+      where: { workspaceId_clickupUserId_spikeDate: { workspaceId, clickupUserId: userId, spikeDate: dayStart(date) } },
     });
     return { date, ...b, alreadyNotified: !!existing };
   }
 
   async notify(args: {
+    workspaceId: string;
     userId: string;
     date: string;
     rule?: SpikeRule;
@@ -83,19 +85,19 @@ export class SpikeNotificationService {
     note?: string;
     sentBy?: string;
   }) {
-    const { userId, date, rule, median, note, sentBy } = args;
-    const b = await this.breakdown(userId, date);
+    const { workspaceId, userId, date, rule, median, note, sentBy } = args;
+    const b = await this.breakdown(workspaceId, userId, date);
     if (b.tasks.length === 0) throw new BadRequestException('No time entries for that user on that day.');
     if (!b.recipientEmail) throw new BadRequestException('No email on file for this member; cannot send.');
 
     // Early guard so the common path never double-emails; the unique index is
     // the backstop for a concurrent race (caught as P2002 below).
     const existing = await this.prisma.spikeNotification.findUnique({
-      where: { clickupUserId_spikeDate: { clickupUserId: userId, spikeDate: dayStart(date) } },
+      where: { workspaceId_clickupUserId_spikeDate: { workspaceId, clickupUserId: userId, spikeDate: dayStart(date) } },
     });
     if (existing) throw new ConflictException('This member has already been notified for this day.');
 
-    const cap = this.settings.getSpikeHoursCap();
+    const cap = this.workspaces.getSpikeHoursCap(workspaceId);
     const reason = this.reasonText(rule, b.totalHours, cap, median);
 
     // Send first, then record. Deliberate: at-least-once + recoverable. If the
@@ -115,6 +117,7 @@ export class SpikeNotificationService {
     try {
       await this.prisma.spikeNotification.create({
         data: {
+          workspaceId,
           clickupUserId: userId,
           spikeDate: dayStart(date),
           recipientEmail: b.recipientEmail,

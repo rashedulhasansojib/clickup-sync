@@ -21,29 +21,29 @@ function makeDeps() {
 describe('TaskSyncProcessor', () => {
   it('syncs a task and logs success', async () => {
     const { proc, syncTask, finished } = makeDeps();
-    await proc.process({ id: '1', name: JOBS.SYNC_CLICKUP_TASK, data: { taskId: 't1' } } as any);
-    expect(syncTask).toHaveBeenCalledWith('t1');
+    await proc.process({ id: '1', name: JOBS.SYNC_CLICKUP_TASK, data: { workspaceId: 'ws1', taskId: 't1' } } as any);
+    expect(syncTask).toHaveBeenCalledWith('ws1', 't1');
     expect(finished).toHaveBeenCalledWith(1n, { tasksSynced: 1 });
   });
 
   it('soft-deletes on the delete job and removes the task’s time entries', async () => {
     const { proc, softDeleteTask, syncTask, deleteByTaskId } = makeDeps();
-    await proc.process({ id: '1', name: JOBS.DELETE_CLICKUP_TASK, data: { taskId: 't1' } } as any);
+    await proc.process({ id: '1', name: JOBS.DELETE_CLICKUP_TASK, data: { workspaceId: 'ws1', taskId: 't1' } } as any);
     expect(deleteByTaskId).toHaveBeenCalledWith('t1');
-    expect(softDeleteTask).toHaveBeenCalledWith('t1');
+    expect(softDeleteTask).toHaveBeenCalledWith('t1', 'ws1');
     expect(syncTask).not.toHaveBeenCalled();
   });
 
   it('does not touch time entries on a normal sync', async () => {
     const { proc, deleteByTaskId } = makeDeps();
-    await proc.process({ id: '1', name: JOBS.SYNC_CLICKUP_TASK, data: { taskId: 't1' } } as any);
+    await proc.process({ id: '1', name: JOBS.SYNC_CLICKUP_TASK, data: { workspaceId: 'ws1', taskId: 't1' } } as any);
     expect(deleteByTaskId).not.toHaveBeenCalled();
   });
 
   it('routes the reconcile job to the reconciliation service with its window', async () => {
     const { proc, reconcileTask, syncTask, softDeleteTask } = makeDeps();
-    await proc.process({ id: '1', name: JOBS.RECONCILE_CLICKUP_TASK, data: { taskId: 't1', startDate: 1000, endDate: 2000 } } as any);
-    expect(reconcileTask).toHaveBeenCalledWith('t1', 1000, 2000);
+    await proc.process({ id: '1', name: JOBS.RECONCILE_CLICKUP_TASK, data: { workspaceId: 'ws1', taskId: 't1', startDate: 1000, endDate: 2000 } } as any);
+    expect(reconcileTask).toHaveBeenCalledWith('ws1', 't1', 1000, 2000);
     expect(syncTask).not.toHaveBeenCalled();
     expect(softDeleteTask).not.toHaveBeenCalled();
   });
@@ -52,7 +52,7 @@ describe('TaskSyncProcessor', () => {
     const { proc, syncTask, failed } = makeDeps();
     const err = new Error('boom');
     syncTask.mockRejectedValueOnce(err);
-    await expect(proc.process({ id: '1', name: JOBS.SYNC_CLICKUP_TASK, data: { taskId: 't1' } } as any)).rejects.toThrow('boom');
+    await expect(proc.process({ id: '1', name: JOBS.SYNC_CLICKUP_TASK, data: { workspaceId: 'ws1', taskId: 't1' } } as any)).rejects.toThrow('boom');
     expect(failed).toHaveBeenCalledWith(1n, err);
   });
 

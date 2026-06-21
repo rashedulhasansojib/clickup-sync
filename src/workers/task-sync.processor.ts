@@ -24,21 +24,22 @@ export class TaskSyncProcessor extends WorkerHost {
     await this.deadLetters.recordIfExhausted(job, err);
   }
 
-  async process(job: Job<{ taskId: string }>) {
-    const log = await this.jobLogs.started({ jobId: job.id?.toString(), queueName: QUEUES.CLICKUP_TASKS, jobName: job.name, entityType: 'task', entityId: job.data.taskId });
+  async process(job: Job<{ workspaceId: string; taskId: string }>) {
+    const { workspaceId, taskId } = job.data;
+    const log = await this.jobLogs.started({ workspaceId, jobId: job.id?.toString(), queueName: QUEUES.CLICKUP_TASKS, jobName: job.name, entityType: 'task', entityId: taskId });
     try {
       let result;
       if (job.name === JOBS.DELETE_CLICKUP_TASK) {
         // A deleted task's tracked time must go too — ClickUp removes the
         // entries with the task but emits no per-entry delete event. Delete
         // them first; the task row survives (soft delete) so the FK holds.
-        await this.timeEntries.deleteByTaskId(job.data.taskId);
-        result = await this.tasks.softDeleteTask(job.data.taskId);
+        await this.timeEntries.deleteByTaskId(taskId);
+        result = await this.tasks.softDeleteTask(taskId, workspaceId);
       } else if (job.name === JOBS.RECONCILE_CLICKUP_TASK) {
-        const { startDate, endDate } = job.data as { taskId: string; startDate: number; endDate: number };
-        result = await this.reconciliation.reconcileTask(job.data.taskId, startDate, endDate);
+        const { startDate, endDate } = job.data as unknown as { startDate: number; endDate: number };
+        result = await this.reconciliation.reconcileTask(workspaceId, taskId, startDate, endDate);
       } else {
-        result = await this.tasks.syncTask(job.data.taskId);
+        result = await this.tasks.syncTask(workspaceId, taskId);
       }
       await this.jobLogs.finished(log.id, { tasksSynced: 1 });
       return result;

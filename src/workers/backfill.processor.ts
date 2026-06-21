@@ -20,10 +20,13 @@ export class BackfillProcessor extends WorkerHost {
     await this.deadLetters.recordIfExhausted(job, err);
   }
 
-  async process(job: Job<{ spaceId: string; lookbackDays?: number; timeEntryLookbackDays?: number }>) {
-    const log = await this.jobLogs.started({ jobId: job.id?.toString(), queueName: QUEUES.CLICKUP_BACKFILLS, jobName: job.name, entityType: 'space', entityId: job.data.spaceId });
+  async process(job: Job<{ workspaceId: string; spaceId: string; lookbackDays?: number; timeEntryLookbackDays?: number }>) {
+    const { workspaceId, spaceId, lookbackDays } = job.data;
+    // Record the requested lookback so reports can show the longest backfill
+    // window run per space (see ReportsService.syncHealth).
+    const log = await this.jobLogs.started({ workspaceId, jobId: job.id?.toString(), queueName: QUEUES.CLICKUP_BACKFILLS, jobName: job.name, entityType: 'space', entityId: spaceId, payload: lookbackDays != null ? { lookbackDays } : undefined });
     try {
-      const result = await this.backfills.backfillSpace(job.data.spaceId, job.data.lookbackDays, job.data.timeEntryLookbackDays);
+      const result = await this.backfills.backfillSpace(workspaceId, spaceId, job.data.lookbackDays, job.data.timeEntryLookbackDays);
       // `tasksSynced` is used by /admin/backfill/active to compute progress bar
       // totals for the time-entry drain phase that follows. Without it the
       // dashboard can only show "X remaining" instead of "X / N done".

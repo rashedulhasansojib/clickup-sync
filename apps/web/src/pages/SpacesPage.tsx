@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ChevronRight, CircleCheck, CircleDashed, Loader2, RefreshCw, Settings } from 'lucide-react';
-import { useSpaces } from '../hooks/useReports';
+import { useSpaces, useSyncHealth } from '../hooks/useReports';
 import { useActiveBackfills, useBackfill } from '../hooks/useAdmin';
-import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../hooks/useAuth';
+import { useActiveWorkspace } from '../hooks/useActiveWorkspace';
 import type { ActiveBackfill } from '../api/admin';
+import type { WorkspaceSpace } from '../api/workspaces';
 import { PageHeader } from '../components/ui/PageHeader';
 import { QueryError } from '../components/ui/QueryError';
 import { Card } from '../components/ui/Card';
@@ -17,14 +18,6 @@ import { Input } from '../components/ui/Input';
 import { Skeleton } from '../components/ui/Skeleton';
 import { fmt } from '../lib/formatters';
 
-// Mirrors the backend CLICKUP_SPACES config (src/config/clickup-spaces.config.ts).
-// Keep the lookbackDays here in sync with that file.
-const CONFIGURED_SPACES = [
-  { id: '3577824', name: 'Digital Marketing', lookbackDays: 30 },
-  { id: '3589129', name: 'R&D Apps', lookbackDays: 30 },
-  { id: '3525433', name: 'Projects', lookbackDays: 30 },
-];
-
 const DEFAULT_LOOKBACK = 30;
 const MIN_LOOKBACK = 1;
 // Fallback when the settings query hasn't loaded yet. The real cap is the
@@ -32,8 +25,8 @@ const MIN_LOOKBACK = 1;
 // read at runtime so backend and frontend share one source of truth.
 const MAX_LOOKBACK_FALLBACK = 1095;
 
-function defaultLookbackFor(spaceId: string): number {
-  return CONFIGURED_SPACES.find((s) => s.id === spaceId)?.lookbackDays ?? DEFAULT_LOOKBACK;
+function defaultLookbackFor(configuredSpaces: WorkspaceSpace[], spaceId: string): number {
+  return configuredSpaces.find((s) => s.spaceId === spaceId)?.backfillLookbackDays ?? DEFAULT_LOOKBACK;
 }
 
 const PALETTE = ['#7B68EE', '#FF02F0', '#49CCF9', '#10b981', '#f59e0b', '#ef4444'];
@@ -49,6 +42,10 @@ type SpaceRow = {
   costAud: number;
   /** false = configured space that has never produced any synced data yet */
   synced: boolean;
+  /** ISO timestamp of the last successful sync (from the sync checkpoint), or null. */
+  lastSyncedAt: string | null;
+  /** Longest backfill lookback (days) ever run for this space, or null if none recorded. */
+  maxLookbackTried: number | null;
 };
 
 /**
@@ -56,36 +53,48 @@ type SpaceRow = {
  * with whatever the backend reports from synced data. Any synced space that
  * isn't in the configured list is appended so nothing is hidden.
  */
-function buildMergedSpaces(apiRows: Omit<SpaceRow, 'synced'>[]): SpaceRow[] {
-  const byId = new Map<string, Omit<SpaceRow, 'synced'>>();
+type SpaceHealth = { lastSyncedAt: string | null; maxLookbackDays: number | null };
+
+function buildMergedSpaces(configuredSpaces: WorkspaceSpace[], apiRows: Omit<SpaceRow, 'synced' | 'lastSyncedAt' | 'maxLookbackTried'>[], healthById: Map<string, SpaceHealth>): SpaceRow[] {
+  const byId = new Map<string, Omit<SpaceRow, 'synced' | 'lastSyncedAt' | 'maxLookbackTried'>>();
   for (const r of apiRows) {
     const id = r.spaceId?.trim();
     if (id) byId.set(id, r);
   }
-  const merged: SpaceRow[] = CONFIGURED_SPACES.map((cfg) => {
-    const hit = byId.get(cfg.id);
-    byId.delete(cfg.id);
-    if (hit) return { ...hit, spaceName: hit.spaceName ?? cfg.name, synced: true };
+  const merged: SpaceRow[] = configuredSpaces.map((cfg) => {
+    const hit = byId.get(cfg.spaceId);
+    byId.delete(cfg.spaceId);
+    const h = healthById.get(cfg.spaceId);
+    const extra = { lastSyncedAt: h?.lastSyncedAt ?? null, maxLookbackTried: h?.maxLookbackDays ?? null };
+    if (hit) return { ...hit, spaceName: hit.spaceName ?? cfg.name, synced: true, ...extra };
     return {
-      spaceId: cfg.id,
+      spaceId: cfg.spaceId,
       spaceName: cfg.name,
       taskCount: 0,
       openCount: 0,
       memberCount: 0,
       hoursLogged: 0,
       costAud: 0,
-      synced: false,
+      // A space can sync successfully yet hold 0 tasks (empty space, or nothing
+      // updated within the lookback window). Trust the sync checkpoint, not just
+      // task presence, so a freshly-synced-but-empty space isn't mislabeled
+      // "Never synced".
+      synced: healthById.has(cfg.spaceId),
+      ...extra,
     };
   });
   // Any remaining synced spaces not in the configured list.
-  for (const r of byId.values()) merged.push({ ...r, synced: true });
+  for (const [id, r] of byId) {
+    const h = healthById.get(id);
+    merged.push({ ...r, synced: true, lastSyncedAt: h?.lastSyncedAt ?? null, maxLookbackTried: h?.maxLookbackDays ?? null });
+  }
   return merged;
 }
 
-function spaceDisplayName(s: SpaceRow): string {
+function spaceDisplayName(configuredSpaces: WorkspaceSpace[], s: SpaceRow): string {
   const n = s.spaceName?.trim();
   if (n) return n;
-  const configured = CONFIGURED_SPACES.find((c) => c.id === s.spaceId);
+  const configured = configuredSpaces.find((c) => c.spaceId === s.spaceId);
   if (configured) return configured.name;
   const id = s.spaceId?.trim();
   // Prefix with "Space" so an unresolved ID doesn't render twice (once where
@@ -211,13 +220,13 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SpaceGrid({ spaces, controls }: { spaces: SpaceRow[]; controls: SyncControls }) {
+function SpaceGrid({ spaces, controls, configuredSpaces }: { spaces: SpaceRow[]; controls: SyncControls; configuredSpaces: WorkspaceSpace[] }) {
   const navigate = useNavigate();
   const { syncingId, queuedIds, progressFor, onSync, canSync } = controls;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
       {spaces.map((space, index) => {
-        const displayName = spaceDisplayName(space);
+        const displayName = spaceDisplayName(configuredSpaces, space);
         const color = spaceColor(space.spaceId);
         const totalHours = space.hoursLogged;
         const closedCount = Math.max(0, space.taskCount - space.openCount);
@@ -283,7 +292,19 @@ function SpaceGrid({ spaces, controls }: { spaces: SpaceRow[]; controls: SyncCon
                   syncing…
                 </Pill>
               ) : space.synced ? (
-                <Pill tone="green" size="xs" icon={<CircleCheck size={10} />}>synced</Pill>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <Pill tone="green" size="xs" icon={<CircleCheck size={10} />}>synced</Pill>
+                  {space.lastSyncedAt && (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }} title={new Date(space.lastSyncedAt).toLocaleString()}>
+                      {fmt.relative(space.lastSyncedAt)}
+                    </span>
+                  )}
+                  {space.maxLookbackTried != null && (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }} title="Longest backfill window run for this space">
+                      · up to {space.maxLookbackTried}d
+                    </span>
+                  )}
+                </div>
               ) : (
                 <Pill tone="amber" size="xs" icon={<CircleDashed size={10} />}>Never synced</Pill>
               )}
@@ -341,7 +362,7 @@ function SpaceGrid({ spaces, controls }: { spaces: SpaceRow[]; controls: SyncCon
   );
 }
 
-function WorkloadView({ spaces, controls }: { spaces: SpaceRow[]; controls: SyncControls }) {
+function WorkloadView({ spaces, controls, configuredSpaces }: { spaces: SpaceRow[]; controls: SyncControls; configuredSpaces: WorkspaceSpace[] }) {
   const navigate = useNavigate();
   const { syncingId, queuedIds, progressFor, onSync, canSync } = controls;
   const sorted = useMemo(() => [...spaces].sort((a, b) => b.hoursLogged - a.hoursLogged), [spaces]);
@@ -389,7 +410,7 @@ function WorkloadView({ spaces, controls }: { spaces: SpaceRow[]; controls: Sync
                     background: spaceColor(sp.spaceId),
                     transition: 'all 200ms',
                   }}
-                  title={`${spaceDisplayName(sp)}: ${fmt.hours(sp.hoursLogged)}`}
+                  title={`${spaceDisplayName(configuredSpaces, sp)}: ${fmt.hours(sp.hoursLogged)}`}
                 />
               ))}
             </div>
@@ -408,7 +429,7 @@ function WorkloadView({ spaces, controls }: { spaces: SpaceRow[]; controls: Sync
                       flexShrink: 0,
                     }}
                   />
-                  <span style={{ fontWeight: 500, color: 'var(--text)' }}>{spaceDisplayName(sp)}</span>
+                  <span style={{ fontWeight: 500, color: 'var(--text)' }}>{spaceDisplayName(configuredSpaces, sp)}</span>
                   <span style={{ fontVariantNumeric: 'tabular-nums' }}>
                     {fmt.hours(sp.hoursLogged)} ({Math.round((sp.hoursLogged / total) * 100)}%)
                   </span>
@@ -455,9 +476,14 @@ function WorkloadView({ spaces, controls }: { spaces: SpaceRow[]; controls: Sync
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ width: 8, height: 8, borderRadius: 2, background: spaceColor(sp.spaceId), flexShrink: 0 }} />
-                    <span style={{ fontWeight: 600, color: 'var(--text)' }}>{spaceDisplayName(sp)}</span>
+                    <span style={{ fontWeight: 600, color: 'var(--text)' }}>{spaceDisplayName(configuredSpaces, sp)}</span>
                     {!sp.synced && !progress && (
                       <Pill tone="amber" size="xs" icon={<CircleDashed size={10} />}>Never synced</Pill>
+                    )}
+                    {sp.synced && !progress && sp.lastSyncedAt && (
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }} title={new Date(sp.lastSyncedAt).toLocaleString()}>
+                        synced {fmt.relative(sp.lastSyncedAt)}{sp.maxLookbackTried != null ? ` · up to ${sp.maxLookbackTried}d` : ''}
+                      </span>
                     )}
                   </div>
                   {progress && <div style={{ maxWidth: 260 }}><SyncProgress progress={progress} /></div>}
@@ -517,15 +543,29 @@ export function SpacesPage() {
   const [lookbackInput, setLookbackInput] = useState<Record<string, string>>({});
   const { hasRole } = useAuth();
   const canSync = hasRole('ADMIN');
+  const { active } = useActiveWorkspace();
+  const configuredSpaces = useMemo<WorkspaceSpace[]>(() => active?.spaces ?? [], [active]);
   const spacesQuery = useSpaces();
+  const syncHealthQuery = useSyncHealth();
   const backfill = useBackfill();
   const queryClient = useQueryClient();
   const activeBackfills = useActiveBackfills(canSync);
-  const settingsQuery = useSettings();
-  const maxLookback = settingsQuery.data?.preferences.sync.maxBackfillLookbackDays ?? MAX_LOOKBACK_FALLBACK;
+  const maxLookback = active?.maxBackfillLookbackDays ?? MAX_LOOKBACK_FALLBACK;
 
-  const apiRows: Omit<SpaceRow, 'synced'>[] = Array.isArray(spacesQuery.data) ? spacesQuery.data : [];
-  const mergedSpaces = useMemo(() => buildMergedSpaces(apiRows), [apiRows]);
+  const apiRows: Omit<SpaceRow, 'synced' | 'lastSyncedAt' | 'maxLookbackTried'>[] = Array.isArray(spacesQuery.data) ? spacesQuery.data : [];
+  // spaceId → sync metadata (from /reports/ops/sync-health): last successful sync
+  // time + longest backfill lookback run. A space with a checkpoint counts as
+  // synced even with 0 tasks, and each card can show "synced Xm ago · up to Nd".
+  const healthById = useMemo(() => {
+    type HealthRow = { scopeId?: string; lastSuccessfulSyncAt?: string | null; maxLookbackDays?: number | null };
+    const rows: HealthRow[] = Array.isArray(syncHealthQuery.data) ? syncHealthQuery.data : [];
+    const m = new Map<string, SpaceHealth>();
+    for (const h of rows) {
+      if (h.scopeId && h.lastSuccessfulSyncAt) m.set(h.scopeId, { lastSyncedAt: h.lastSuccessfulSyncAt, maxLookbackDays: h.maxLookbackDays ?? null });
+    }
+    return m;
+  }, [syncHealthQuery.data]);
+  const mergedSpaces = useMemo(() => buildMergedSpaces(configuredSpaces, apiRows, healthById), [configuredSpaces, apiRows, healthById]);
 
   const progressBySpace = useMemo(() => {
     const map = new Map<string, ActiveBackfill>();
@@ -555,15 +595,20 @@ export function SpacesPage() {
     });
   }, [progressBySpace, activeBackfills.data, optimisticQueued.size]);
 
-  // When a space drops out of the active set, invalidate `spaces` so the
-  // hours/task counts refresh with the freshly-synced data.
+  // When a space drops out of the active set (its backfill + time-entry drain
+  // finished), refresh the data that just changed — WITHOUT a manual reload:
+  //   • `spaces`      → hours/task counts
+  //   • `sync-health` → synced status, last-synced time, longest-lookback badge
   const prevActiveIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const currentActive = new Set(progressBySpace.keys());
     const prev = prevActiveIdsRef.current;
     let resolved = false;
     for (const id of prev) if (!currentActive.has(id)) { resolved = true; break; }
-    if (resolved) void queryClient.invalidateQueries({ queryKey: ['spaces'] });
+    if (resolved) {
+      void queryClient.invalidateQueries({ queryKey: ['spaces'] });
+      void queryClient.invalidateQueries({ queryKey: ['sync-health'] });
+    }
     prevActiveIdsRef.current = currentActive;
   }, [progressBySpace, queryClient]);
 
@@ -572,7 +617,7 @@ export function SpacesPage() {
   }
 
   function lookbackText(spaceId: string): string {
-    return lookbackInput[spaceId] ?? String(defaultLookbackFor(spaceId));
+    return lookbackInput[spaceId] ?? String(defaultLookbackFor(configuredSpaces, spaceId));
   }
 
   function onLookbackChange(spaceId: string, value: string) {
@@ -584,9 +629,9 @@ export function SpacesPage() {
 
   function effectiveLookback(spaceId: string): number {
     const raw = lookbackInput[spaceId];
-    if (raw === undefined || raw.trim() === '') return defaultLookbackFor(spaceId);
+    if (raw === undefined || raw.trim() === '') return defaultLookbackFor(configuredSpaces, spaceId);
     const n = Number(raw);
-    if (!Number.isFinite(n) || n <= 0) return defaultLookbackFor(spaceId);
+    if (!Number.isFinite(n) || n <= 0) return defaultLookbackFor(configuredSpaces, spaceId);
     return Math.max(MIN_LOOKBACK, Math.min(maxLookback, Math.round(n)));
   }
 
@@ -692,9 +737,9 @@ export function SpacesPage() {
           {[1, 2, 3].map((n) => <Skeleton key={n} height={260} />)}
         </div>
       ) : view === 'grid' ? (
-        <SpaceGrid spaces={mergedSpaces} controls={controls} />
+        <SpaceGrid spaces={mergedSpaces} controls={controls} configuredSpaces={configuredSpaces} />
       ) : (
-        <WorkloadView spaces={mergedSpaces} controls={controls} />
+        <WorkloadView spaces={mergedSpaces} controls={controls} configuredSpaces={configuredSpaces} />
       )}
     </div>
   );

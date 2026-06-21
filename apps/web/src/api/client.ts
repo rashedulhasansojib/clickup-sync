@@ -11,11 +11,23 @@ export const apiClient = axios.create({
   withCredentials: true,
 });
 
+// The active workspace id, set by WorkspaceProvider. Appended to every request
+// so the backend scopes admin/reports/clickup data to the chosen workspace.
+// Backend endpoints that aren't workspace-scoped simply ignore the param.
+let activeWorkspaceId: string | null = null;
+export function setActiveWorkspaceId(id: string | null) {
+  activeWorkspaceId = id;
+}
+
 apiClient.interceptors.request.use((config) => {
   const method = (config.method ?? 'get').toUpperCase();
   if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) {
     const csrf = readCookie('csrf');
     if (csrf) config.headers['x-csrf-token'] = csrf;
+  }
+  // Attach the active workspace unless the caller set one explicitly.
+  if (activeWorkspaceId) {
+    config.params = { workspaceId: activeWorkspaceId, ...(config.params ?? {}) };
   }
   return config;
 });

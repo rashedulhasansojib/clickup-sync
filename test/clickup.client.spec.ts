@@ -3,8 +3,8 @@ import { ClickupClient } from '../src/clickup/clickup.client';
 
 function build(httpRequest: jest.Mock) {
   const http = { request: httpRequest } as any;
-  const settings = { getApiToken: () => 'pk_test', getTeamId: () => '3450636' } as any;
-  return new ClickupClient(http, settings);
+  const workspaces = { getApiToken: () => 'pk_test', getTeamId: () => '3450636' } as any;
+  return new ClickupClient(http, workspaces);
 }
 
 function err429(retryAfter: string) {
@@ -19,7 +19,7 @@ describe('ClickupClient — 429 / Retry-After handling', () => {
       .mockReturnValueOnce(of({ data: { id: 'task-1' } }));
 
     const client = build(request);
-    const task = await client.getTask('task-1');
+    const task = await client.getTask('ws1', 'task-1');
 
     expect(task).toEqual({ id: 'task-1' });
     expect(request).toHaveBeenCalledTimes(2);
@@ -29,7 +29,7 @@ describe('ClickupClient — 429 / Retry-After handling', () => {
     const request = jest.fn().mockReturnValue(throwError(() => err429('0')));
     const client = build(request);
 
-    await expect(client.getTask('task-1')).rejects.toMatchObject({ response: { status: 429 } });
+    await expect(client.getTask('ws1', 'task-1')).rejects.toMatchObject({ response: { status: 429 } });
     // initial attempt + bounded retries (does not loop forever)
     expect(request.mock.calls.length).toBeGreaterThan(1);
     expect(request.mock.calls.length).toBeLessThanOrEqual(5);
@@ -41,7 +41,7 @@ describe('ClickupClient — 429 / Retry-After handling', () => {
       .mockReturnValue(throwError(() => ({ response: { status: 500 }, message: 'server error' })));
     const client = build(request);
 
-    await expect(client.getTask('task-1')).rejects.toMatchObject({ response: { status: 500 } });
+    await expect(client.getTask('ws1', 'task-1')).rejects.toMatchObject({ response: { status: 500 } });
     expect(request).toHaveBeenCalledTimes(1);
   });
 });
@@ -64,7 +64,7 @@ describe('ClickupClient.getTimeEntries — multi-year window chunking', () => {
 
     const end = Date.now();
     const start = end - 300 * DAY_MS; // < 365 days
-    const entries = await client.getTimeEntries('3450636', 'task-1', { startDate: start, endDate: end });
+    const entries = await client.getTimeEntries('ws1', 'task-1', { startDate: start, endDate: end });
 
     expect(request).toHaveBeenCalledTimes(1);
     expect(entries).toHaveLength(1);
@@ -79,7 +79,7 @@ describe('ClickupClient.getTimeEntries — multi-year window chunking', () => {
 
     const end = Date.now();
     const start = end - 1095 * DAY_MS; // exactly 3 years
-    await client.getTimeEntries('3450636', 'task-1', { startDate: start, endDate: end });
+    await client.getTimeEntries('ws1', 'task-1', { startDate: start, endDate: end });
 
     expect(request).toHaveBeenCalledTimes(3);
     const wins = request.mock.calls.map((c) => windowOf(urlOf(c))).sort((a, b) => a.start - b.start);
@@ -102,7 +102,7 @@ describe('ClickupClient.getTimeEntries — multi-year window chunking', () => {
 
     const end = Date.now();
     const start = end - 1095 * DAY_MS;
-    const entries = await client.getTimeEntries('3450636', 'task-1', { startDate: start, endDate: end });
+    const entries = await client.getTimeEntries('ws1', 'task-1', { startDate: start, endDate: end });
 
     const ids = entries.map((e: any) => e.id).sort();
     expect(ids).toEqual(['e1', 'e2', 'e3', 'shared']);
@@ -120,7 +120,7 @@ describe('ClickupClient.getAllTasksBySpace — truncation signal', () => {
       .mockReturnValueOnce(of({ data: shortPage }));
     const client = build(request);
 
-    const res = await client.getAllTasksBySpace('3577824', { teamId: '3450636' });
+    const res = await client.getAllTasksBySpace('ws1', '3577824', {});
 
     expect(res.truncated).toBe(false);
     expect(res.tasks).toHaveLength(101);

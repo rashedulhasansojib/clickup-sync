@@ -7,25 +7,25 @@ import { NormalizedTask } from '../clickup/clickup-normalizer';
 export class TasksRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  upsert(task: NormalizedTask) {
+  upsert(task: NormalizedTask, workspaceId: string) {
     return this.prisma.clickupTask.upsert({
       where: { taskId: task.taskId },
-      create: { ...task, raw: task.raw as Prisma.InputJsonValue, isDeleted: false, syncCount: 1 },
+      create: { ...task, workspaceId, raw: task.raw as Prisma.InputJsonValue, isDeleted: false, syncCount: 1 },
       update: { ...task, raw: task.raw as Prisma.InputJsonValue, isDeleted: false, deletedAt: null, syncCount: { increment: 1 } },
     });
   }
 
-  softDelete(taskId: string) {
+  softDelete(taskId: string, workspaceId: string) {
     return this.prisma.clickupTask.upsert({
       where: { taskId },
-      create: { taskId, taskName: 'Unknown Task', isDeleted: true, deletedAt: new Date() },
+      create: { taskId, workspaceId, taskName: 'Unknown Task', isDeleted: true, deletedAt: new Date() },
       update: { isDeleted: true, deletedAt: new Date(), syncedAt: new Date(), syncCount: { increment: 1 } },
     });
   }
 
-  patchSpaceNames(spaceId: string, spaceName: string) {
+  patchSpaceNames(workspaceId: string, spaceId: string, spaceName: string) {
     return this.prisma.clickupTask.updateMany({
-      where: { spaceId, spaceName: null },
+      where: { workspaceId, spaceId, spaceName: null },
       data: { spaceName },
     });
   }
@@ -35,16 +35,16 @@ export class TasksRepository {
     return row !== null;
   }
 
-  findAllIds(spaceId?: string): Promise<{ taskId: string; spaceId: string | null }[]> {
+  findAllIds(workspaceId: string, spaceId?: string): Promise<{ taskId: string; spaceId: string | null }[]> {
     return this.prisma.clickupTask.findMany({
-      where: { isDeleted: false, ...(spaceId ? { spaceId } : {}) },
+      where: { workspaceId, isDeleted: false, ...(spaceId ? { spaceId } : {}) },
       select: { taskId: true, spaceId: true },
     });
   }
 
   /** Count of non-deleted tasks — the reconciliation-progress denominator. */
-  countActive(): Promise<number> {
-    return this.prisma.clickupTask.count({ where: { isDeleted: false } });
+  countActive(workspaceId: string): Promise<number> {
+    return this.prisma.clickupTask.count({ where: { workspaceId, isDeleted: false } });
   }
 
   async findMissingParentIds(parentIds: string[]): Promise<string[]> {

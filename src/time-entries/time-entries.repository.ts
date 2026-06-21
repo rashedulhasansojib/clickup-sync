@@ -7,16 +7,18 @@ import { NormalizedTimeEntry } from '../clickup/clickup-normalizer';
 export class TimeEntriesRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  upsert(entry: NormalizedTimeEntry, cost: { rateId: bigint | null; currency: string; hourlyRateCents: bigint; costCents: bigint; status: string }) {
+  upsert(entry: NormalizedTimeEntry, cost: { rateId: bigint | null; currency: string; hourlyRateCents: bigint; costCents: bigint; status: string }, workspaceId: string) {
     // taskName exists on NormalizedTimeEntry for normalizer convenience but is not a column —
     // it comes from the task relation.  Exclude it so Prisma resolves to the Unchecked variant
     // which accepts taskId and rateId as plain scalars.
     const { taskName: _taskName, ...scalarFields } = entry;
-    const payload = { ...scalarFields, raw: entry.raw as Prisma.InputJsonValue, ...cost };
+    const createPayload = { ...scalarFields, workspaceId, raw: entry.raw as Prisma.InputJsonValue, ...cost };
+    // workspaceId is immutable for an entry — only set it on create.
+    const updatePayload = { ...scalarFields, raw: entry.raw as Prisma.InputJsonValue, ...cost };
     return this.prisma.clickupTimeEntry.upsert({
       where: { timeEntryId: entry.timeEntryId },
-      create: payload,
-      update: payload,
+      create: createPayload,
+      update: updatePayload,
     });
   }
 
@@ -49,6 +51,7 @@ export class TimeEntriesRepository {
    * different, mapped user than the webhook's logged user). Returns rows deleted.
    */
   async pruneTaskEntriesOutsideSet(args: {
+    workspaceId: string;
     taskId: string;
     userIds: string[];
     startMs: number;
@@ -57,6 +60,7 @@ export class TimeEntriesRepository {
   }): Promise<number> {
     const { count } = await this.prisma.clickupTimeEntry.deleteMany({
       where: {
+        workspaceId: args.workspaceId,
         taskId: args.taskId,
         userId: { in: args.userIds },
         startTime: { gte: new Date(args.startMs), lte: new Date(args.endMs) },
@@ -66,7 +70,7 @@ export class TimeEntriesRepository {
     return count;
   }
 
-  async findUnreplacedAgencyEntries(agencyUserId: string, limit = 500) {
+  async findUnreplacedAgencyEntries(workspaceId: string, agencyUserId: string, limit = 500) {
     // NOT EXISTS anti-join rather than loading every replaced id into a JS Set
     // and building an unbounded `NOT IN (...)` list (which grows without limit
     // as replacements accumulate). Mirrors findUnreplacedTaggedEntries below.
@@ -84,6 +88,7 @@ export class TimeEntriesRepository {
              te.duration_hours, te.billable, te.description
       FROM clickup_time_entries te
       WHERE te.user_id = ${agencyUserId}
+        AND te.workspace_id = ${workspaceId}
         AND NOT EXISTS (
           SELECT 1 FROM time_entry_replacements r WHERE r.original_entry_id = te.time_entry_id
         )
@@ -101,7 +106,7 @@ export class TimeEntriesRepository {
    * `tag_names` is materialised in SQL (`raw->'tags'[].name` lowercased) so the
    * caller receives a plain `string[]` per row.
    */
-  async findUnreplacedTaggedEntries(limit = 500) {
+  async findUnreplacedTaggedEntries(workspaceId: string, limit = 500) {
     type Row = {
       time_entry_id: string;
       task_id: string | null;
@@ -130,6 +135,7 @@ export class TimeEntriesRepository {
         ) AS tag_names
       FROM clickup_time_entries te
       WHERE jsonb_array_length(COALESCE(te.raw->'tags', '[]'::jsonb)) > 0
+        AND te.workspace_id = ${workspaceId}
         AND NOT EXISTS (
           SELECT 1 FROM time_entry_replacements r WHERE r.original_entry_id = te.time_entry_id
         )

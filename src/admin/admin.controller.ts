@@ -24,11 +24,12 @@ import { SpikeResolutionService } from './spike-resolution.service';
 import { SearchRepository } from './search.repository';
 import { TaskHistoryRepository } from './task-history.repository';
 import { SettingsService } from '../settings/settings.service';
+import { WorkspaceService } from '../workspaces/workspace.service';
+import { CreateWorkspaceDto, UpdateWorkspaceDto, UpsertWorkspaceSpaceDto } from './dto/workspace.dto';
 import { QueueService } from '../queues/queue.service';
 import { JOBS, QUEUES } from '../queues/queue.constants';
 import { replacementJobId } from '../time-entries/assignee-replacement.service';
 import { PrismaService } from '../database/prisma.service';
-import { CLICKUP_SPACES } from '../config/clickup-spaces.config';
 import { DeadLetterRepository } from '../jobs/dead-letter.repository';
 import { ClickupClient } from '../clickup/clickup.client';
 import { ClickupWebhooksService } from '../clickup/clickup-webhooks.service';
@@ -79,6 +80,7 @@ export class AdminController {
     private readonly prisma: PrismaService,
     private readonly auditLog: AuditLogRepository,
     private readonly settings: SettingsService,
+    private readonly workspaces: WorkspaceService,
     private readonly spikeNotifications: SpikeNotificationService,
     private readonly spikeResolutions: SpikeResolutionService,
     private readonly searchRepo: SearchRepository,
@@ -99,9 +101,9 @@ export class AdminController {
 
   @Get('workspace-members')
   @ApiOperation({ summary: 'List ClickUp workspace members' })
-  async listWorkspaceMembers() {
-    const teamId = this.settings.getTeamId();
-    const members = await this.clickup.getTeamMembers(teamId);
+  async listWorkspaceMembers(@Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    const members = await this.clickup.getTeamMembers(wsId);
     return members.map((m) => ({
       id: String(m.user.id),
       name: m.user.username ?? null,
@@ -109,10 +111,66 @@ export class AdminController {
     }));
   }
 
+  // ── Workspaces CRUD (multi-workspace connections) ───────────────────────────
+
+  @Get('workspaces')
+  @ApiOperation({ summary: 'List connected ClickUp workspaces (secrets masked)' })
+  listWorkspaces() {
+    return { workspaces: this.workspaces.listMasked(), encryptionEnabled: this.workspaces.encryptionEnabled() };
+  }
+
+  @Post('workspaces')
+  @Roles(Role.OWNER)
+  @HttpCode(201)
+  @ApiOperation({ summary: 'Connect a new ClickUp workspace' })
+  createWorkspace(@Body() dto: CreateWorkspaceDto, @CurrentUser() user: AuthPrincipal) {
+    return this.workspaces.createWorkspace(dto, actorLabel(user));
+  }
+
+  @Patch('workspaces/:id')
+  @Roles(Role.OWNER)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Update a workspace connection (token written only when supplied)' })
+  updateWorkspace(@Param('id') id: string, @Body() dto: UpdateWorkspaceDto, @CurrentUser() user: AuthPrincipal) {
+    return this.workspaces.updateWorkspace(id, dto, actorLabel(user));
+  }
+
+  @Delete('workspaces/:id')
+  @Roles(Role.OWNER)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Remove a workspace connection (refuses if it still owns synced data)' })
+  async deleteWorkspace(@Param('id') id: string) {
+    await this.workspaces.deleteWorkspace(id);
+    return { deleted: true, id };
+  }
+
+  @Get('workspaces/:id/clickup-spaces')
+  @ApiOperation({ summary: "Fetch the workspace's spaces from ClickUp (for the 'Discover spaces' picker). Flags which are already configured." })
+  async listClickupSpaces(@Param('id') id: string) {
+    if (!this.workspaces.hasWorkspace(id)) throw new BadRequestException(`Unknown workspace: ${id}`);
+    const spaces = await this.clickup.listSpaces(id);
+    const configured = new Set(this.workspaces.getSpaces(id).map((s) => s.spaceId));
+    return { spaces: spaces.map((s) => ({ ...s, configured: configured.has(s.id) })) };
+  }
+
+  @Post('workspaces/:id/spaces')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Add or update a ClickUp space scope on a workspace' })
+  upsertWorkspaceSpace(@Param('id') id: string, @Body() dto: UpsertWorkspaceSpaceDto) {
+    return this.workspaces.upsertSpace(id, dto.spaceId, { name: dto.name, backfillLookbackDays: dto.backfillLookbackDays, enabled: dto.enabled });
+  }
+
+  @Delete('workspaces/:id/spaces/:spaceId')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Remove a ClickUp space scope from a workspace' })
+  deleteWorkspaceSpace(@Param('id') id: string, @Param('spaceId') spaceId: string) {
+    return this.workspaces.deleteSpace(id, spaceId);
+  }
+
   @Get('hour-spikes/:userId/:date/preview')
   @ApiOperation({ summary: "Preview a spike notice: the member's per-task breakdown for that Dhaka-local day, recipient email, and whether they've already been notified." })
-  previewSpikeNotice(@Param('userId') userId: string, @Param('date') date: string) {
-    return this.spikeNotifications.preview(userId, date);
+  previewSpikeNotice(@Param('userId') userId: string, @Param('date') date: string, @Query('workspaceId') workspaceId?: string) {
+    return this.spikeNotifications.preview(this.workspaces.resolveWorkspaceId(workspaceId), userId, date);
   }
 
   // 200, not 201: this is an action endpoint (send the notice) like the other
@@ -121,8 +179,9 @@ export class AdminController {
   @Post('hour-spikes/notify')
   @HttpCode(200)
   @ApiOperation({ summary: 'Email a flagged member their spike-day task breakdown (+ optional note) and record the send. 409 if already notified for that day.' })
-  notifySpike(@Body() dto: NotifySpikeDto, @CurrentUser() user: AuthPrincipal) {
+  notifySpike(@Body() dto: NotifySpikeDto, @CurrentUser() user: AuthPrincipal, @Query('workspaceId') workspaceId?: string) {
     return this.spikeNotifications.notify({
+      workspaceId: this.workspaces.resolveWorkspaceId(workspaceId),
       userId: dto.userId,
       date: dto.date,
       rule: dto.rule,
@@ -135,8 +194,9 @@ export class AdminController {
   @Post('hour-spikes/resolve')
   @HttpCode(200)
   @ApiOperation({ summary: 'Mark a flagged spike day as resolved so it drops out of the watchlist. Idempotent.' })
-  resolveSpike(@Body() dto: ResolveSpikeDto, @CurrentUser() user: AuthPrincipal) {
+  resolveSpike(@Body() dto: ResolveSpikeDto, @CurrentUser() user: AuthPrincipal, @Query('workspaceId') workspaceId?: string) {
     return this.spikeResolutions.resolve({
+      workspaceId: this.workspaces.resolveWorkspaceId(workspaceId),
       userId: dto.userId,
       date: dto.date,
       userName: dto.userName,
@@ -148,25 +208,27 @@ export class AdminController {
   @Delete('hour-spikes/resolve')
   @HttpCode(200)
   @ApiOperation({ summary: 'Un-resolve a spike day so it reappears in the watchlist. No-op if not resolved.' })
-  unresolveSpike(@Body() dto: UnresolveSpikeDto) {
-    return this.spikeResolutions.unresolve({ userId: dto.userId, date: dto.date });
+  unresolveSpike(@Body() dto: UnresolveSpikeDto, @Query('workspaceId') workspaceId?: string) {
+    return this.spikeResolutions.unresolve({ workspaceId: this.workspaces.resolveWorkspaceId(workspaceId), userId: dto.userId, date: dto.date });
   }
 
   @Post('tasks/sync')
   @HttpCode(200)
   @ApiOperation({ summary: 'Manually trigger a single ClickUp task sync' })
-  syncTask(@Body() dto: SyncTaskDto) {
-    this.queues.get(QUEUES.CLICKUP_TASKS).add(JOBS.SYNC_CLICKUP_TASK, { taskId: dto.taskId }, this.queues.defaultJobOptions());
+  syncTask(@Body() dto: SyncTaskDto, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    this.queues.get(QUEUES.CLICKUP_TASKS).add(JOBS.SYNC_CLICKUP_TASK, { workspaceId: wsId, taskId: dto.taskId }, this.queues.defaultJobOptions());
     return { queued: true, taskId: dto.taskId };
   }
 
   @Post('time-entries/sync-task')
   @HttpCode(200)
   @ApiOperation({ summary: 'Enqueue a time-entry sync for a single task. Useful for clearing stuck FK-failed jobs after the task row is present.' })
-  syncTaskTimeEntries(@Body() dto: SyncTaskDto) {
+  syncTaskTimeEntries(@Body() dto: SyncTaskDto, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
     this.queues.get(QUEUES.CLICKUP_TIME_ENTRIES).add(
       JOBS.SYNC_TASK_TIME_ENTRIES,
-      { taskId: dto.taskId },
+      { workspaceId: wsId, taskId: dto.taskId },
       this.queues.defaultJobOptions(),
     );
     return { queued: true, taskId: dto.taskId, queue: QUEUES.CLICKUP_TIME_ENTRIES };
@@ -175,17 +237,21 @@ export class AdminController {
   @Post('backfill')
   @HttpCode(200)
   @ApiOperation({ summary: 'Trigger a space backfill' })
-  backfill(@Body() dto: BackfillDto) {
-    const space = CLICKUP_SPACES.find((s) => s.id === dto.spaceId);
-    if (!space && !dto.allowUnknownSpaces) throw new BadRequestException(`Unknown spaceId: ${dto.spaceId}. Valid: ${CLICKUP_SPACES.map((s) => s.id).join(', ')}. Pass allowUnknownSpaces: true to override.`);
+  backfill(@Body() dto: BackfillDto, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    const space = this.workspaces.getSpace(wsId, dto.spaceId);
+    if (!space && !dto.allowUnknownSpaces) {
+      const valid = this.workspaces.getSpaces(wsId).map((s) => s.spaceId).join(', ');
+      throw new BadRequestException(`Unknown spaceId: ${dto.spaceId} for this workspace. Valid: ${valid || '(none)'}. Pass allowUnknownSpaces: true to override.`);
+    }
     // The DTO only enforces the absolute 3650-day backstop; the effective cap is
-    // the configurable Settings → Sync value, enforced here at request time.
-    const cap = this.settings.getBackfillMaxLookbackDays();
+    // the configurable per-workspace Sync value, enforced here at request time.
+    const cap = this.workspaces.getBackfillMaxLookbackDays(wsId);
     if (dto.lookbackDays != null && dto.lookbackDays > cap) {
       throw new BadRequestException(`lookbackDays ${dto.lookbackDays} exceeds the configured maximum ${cap}. Raise it in Settings → Sync.`);
     }
     const lookbackDays = dto.lookbackDays ?? space?.backfillLookbackDays ?? 30;
-    this.queues.get(QUEUES.CLICKUP_BACKFILLS).add(JOBS.BACKFILL_CLICKUP_SPACE, { spaceId: dto.spaceId, lookbackDays }, this.queues.defaultJobOptions());
+    this.queues.get(QUEUES.CLICKUP_BACKFILLS).add(JOBS.BACKFILL_CLICKUP_SPACE, { workspaceId: wsId, spaceId: dto.spaceId, lookbackDays }, this.queues.defaultJobOptions());
     return { queued: true, spaceId: dto.spaceId, lookbackDays };
   }
 
@@ -210,11 +276,16 @@ export class AdminController {
    */
   @Get('backfill/active')
   @ApiOperation({ summary: 'Live per-space sync progress (queued + active jobs, with totals from the most recent backfill)' })
-  async backfillActive() {
-    const [backfillJobs, timeEntryJobs] = await Promise.all([
+  async backfillActive(@Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    const wsOf = (data: unknown) => (data as { workspaceId?: string } | undefined)?.workspaceId;
+    const [allBackfillJobs, allTimeEntryJobs] = await Promise.all([
       this.queues.get(QUEUES.CLICKUP_BACKFILLS).getJobs(['active', 'waiting', 'delayed', 'prioritized']),
       this.queues.get(QUEUES.CLICKUP_TIME_ENTRIES).getJobs(['active', 'waiting', 'delayed', 'prioritized']),
     ]);
+    // Scope progress to the active workspace.
+    const backfillJobs = allBackfillJobs.filter((j) => wsOf(j.data) === wsId);
+    const timeEntryJobs = allTimeEntryJobs.filter((j) => wsOf(j.data) === wsId);
 
     const fetchingSpaceIds = new Set<string>();
     for (const job of backfillJobs) {
@@ -229,7 +300,7 @@ export class AdminController {
     )];
     const taskSpaceRows = taskIds.length > 0
       ? await this.prisma.clickupTask.findMany({
-          where: { taskId: { in: taskIds } },
+          where: { workspaceId: wsId, taskId: { in: taskIds } },
           select: { taskId: true, spaceId: true },
         })
       : [];
@@ -250,6 +321,7 @@ export class AdminController {
     // `tasks_synced` total for the progress bar denominator.
     const recentBackfills = await this.prisma.syncJobLog.findMany({
       where: {
+        workspaceId: wsId,
         queueName: QUEUES.CLICKUP_BACKFILLS,
         entityType: 'space',
         entityId: { in: [...activeSpaceIds] },
@@ -285,17 +357,18 @@ export class AdminController {
   @Post('webhooks/register')
   @Roles(Role.OWNER)
   @HttpCode(200)
-  @ApiOperation({ summary: 'Register NestJS webhook with ClickUp — idempotent; stores the signing secret encrypted on first creation' })
-  async registerWebhook(@CurrentUser() user: AuthPrincipal) {
-    const result = await this.webhooks.register(actorLabel(user));
-    if (this.settings.getPreferences().sync.backfillOnConnect) {
+  @ApiOperation({ summary: 'Register the NestJS webhook with ClickUp for a workspace — idempotent; stores the signing secret encrypted on first creation' })
+  async registerWebhook(@CurrentUser() user: AuthPrincipal, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    const result = await this.webhooks.register(wsId, actorLabel(user));
+    if (this.workspaces.getSyncPreferences(wsId).backfillOnConnect) {
       try {
         const backfills = this.queues.get(QUEUES.CLICKUP_BACKFILLS);
-        for (const space of CLICKUP_SPACES) {
-          if (!this.settings.isSpaceEnabled(space.id)) continue;
+        for (const space of this.workspaces.getSpaces(wsId)) {
+          if (!space.enabled) continue;
           await backfills.add(
             JOBS.BACKFILL_CLICKUP_SPACE,
-            { spaceId: space.id, lookbackDays: space.backfillLookbackDays },
+            { workspaceId: wsId, spaceId: space.spaceId, lookbackDays: space.backfillLookbackDays },
             this.queues.defaultJobOptions(),
           );
         }
@@ -306,24 +379,23 @@ export class AdminController {
     return result;
   }
 
-  // ── ClickUp connection settings ─────────────────────────────────────────────
+  // ── App-global settings (notifications / cost / failure) ────────────────────
 
   @Get('settings')
-  @ApiOperation({ summary: 'Get ClickUp connection settings (secrets masked)' })
+  @ApiOperation({ summary: 'Get app-global preferences + connected workspaces (secrets masked)' })
   getSettings() {
-    return this.settings.getMasked();
+    return {
+      ...this.settings.getGlobal(),
+      encryptionEnabled: this.workspaces.encryptionEnabled(),
+      workspaces: this.workspaces.listMasked(),
+    };
   }
 
   @Patch('settings')
   @Roles(Role.OWNER)
   @HttpCode(200)
-  @ApiOperation({ summary: 'Update ClickUp connection settings. Secrets are written only when supplied.' })
+  @ApiOperation({ summary: 'Update app-global preferences (notifications / cost / failure).' })
   updateSettings(@Body() dto: UpdateSettingsDto, @CurrentUser() user: AuthPrincipal) {
-    if ((dto.apiToken || dto.webhookSecret) && !this.settings.getMasked().encryptionEnabled) {
-      throw new BadRequestException(
-        'Cannot store secrets: APP_ENCRYPTION_KEY is not configured on the server. Set it (64 hex chars) and restart.',
-      );
-    }
     return this.settings.update(dto, actorLabel(user));
   }
 
@@ -340,7 +412,7 @@ export class AdminController {
       // since the event was first received — and so we don't have to
       // shape-match what the worker expects in two places.
       const parsed = this.webhookParser.parse(row.rawPayload);
-      await queue.add(JOBS.PROCESS_CLICKUP_EVENT, parsed, this.queues.webhookJobOptions());
+      await queue.add(JOBS.PROCESS_CLICKUP_EVENT, { ...parsed, workspaceId: row.workspaceId }, this.queues.webhookJobOptions());
       // Clear the failed marker so this attempt can be observed.
       await this.webhookEvents.markRequeued(row.fingerprint).catch(() => undefined);
       requeued += 1;
@@ -403,9 +475,10 @@ export class AdminController {
   @Post('time-entries/backfill-replacement')
   @HttpCode(200)
   @ApiOperation({ summary: 'Queue replacement jobs for all historical time entries that carry a mapped tag and have not been replaced yet.' })
-  async backfillReplacement(@Body() dto: BackfillReplacementDto) {
+  async backfillReplacement(@Body() dto: BackfillReplacementDto, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
     const limit = Math.min(dto.limit ?? 500, 2000);
-    const entries = await this.timeEntriesRepo.findUnreplacedTaggedEntries(limit);
+    const entries = await this.timeEntriesRepo.findUnreplacedTaggedEntries(wsId, limit);
 
     let queued = 0;
     for (const entry of entries) {
@@ -415,6 +488,7 @@ export class AdminController {
       this.queues.get(QUEUES.CLICKUP_ASSIGNEE_REPLACEMENT).add(
         JOBS.REPLACE_TIME_ENTRY_ASSIGNEES,
         {
+          workspaceId: wsId,
           timeEntryId: entry.time_entry_id,
           taskId: entry.task_id ?? '',
           startMs: entry.start_time?.getTime() ?? 0,
@@ -438,17 +512,18 @@ export class AdminController {
   @Post('time-entries/sync-all')
   @HttpCode(200)
   @ApiOperation({ summary: 'Enqueue time-entry sync jobs for every task in the database' })
-  async syncAllTimeEntries(@Query('lookbackDays') lookbackDaysParam?: string) {
-    const tasks = await this.tasksRepo.findAllIds();
+  async syncAllTimeEntries(@Query('lookbackDays') lookbackDaysParam?: string, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    const tasks = await this.tasksRepo.findAllIds(wsId);
     const endDate = Date.now();
     const queue = this.queues.get(QUEUES.CLICKUP_TIME_ENTRIES);
     const jobOpts = this.queues.defaultJobOptions();
 
     for (const { taskId, spaceId } of tasks) {
-      const space = CLICKUP_SPACES.find((s) => s.id === spaceId);
+      const space = spaceId ? this.workspaces.getSpace(wsId, spaceId) : undefined;
       const days = lookbackDaysParam ? Number(lookbackDaysParam) : (space?.backfillLookbackDays ?? 90);
       const startDate = subtractDays(days).getTime();
-      await queue.add(JOBS.SYNC_TASK_TIME_ENTRIES, { taskId, startDate, endDate }, jobOpts);
+      await queue.add(JOBS.SYNC_TASK_TIME_ENTRIES, { workspaceId: wsId, taskId, startDate, endDate }, jobOpts);
     }
 
     return { queued: tasks.length };
@@ -457,15 +532,16 @@ export class AdminController {
   @Post('tasks/reconcile')
   @HttpCode(200)
   @ApiOperation({ summary: 'Reconcile every stored task against ClickUp: detect whole-task deletes (soft-delete ghosts) and re-sync each task’s time entries' })
-  async reconcileTasks(@Query('lookbackDays') lookbackDaysParam?: string) {
-    // Refuse to start a second sweep while one is still draining: re-triggering
-    // would enqueue another RECONCILE job per task (no dedup) and double the
-    // queue depth. The caller can poll /admin/tasks/reconcile/active for status.
+  async reconcileTasks(@Query('lookbackDays') lookbackDaysParam?: string, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    // Refuse to start a second sweep for this workspace while one is still
+    // draining: re-triggering would enqueue another RECONCILE job per task (no
+    // dedup) and double the queue depth. Poll /admin/tasks/reconcile/active.
     const inFlight = await this.queues.get(QUEUES.CLICKUP_TASKS).getJobs(['active', 'waiting', 'delayed', 'prioritized']);
-    if (inFlight.some((j) => j.name === JOBS.RECONCILE_CLICKUP_TASK)) {
+    if (inFlight.some((j) => j.name === JOBS.RECONCILE_CLICKUP_TASK && (j.data as { workspaceId?: string })?.workspaceId === wsId)) {
       return { queued: 0, alreadyRunning: true };
     }
-    const tasks = await this.tasksRepo.findAllIds();
+    const tasks = await this.tasksRepo.findAllIds(wsId);
     const endDate = Date.now();
     const days = lookbackDaysParam ? Number(lookbackDaysParam) : 365;
     const startDate = subtractDays(days).getTime();
@@ -473,7 +549,7 @@ export class AdminController {
     const jobOpts = this.queues.defaultJobOptions();
 
     for (const { taskId } of tasks) {
-      await queue.add(JOBS.RECONCILE_CLICKUP_TASK, { taskId, startDate, endDate }, jobOpts);
+      await queue.add(JOBS.RECONCILE_CLICKUP_TASK, { workspaceId: wsId, taskId, startDate, endDate }, jobOpts);
     }
 
     return { queued: tasks.length };
@@ -481,15 +557,16 @@ export class AdminController {
 
   @Get('tasks/reconcile/active')
   @ApiOperation({ summary: 'Live progress for a running full-reconciliation sweep' })
-  async reconcileActive() {
+  async reconcileActive(@Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
     const jobs = await this.queues.get(QUEUES.CLICKUP_TASKS).getJobs(['active', 'waiting', 'delayed', 'prioritized']);
-    // The clickup-tasks queue is shared with sync/delete jobs, so count only
-    // reconcile jobs by name.
-    const remaining = jobs.filter((j) => j.name === JOBS.RECONCILE_CLICKUP_TASK).length;
+    // The clickup-tasks queue is shared with sync/delete jobs and across
+    // workspaces, so count only reconcile jobs for this workspace.
+    const remaining = jobs.filter((j) => j.name === JOBS.RECONCILE_CLICKUP_TASK && (j.data as { workspaceId?: string })?.workspaceId === wsId).length;
     if (remaining === 0) return { active: false, total: 0, done: 0, remaining: 0 };
     // Denominator ≈ jobs enqueued (one per non-deleted task). It drifts down as
     // the sweep soft-deletes 404'd tasks, so clamp done at 0.
-    const total = await this.tasksRepo.countActive();
+    const total = await this.tasksRepo.countActive(wsId);
     const done = Math.max(0, total - remaining);
     return { active: true, total, done, remaining };
   }

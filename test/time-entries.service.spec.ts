@@ -58,7 +58,7 @@ describe('TimeEntriesService.syncTaskTimeEntries — task self-heal', () => {
       exists: jest.fn().mockResolvedValue(true),
     });
 
-    await service.syncTaskTimeEntries('86exjakgc');
+    await service.syncTaskTimeEntries('ws1', '86exjakgc');
 
     expect(exists).toHaveBeenCalledWith('86exjakgc');
     expect(syncTask).not.toHaveBeenCalled();
@@ -81,9 +81,9 @@ describe('TimeEntriesService.syncTaskTimeEntries — task self-heal', () => {
       .mockResolvedValueOnce(true);
     const { service } = makeService({ exists, syncTask, getTimeEntries });
 
-    await service.syncTaskTimeEntries('86exjakgc');
+    await service.syncTaskTimeEntries('ws1', '86exjakgc');
 
-    expect(syncTask).toHaveBeenCalledWith('86exjakgc');
+    expect(syncTask).toHaveBeenCalledWith('ws1', '86exjakgc');
     expect(getTimeEntries).toHaveBeenCalled();
     // Order matters: task row must be inserted before any time-entry upsert
     // could FK against it.
@@ -104,7 +104,7 @@ describe('TimeEntriesService.syncTaskTimeEntries — task self-heal', () => {
 
     // No throw — the job log row should land as completed, not failed,
     // because the failure here is "data not in our domain" not "we broke".
-    await expect(service.syncTaskTimeEntries('86exjakgc')).resolves.toBe(0);
+    await expect(service.syncTaskTimeEntries('ws1', '86exjakgc')).resolves.toBe(0);
     expect(syncTask).toHaveBeenCalled();
     expect(getTimeEntries).not.toHaveBeenCalled();
     expect(upsert).not.toHaveBeenCalled();
@@ -121,7 +121,7 @@ describe('TimeEntriesService.syncTaskTimeEntries — task self-heal', () => {
       syncTask: jest.fn().mockResolvedValue({}),
     });
 
-    await service.syncTaskTimeEntries('86exjakgc');
+    await service.syncTaskTimeEntries('ws1', '86exjakgc');
     expect(syncTask).toHaveBeenCalled();
     expect(getTimeEntries).toHaveBeenCalled();
   });
@@ -144,16 +144,16 @@ describe('TimeEntriesService.syncTaskTimeEntries — subtask roll-up FK self-hea
 
   it('self-heals a foreign task referenced by a rolled-up subtask entry, then upserts both', async () => {
     const { present, exists } = statefulDb(['PARENT']);
-    const syncTask = jest.fn(async (id: string) => { present.add(id); return {}; });
+    const syncTask = jest.fn(async (_ws: string, id: string) => { present.add(id); return {}; });
     const getTimeEntries = jest.fn().mockResolvedValue([
       { id: 'te-parent', user: { id: 'u1' }, task: { id: 'PARENT' } },
       { id: 'te-sub', user: { id: 'u1' }, task: { id: 'SUB' } }, // rolled-up subtask
     ]);
     const { service, upsert } = makeService({ exists, syncTask, getTimeEntries });
 
-    const count = await service.syncTaskTimeEntries('PARENT');
+    const count = await service.syncTaskTimeEntries('ws1', 'PARENT');
 
-    expect(syncTask).toHaveBeenCalledWith('SUB'); // healed the subtask, not the parent
+    expect(syncTask).toHaveBeenCalledWith('ws1', 'SUB'); // healed the subtask, not the parent
     expect(upsert).toHaveBeenCalledTimes(2);      // both entries written, no FK skip
     expect(count).toBe(2);
   });
@@ -167,26 +167,26 @@ describe('TimeEntriesService.syncTaskTimeEntries — subtask roll-up FK self-hea
     ]);
     const { service, upsert } = makeService({ exists, syncTask, getTimeEntries });
 
-    const count = await service.syncTaskTimeEntries('PARENT');
+    const count = await service.syncTaskTimeEntries('ws1', 'PARENT');
 
-    expect(syncTask).toHaveBeenCalledWith('SUB');
+    expect(syncTask).toHaveBeenCalledWith('ws1', 'SUB');
     expect(upsert).toHaveBeenCalledTimes(1); // only the resolvable PARENT entry
     expect(count).toBe(1);
   });
 
   it('self-heals each distinct foreign task only once even across multiple entries', async () => {
     const { present, exists } = statefulDb(['PARENT']);
-    const syncTask = jest.fn(async (id: string) => { present.add(id); return {}; });
+    const syncTask = jest.fn(async (_ws: string, id: string) => { present.add(id); return {}; });
     const getTimeEntries = jest.fn().mockResolvedValue([
       { id: 'te-1', user: { id: 'u1' }, task: { id: 'SUB' } },
       { id: 'te-2', user: { id: 'u1' }, task: { id: 'SUB' } }, // same subtask again
     ]);
     const { service } = makeService({ exists, syncTask, getTimeEntries });
 
-    await service.syncTaskTimeEntries('PARENT');
+    await service.syncTaskTimeEntries('ws1', 'PARENT');
 
     expect(syncTask).toHaveBeenCalledTimes(1);
-    expect(syncTask).toHaveBeenCalledWith('SUB');
+    expect(syncTask).toHaveBeenCalledWith('ws1', 'SUB');
   });
 });
 
@@ -197,10 +197,10 @@ describe('TimeEntriesService.syncTaskTimeEntries — delete reconciliation', () 
     ]);
     const { service, pruneTaskEntriesOutsideSet } = makeService({ getTimeEntries });
 
-    await service.syncTaskTimeEntries('t1', ['u9'], 1000, 2000);
+    await service.syncTaskTimeEntries('ws1', 't1', ['u9'], 1000, 2000);
 
     expect(pruneTaskEntriesOutsideSet).toHaveBeenCalledWith({
-      taskId: 't1', userIds: ['u9'], startMs: 1000, endMs: 2000, keepIds: ['te-A'],
+      workspaceId: 'ws1', taskId: 't1', userIds: ['u9'], startMs: 1000, endMs: 2000, keepIds: ['te-A'],
     });
   });
 
@@ -209,11 +209,11 @@ describe('TimeEntriesService.syncTaskTimeEntries — delete reconciliation', () 
       getTimeEntries: jest.fn().mockResolvedValue([]),
     });
 
-    await service.syncTaskTimeEntries('t1', ['u9'], 1000, 2000);
+    await service.syncTaskTimeEntries('ws1', 't1', ['u9'], 1000, 2000);
 
     expect(upsert).not.toHaveBeenCalled();
     expect(pruneTaskEntriesOutsideSet).toHaveBeenCalledWith({
-      taskId: 't1', userIds: ['u9'], startMs: 1000, endMs: 2000, keepIds: [],
+      workspaceId: 'ws1', taskId: 't1', userIds: ['u9'], startMs: 1000, endMs: 2000, keepIds: [],
     });
   });
 
@@ -222,10 +222,10 @@ describe('TimeEntriesService.syncTaskTimeEntries — delete reconciliation', () 
       getMemberIds: jest.fn().mockResolvedValue(['m1', 'm2', 'm3']),
     });
 
-    await service.syncTaskTimeEntries('t1');
+    await service.syncTaskTimeEntries('ws1', 't1');
 
     expect(pruneTaskEntriesOutsideSet).toHaveBeenCalledWith(
-      expect.objectContaining({ taskId: 't1', userIds: ['m1', 'm2', 'm3'] }),
+      expect.objectContaining({ workspaceId: 'ws1', taskId: 't1', userIds: ['m1', 'm2', 'm3'] }),
     );
   });
 
@@ -236,7 +236,7 @@ describe('TimeEntriesService.syncTaskTimeEntries — delete reconciliation', () 
       syncTask: jest.fn().mockRejectedValue(new Error('ClickUp 404')),
     });
 
-    await expect(service.syncTaskTimeEntries('ghost')).resolves.toBe(0);
+    await expect(service.syncTaskTimeEntries('ws1', 'ghost')).resolves.toBe(0);
     expect(pruneTaskEntriesOutsideSet).not.toHaveBeenCalled();
   });
 });
@@ -248,7 +248,7 @@ describe('TimeEntriesService.syncTaskTimeEntries — prune safety valve', () => 
       getTimeEntries: jest.fn().mockResolvedValue(entries),
     });
 
-    await service.syncTaskTimeEntries('PARENT');
+    await service.syncTaskTimeEntries('ws1', 'PARENT');
 
     expect(pruneTaskEntriesOutsideSet).not.toHaveBeenCalled();
   });
@@ -258,7 +258,7 @@ describe('TimeEntriesService.syncTaskTimeEntries — prune safety valve', () => 
       getTimeEntries: jest.fn().mockResolvedValue([{ id: 'te-1', user: { id: 'u1' }, task: { id: 'PARENT' } }]),
     });
 
-    await service.syncTaskTimeEntries('PARENT');
+    await service.syncTaskTimeEntries('ws1', 'PARENT');
 
     expect(pruneTaskEntriesOutsideSet).toHaveBeenCalled();
   });
