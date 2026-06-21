@@ -57,7 +57,7 @@ export const adminApi = {
   reconcileTasks: (lookbackDays?: number) =>
     apiClient.post('/admin/tasks/reconcile', undefined, {
       params: lookbackDays ? { lookbackDays } : undefined,
-    }).then(r => r.data as { queued: number }),
+    }).then(r => r.data as { queued: number; alreadyRunning?: boolean }),
   reconcileActive: (): Promise<ReconcileProgress> =>
     apiClient.get('/admin/tasks/reconcile/active').then(r => r.data as ReconcileProgress),
   registerWebhook: () => apiClient.post('/admin/webhooks/register').then(r => r.data),

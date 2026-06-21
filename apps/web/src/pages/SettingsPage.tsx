@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { useTagAssignee, useCreateTagAssignee, useUpdateTagAssignee, useDeleteTagAssignee } from '../hooks/useTagAssignee';
 import { useSettings, useUpdateSettings } from '../hooks/useSettings';
+import { useReconcileTasks, useReconcileActive } from '../hooks/useAdmin';
+import { useActiveWorkspace } from '../hooks/useActiveWorkspace';
 import { useAuth } from '../hooks/useAuth';
 import { RequireRole } from '../components/RequireRole';
 import type { SettingsPatch } from '../api/settings';
@@ -1111,6 +1113,12 @@ export function SettingsPage() {
   const settingsQuery = useSettings();
   const updateSettings = useUpdateSettings();
   const toast = useToast();
+  // Full reconciliation runs against the ACTIVE workspace (the axios interceptor
+  // attaches its id); progress is likewise per-workspace.
+  const reconcileTasks = useReconcileTasks();
+  const reconcileProgress = useReconcileActive(hasRole('ADMIN'));
+  const { active: activeWorkspace } = useActiveWorkspace();
+  const [reconcileDays, setReconcileDays] = useState('365');
 
   // Connection/save results surface as toasts (top-right, auto-dismiss).
   function showBanner(text: string, tone: 'blue' | 'red' = 'blue') {
@@ -1294,6 +1302,77 @@ export function SettingsPage() {
                 desc="Not implemented — failed jobs go to dead-letter but syncing isn't paused."
                 control={<Switch checked={false} disabled onChange={() => undefined} />}
               />
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Full reconciliation"
+              subtitle={<>Runs against the active workspace{activeWorkspace ? <> — <strong>{activeWorkspace.name}</strong></> : ''}. Switch workspaces in the top bar to reconcile a different one.</>}
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+              <SettingRow
+                label="Reconcile now"
+                desc="Sweeps every stored task in this workspace: soft-deletes ones removed in ClickUp (and their time entries) and re-syncs the rest's tracked time, so deletions made directly in ClickUp show up here."
+                control={
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={reconcileDays}
+                      onChange={(e) => setReconcileDays(e.target.value)}
+                      style={{ width: 88 }}
+                      aria-label="Reconciliation lookback in days"
+                    />
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>days back</span>
+                    <Button
+                      size="sm"
+                      variant="caution"
+                      loading={reconcileTasks.isPending}
+                      onClick={() => {
+                        const days = Number(reconcileDays);
+                        if (!Number.isFinite(days) || days < 1) {
+                          showBanner('Enter a lookback of at least 1 day.', 'red');
+                          return;
+                        }
+                        reconcileTasks.mutate(days, {
+                          onSuccess: (res) => {
+                            showBanner(
+                              res.alreadyRunning
+                                ? 'A reconciliation is already running for this workspace.'
+                                : `Reconciliation queued for ${res.queued.toLocaleString()} task${res.queued === 1 ? '' : 's'} (last ${days} days). Deletions will clear as the jobs run.`,
+                              'blue',
+                            );
+                            reconcileProgress.refetch();
+                          },
+                          onError: (err) => showBanner(`Reconciliation failed to start: ${(err as Error).message}`, 'red'),
+                        });
+                      }}
+                    >
+                      Run now
+                    </Button>
+                  </div>
+                }
+              />
+              {reconcileProgress.data?.active && (
+                <div style={{ padding: '4px 0 10px' }}>
+                  {(() => {
+                    const { done, total } = reconcileProgress.data;
+                    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)' }}>
+                          <span>Reconciling tasks · {done.toLocaleString()} / {total.toLocaleString()}</span>
+                          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{pct}%</span>
+                        </div>
+                        <div style={{ width: '100%', height: 6, background: 'var(--muted-bg)', borderRadius: 3, overflow: 'hidden' }}>
+                          <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent)', transition: 'width 200ms ease-out' }} />
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
           </Card>
 
