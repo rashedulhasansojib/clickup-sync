@@ -13,6 +13,13 @@ export interface CsvColumn<T> {
   header: string;
   /** Field name on the row, or a function deriving the cell value. */
   value: keyof T | ((row: T) => unknown);
+  /**
+   * Optional link to a DataTable column `key`. When the caller filters its
+   * column list against the table's hidden-column set, a CSV column carrying a
+   * hidden table key is dropped from the export. CSV-only columns (no table
+   * counterpart) leave this undefined and always export.
+   */
+  key?: string;
 }
 
 function csvEscape(value: unknown): string {

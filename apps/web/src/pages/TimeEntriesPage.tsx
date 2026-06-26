@@ -8,7 +8,7 @@ import {
 import { useTimeEntriesList, useTimeEntriesByUser, useTimeEntriesAggregates, useClients, useLists, useFolders } from '../hooks/useReports';
 import { useMutation } from '@tanstack/react-query';
 import { reportsApi } from '../api/reports';
-import { csvFilename, downloadCsv, toCsv, type CsvColumn } from '../lib/csv';
+import { exportXlsx, type XlsxColumn } from '../lib/xlsx';
 import { useToast } from '../components/ui/Toast';
 import { useGlobalFilters } from '../hooks/useGlobalFilters';
 import { fmt } from '../lib/formatters';
@@ -81,6 +81,9 @@ export function TimeEntriesPage() {
   const [listFilter, setListFilter] = useState('');
   const [folderFilter, setFolderFilter] = useState('');
   const [selectedEntry, setSelectedEntry] = useState<TimeEntryItem | null>(null);
+  // Mirror the DataTable's column show/hide state so CSV export drops the same
+  // hidden columns (keys match the `columns` defs below).
+  const [hiddenCols, setHiddenCols] = useState<string[]>([]);
   // True when the user arrived via a Missing-Rates "Entries" deep link
   // (userId + missingOnly together). In that mode we bypass the topbar
   // space/date globals so the page renders the full unfiltered set the user
@@ -268,30 +271,36 @@ export function TimeEntriesPage() {
   const timeEntriesQuery = useTimeEntriesList(params);
   const { data, isLoading } = timeEntriesQuery;
 
-  const exportCsv = useMutation({
+  const exportExcel = useMutation({
     mutationFn: async () => {
       const { items } = await reportsApi.timeEntriesList({ ...params, limit: 5000, offset: 0 });
-      const cols: CsvColumn<TimeEntryItem>[] = [
-        { header: 'Time entry ID', value: 'timeEntryId' },
+      // `key` ties a column to its DataTable column so columns hidden via the
+      // table's "Columns" menu are dropped here too. Columns with no `key` are
+      // export-only (not hideable in the table) and always export.
+      const cols: XlsxColumn<TimeEntryItem>[] = [
+        { header: 'Time entry ID', value: 'timeEntryId', key: 'timeEntryId' },
         { header: 'Task ID',       value: 'taskId' },
-        { header: 'Task name',     value: 'taskName' },
-        { header: 'User ID',       value: 'userId' },
-        { header: 'User name',     value: 'userName' },
-        { header: 'User email',    value: 'userEmail' },
-        { header: 'Client',        value: 'client' },
-        { header: 'List',          value: 'listName' },
-        { header: 'Start',         value: 'startTime' },
-        { header: 'End',           value: 'endTime' },
-        { header: 'Duration (h)', value: 'durationHours' },
-        { header: 'Billable',      value: 'billable' },
-        { header: 'Hourly rate (cents)', value: 'hourlyRateCents' },
-        { header: 'Cost',          value: 'costAud' },
+        { header: 'Task name',     value: 'taskName', key: 'taskName', width: 42 },
+        { header: 'User ID',       value: 'userId', key: 'userName' },
+        { header: 'User name',     value: 'userName', key: 'userName', width: 24 },
+        { header: 'User email',    value: 'userEmail', key: 'userName', width: 28 },
+        { header: 'Client',        value: 'client', key: 'client' },
+        { header: 'List',          value: 'listName', key: 'listName' },
+        { header: 'Start',         value: 'startTime', key: 'startTime', type: 'date' },
+        { header: 'End',           value: 'endTime', type: 'date' },
+        { header: 'Duration (h)', value: 'durationHours', key: 'durationHours', type: 'number' },
+        { header: 'Billable',      value: 'billable', key: 'billable' },
+        // Both money columns export in dollars (matching the UI). `hourlyRateCents`
+        // is stored in cents, so divide by 100; `costAud` is already dollars.
+        { header: 'Hourly rate',   value: (r) => (r.hourlyRateCents != null ? r.hourlyRateCents / 100 : null), key: 'hourlyRateCents', type: 'money' },
+        { header: 'Cost',          value: 'costAud', key: 'costAud', type: 'money' },
         { header: 'Currency',      value: 'currency' },
-        { header: 'Status',        value: 'status' },
-        { header: 'Description',   value: 'description' },
-        { header: 'Synced',        value: 'syncedAt' },
+        { header: 'Status',        value: 'status', key: 'status' },
+        { header: 'Description',   value: 'description', width: 42 },
+        { header: 'Synced',        value: 'syncedAt', key: 'syncedAt', type: 'date' },
       ];
-      downloadCsv(csvFilename('time-entries'), toCsv(items as TimeEntryItem[], cols));
+      const visibleCols = cols.filter((c) => !c.key || !hiddenCols.includes(c.key));
+      await exportXlsx({ filename: 'time-entries', sheetName: 'Time entries', rows: items as TimeEntryItem[], columns: visibleCols });
       return { rows: items.length };
     },
   });
@@ -501,11 +510,11 @@ export function TimeEntriesPage() {
               size="md"
               variant="subtle"
               icon={<Download size={13} strokeWidth={1.75} />}
-              loading={exportCsv.isPending}
-              disabled={exportCsv.isPending || isLoading}
-              onClick={() => exportCsv.mutate()}
+              loading={exportExcel.isPending}
+              disabled={exportExcel.isPending || isLoading}
+              onClick={() => exportExcel.mutate()}
             >
-              Export CSV
+              Export Excel
             </Button>
             {isAdmin && (
               <Button
@@ -685,6 +694,8 @@ export function TimeEntriesPage() {
         pageSizeOptions={[10, 25, 50, 100]}
         onRowClick={(row) => setSelectedEntry(row)}
         initialSort={{ key: 'startTime', dir: 'desc' }}
+        hiddenColumns={hiddenCols}
+        onHiddenColumnsChange={setHiddenCols}
       />
 
       <TimeEntryDrawer entry={selectedEntry} onClose={() => setSelectedEntry(null)} />

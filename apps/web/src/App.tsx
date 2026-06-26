@@ -165,7 +165,6 @@ export default function App() {
 										<Route path="/analytics" element={<SuspenseRoute><AnalyticsPage /></SuspenseRoute>} />
 										<Route path="/time-spikes" element={<SuspenseRoute><HourSpikesPage /></SuspenseRoute>} />
 										<Route path="/tasks" element={<SuspenseRoute><TasksPage /></SuspenseRoute>} />
-										<Route path="/tasks/:taskId" element={<SuspenseRoute><TasksPage /></SuspenseRoute>} />
 										<Route path="/time-entries" element={<SuspenseRoute><TimeEntriesPage /></SuspenseRoute>} />
 										<Route path="/missing-rates" element={<SuspenseRoute><MissingRatesPage /></SuspenseRoute>} />
 										<Route path="/assignee-rates" element={<SuspenseRoute><AssigneeRatesPage /></SuspenseRoute>} />

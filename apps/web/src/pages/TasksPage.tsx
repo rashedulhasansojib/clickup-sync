@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, type ReactNode } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import {
   Search, Download, RefreshCw, X, CheckSquare, Copy, ExternalLink,
@@ -25,7 +25,7 @@ import { TaskTimeline, type TaskTimelineEvent } from '../components/tasks/TaskTi
 import { fmt } from '../lib/formatters';
 import { adminApi } from '../api/admin';
 import { reportsApi } from '../api/reports';
-import { csvFilename, downloadCsv, toCsv, type CsvColumn } from '../lib/csv';
+import { exportXlsx, type XlsxColumn } from '../lib/xlsx';
 
 type Task = Record<string, unknown>;
 
@@ -269,8 +269,6 @@ function TaskDetailDrawer({ task, onClose }: { task: Task | null; onClose: () =>
 }
 
 export function TasksPage() {
-  const navigate = useNavigate();
-  const { taskId } = useParams();
   const { space, fromDate, toDate } = useGlobalFilters();
   const queryClient = useQueryClient();
   const { data: assigneesData } = useTasksAssignees();
@@ -294,6 +292,14 @@ export function TasksPage() {
   const [taskIdsFilter, setTaskIdsFilter] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  // Detail drawer selection is local state (like TimeEntriesPage), NOT a URL
+  // route. Driving it through `/tasks/:taskId` remounted the page on row click
+  // — wiping page/pageSize/filters and leaving the drawer unable to find the
+  // clicked row when it lived past page 1 / row 50.
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  // Mirror the DataTable's column show/hide state here so CSV export can drop
+  // the same hidden columns (keys match the `columns` defs below).
+  const [hiddenCols, setHiddenCols] = useState<string[]>([]);
 
   // Apply ?taskIds= from deep-links (e.g. Missing Rates "Show more" button).
   // Snapshot once on mount and strip the query so back-navigation doesn't
@@ -438,8 +444,6 @@ export function TasksPage() {
   const items: Task[] = (data?.items ?? []) as Task[];
   const total: number = data?.total ?? 0;
 
-  const openTask = taskId ? (items.find((t) => String(t.taskId ?? t.task_id) === taskId) ?? null) : null;
-
   const hasFilters = !!(
     searchRaw || search || statusFilter || priorityFilter || typeFilter || assigneeFilter || clientFilter || listFilter || folderFilter || archivedFilter !== 'exclude' || taskIdsFilter.length > 0
   );
@@ -473,34 +477,38 @@ export function TasksPage() {
   // page of 50). Backend `safeLimit` caps at 5000 — enough for the present
   // data volume; if any single space ever exceeds that, the export silently
   // truncates and we'd need to paginate here.
-  const exportCsv = useMutation({
+  const exportExcel = useMutation({
     mutationFn: async () => {
       const { items } = await reportsApi.tasks({ ...taskParams, limit: 5000, offset: 0 });
-      const cols: CsvColumn<Task>[] = [
+      // `key` ties a column to its DataTable column so columns hidden via the
+      // table's "Columns" menu are dropped here too. Columns with no `key` are
+      // export-only (not hideable in the table) and always export.
+      const cols: XlsxColumn<Task>[] = [
         { header: 'Task ID',       value: (r) => r.taskId ?? r.task_id },
-        { header: 'Task name',     value: (r) => r.taskName ?? r.task_name },
+        { header: 'Task name',     value: (r) => r.taskName ?? r.task_name, key: 'task_name', width: 42 },
         { header: 'Parent task',   value: (r) => r.parentTaskId ?? r.parent_task_id },
-        { header: 'Space',         value: (r) => r.spaceName ?? r.space_name },
-        { header: 'List',          value: (r) => r.listName ?? r.list_name },
-        { header: 'Status',        value: 'status' },
+        { header: 'Space',         value: (r) => r.spaceName ?? r.space_name, key: 'space_name' },
+        { header: 'List',          value: (r) => r.listName ?? r.list_name, key: 'list_name' },
+        { header: 'Status',        value: 'status', key: 'status' },
         { header: 'Status type',   value: (r) => r.statusType ?? r.status_type },
         { header: 'Priority',      value: 'priority' },
-        { header: 'Assignees',     value: 'assigneesNames' },
-        { header: 'Assignee emails', value: 'assigneesEmails' },
-        { header: 'Client',        value: 'client' },
-        { header: 'Department',    value: 'department' },
-        { header: 'Sprint',        value: (r) => r.sprintName ?? r.sprint_name },
-        { header: 'Sprint points', value: (r) => r.sprintPoints ?? r.sprint_points },
-        { header: 'Est. hours',    value: (r) => r.timeEstimateHours ?? r.time_estimate_hours },
-        { header: 'Spent hours',   value: (r) => r.timeSpentHours ?? r.time_spent_hours },
-        { header: 'Created',       value: (r) => r.createdDate ?? r.created_date },
-        { header: 'Updated',       value: (r) => r.updatedDate ?? r.updated_date },
-        { header: 'Due',           value: (r) => r.dueDate ?? r.due_date },
-        { header: 'Closed',        value: (r) => r.closedDate ?? r.closed_date },
+        { header: 'Assignees',     value: 'assigneesNames', key: 'assignees', width: 30 },
+        { header: 'Assignee emails', value: 'assigneesEmails', key: 'assignees', width: 30 },
+        { header: 'Client',        value: 'client', key: 'client' },
+        { header: 'Department',    value: 'department', key: 'department' },
+        { header: 'Sprint',        value: (r) => r.sprintName ?? r.sprint_name, key: 'sprint_name' },
+        { header: 'Sprint points', value: (r) => r.sprintPoints ?? r.sprint_points, key: 'sprint_points', type: 'number' },
+        { header: 'Est. hours',    value: (r) => r.timeEstimateHours ?? r.time_estimate_hours, key: 'time_estimate', type: 'number' },
+        { header: 'Spent hours',   value: (r) => r.timeSpentHours ?? r.time_spent_hours, key: 'time_spent', type: 'number' },
+        { header: 'Created',       value: (r) => r.createdDate ?? r.created_date, type: 'date' },
+        { header: 'Updated',       value: (r) => r.updatedDate ?? r.updated_date, key: 'updated_date', type: 'date' },
+        { header: 'Due',           value: (r) => r.dueDate ?? r.due_date, type: 'date' },
+        { header: 'Closed',        value: (r) => r.closedDate ?? r.closed_date, type: 'date' },
         { header: 'Archived',      value: 'archived' },
-        { header: 'Synced',        value: (r) => r.syncedAt ?? r.synced_at },
+        { header: 'Synced',        value: (r) => r.syncedAt ?? r.synced_at, key: 'synced_at', type: 'date' },
       ];
-      downloadCsv(csvFilename('tasks'), toCsv(items as Task[], cols));
+      const visibleCols = cols.filter((c) => !c.key || !hiddenCols.includes(c.key));
+      await exportXlsx({ filename: 'tasks', sheetName: 'Tasks', rows: items as Task[], columns: visibleCols });
       return { rows: items.length };
     },
   });
@@ -694,11 +702,11 @@ export function TasksPage() {
               variant="subtle"
               size="md"
               icon={<Download size={13} strokeWidth={1.75} />}
-              loading={exportCsv.isPending}
-              disabled={exportCsv.isPending || isLoading}
-              onClick={() => exportCsv.mutate()}
+              loading={exportExcel.isPending}
+              disabled={exportExcel.isPending || isLoading}
+              onClick={() => exportExcel.mutate()}
             >
-              Export CSV
+              Export Excel
             </Button>
             {isAdmin && (
               <Button
@@ -794,11 +802,13 @@ export function TasksPage() {
         onPageChange={p => setPage(p)}
         onPageSizeChange={n => { setPageSize(n); setPage(1); }}
         pageSizeOptions={[10, 25, 50, 100]}
-        onRowClick={(r) => navigate(`/tasks/${String(r.taskId ?? r.task_id)}`)}
+        onRowClick={(r) => setSelectedTask(r)}
         initialSort={{ key: 'updated_date', dir: 'desc' }}
+        hiddenColumns={hiddenCols}
+        onHiddenColumnsChange={setHiddenCols}
       />
 
-      <TaskDetailDrawer task={openTask} onClose={() => navigate('/tasks')} />
+      <TaskDetailDrawer task={selectedTask} onClose={() => setSelectedTask(null)} />
     </div>
   );
 }

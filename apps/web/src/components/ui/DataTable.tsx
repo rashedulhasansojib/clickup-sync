@@ -52,6 +52,14 @@ interface DataTableProps<T> {
    * slice of a larger set, client-side sort is disabled (see `isServerPaginated`).
    */
   initialSort?: { key: string; dir: 'asc' | 'desc' };
+  /**
+   * Optional controlled column visibility. When BOTH are supplied the table
+   * stops self-managing show/hide and instead reports the hidden-key set up to
+   * the parent — letting a page mirror the on-screen columns (e.g. so a CSV
+   * export matches what's visible). Omit both for the default internal behavior.
+   */
+  hiddenColumns?: string[];
+  onHiddenColumnsChange?: (hiddenKeys: string[]) => void;
 }
 
 export function DataTable<T extends { [key: string]: unknown }>({
@@ -74,12 +82,24 @@ export function DataTable<T extends { [key: string]: unknown }>({
   stickyColumns,
   rowKey = 'id' as keyof T,
   initialSort,
+  hiddenColumns,
+  onHiddenColumnsChange,
 }: DataTableProps<T>) {
   const [sortKey, setSortKey] = useState<string | null>(initialSort?.key ?? null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(initialSort?.dir ?? 'asc');
-  const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(
+  // Column visibility is internal by default, but becomes controlled when the
+  // parent passes both `hiddenColumns` and `onHiddenColumnsChange`. `hiddenKeys`
+  // / `setHiddenKeys` below abstract over both modes so the rest of the
+  // component (and the column menus) stay identical.
+  const [internalHidden, setInternalHidden] = useState<Set<string>>(
     new Set(initialColumns.filter(c => c.hidden).map(c => c.key)),
   );
+  const isControlledCols = hiddenColumns != null && onHiddenColumnsChange != null;
+  const hiddenKeys = isControlledCols ? new Set(hiddenColumns) : internalHidden;
+  const setHiddenKeys = (next: Set<string>) => {
+    if (isControlledCols) onHiddenColumnsChange(Array.from(next));
+    else setInternalHidden(next);
+  };
   const [showColMenu, setShowColMenu] = useState(false);
   const colMenuRef = useRef<HTMLDivElement>(null);
 
