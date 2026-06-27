@@ -53,8 +53,25 @@ export class KbQueue implements OnModuleInit, OnModuleDestroy {
   /**
    * Enqueue an onboarding run. `jobId: workspaceId` makes it idempotent — a
    * re-POST while a run is in flight does not spawn a duplicate.
+   *
+   * But that stable jobId also means a RETAINED completed/failed job (kept by
+   * removeOn*) blocks a later re-onboard: BullMQ dedupes jobId across ALL states,
+   * so add() would silently return the old finished job. So first remove any
+   * existing FINISHED job for this workspace, letting a fresh run proceed. An
+   * in-flight (active/waiting/delayed) job is left alone — that's the genuine
+   * idempotency case (and an active/locked job can't be removed anyway; a
+   * crashed one is reclaimed by BullMQ's stalled recovery, see KbProcessor).
    */
   async enqueue(data: KbJobData): Promise<void> {
+    const existing = await this.queue.getJob(data.workspaceId);
+    if (existing) {
+      const state = await existing.getState().catch(() => "unknown");
+      if (state === "completed" || state === "failed") {
+        await existing.remove().catch((err: unknown) => {
+          this.logger.warn(`Could not remove prior ${state} KB job ${data.workspaceId}: ${(err as Error).message}`);
+        });
+      }
+    }
     await this.queue.add("onboard", data, {
       jobId: data.workspaceId,
       removeOnComplete: 50,

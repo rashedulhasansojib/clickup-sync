@@ -144,7 +144,9 @@ export class KbOnboardingService {
       const c = await this.clicksy.triggerCommentBackfill(workspaceId, spaceId);
       triggered = triggered || t || c;
     }
-    if (triggered) await this.clicksy.pollUntilDrained(workspaceId);
+    // Wait only until tasks are mirrored; let time-entry sync continue async in
+    // Clicksy (the embed doesn't need it). See pollUntilTasksFetched.
+    if (triggered) await this.clicksy.pollUntilTasksFetched(workspaceId);
   }
 
   /**

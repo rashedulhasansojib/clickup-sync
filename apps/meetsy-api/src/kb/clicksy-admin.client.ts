@@ -55,8 +55,16 @@ export class ClicksyAdminClient {
     return this.post("/admin/comments/backfill", { spaceId }, workspaceId);
   }
 
-  /** GET /admin/backfill/active — returns the live per-space progress. */
-  private async getActiveSpaceCount(workspaceId: string): Promise<number | null> {
+  /**
+   * GET /admin/backfill/active — count spaces still in the `fetching` (task
+   * mirror) phase. Spaces in the `time-entries` phase are intentionally NOT
+   * counted: the KB embed only needs tasks, and per-task time-entry sync (≤100
+   * calls/min) can take many minutes more. Returns null when unreachable.
+   *
+   * Response shape (Clicksy admin.controller `backfillActive`):
+   *   { spaces: [{ spaceId, phase: 'fetching' | 'time-entries', ... }] }
+   */
+  private async getFetchingSpaceCount(workspaceId: string): Promise<number | null> {
     const base = this.config.get("CLICKSY_ADMIN_URL");
     const key = this.config.get("ADMIN_API_KEY");
     if (!base || !key) return null;
@@ -64,8 +72,9 @@ export class ClicksyAdminClient {
     try {
       const res = await fetch(url, { headers: { "x-admin-key": key } });
       if (!res.ok) return null;
-      const data = (await res.json()) as { spaces?: unknown[] };
-      return Array.isArray(data.spaces) ? data.spaces.length : 0;
+      const data = (await res.json()) as { spaces?: Array<{ phase?: string }> };
+      if (!Array.isArray(data.spaces)) return 0;
+      return data.spaces.filter((s) => s?.phase === "fetching").length;
     } catch (err) {
       this.logger.warn(`Clicksy admin /backfill/active unreachable: ${(err as Error).message}`);
       return null;
@@ -73,23 +82,25 @@ export class ClicksyAdminClient {
   }
 
   /**
-   * Poll /admin/backfill/active until no spaces are in flight, or the timeout
-   * elapses. Bounded so a stuck/unreachable Clicksy never hangs the embed job
-   * (which BullMQ could otherwise mark stalled). Returns true if it drained.
+   * Poll /admin/backfill/active until no space is still FETCHING tasks (the
+   * embed's only prerequisite), or the timeout elapses. Time-entry sync is left
+   * to continue asynchronously in Clicksy — the KB doesn't need it, so blocking
+   * on it would stall onboarding for minutes. Bounded so a stuck/unreachable
+   * Clicksy never hangs the embed job. Returns true once tasks are fetched.
    */
-  async pollUntilDrained(
+  async pollUntilTasksFetched(
     workspaceId: string,
     { timeoutMs = 5 * 60_000, intervalMs = 5_000 }: { timeoutMs?: number; intervalMs?: number } = {},
   ): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const active = await this.getActiveSpaceCount(workspaceId);
+      const fetching = await this.getFetchingSpaceCount(workspaceId);
       // null = unreachable; stop polling and let onboarding proceed (degrade).
-      if (active === null) return false;
-      if (active === 0) return true;
+      if (fetching === null) return false;
+      if (fetching === 0) return true;
       await new Promise((r) => setTimeout(r, intervalMs));
     }
-    this.logger.warn(`Clicksy backfill poll timed out for workspace ${workspaceId}`);
+    this.logger.warn(`Clicksy task-fetch poll timed out for workspace ${workspaceId}`);
     return false;
   }
 }

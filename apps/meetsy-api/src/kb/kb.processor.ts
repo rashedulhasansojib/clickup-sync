@@ -75,13 +75,31 @@ export class KbProcessor implements OnModuleInit, OnModuleDestroy {
       (job) => this.process(job),
       {
         connection: { host, port, maxRetriesPerRequest: null },
-        // Onboarding can poll a Clicksy backfill for minutes; raise the stall
-        // lock so BullMQ doesn't reclaim/retry a healthy long-running job.
-        lockDuration: 10 * 60_000,
+        // A healthy long run (embed + bounded Clicksy poll) keeps its lock via
+        // BullMQ's auto-renewal (every lockDuration/2), which runs on a timer
+        // independent of the awaited I/O. lockDuration only governs how long
+        // after a CRASH the job is reclaimed — keep it short so a killed worker
+        // recovers in ~2-3min, not 10. 120s is low enough for fast recovery yet
+        // high enough to avoid false-stalls when this box is under load.
+        lockDuration: 120_000,
+        stalledInterval: 30_000,
+        // One automatic re-run after a crash; a second stall = terminal failure
+        // (handled below), so a poison job can't loop forever.
+        maxStalledCount: 1,
       },
     );
+    // Authoritative terminal handler. A job that exceeds maxStalledCount is moved
+    // straight to `failed` by BullMQ WITHOUT re-entering process(), so the catch
+    // in process() never runs — without this, kbSyncState would stay stuck on
+    // "onboarding" forever and the status SSE would never complete. Idempotent
+    // with the catch block (both set "error"); the `stalled` event (first stall,
+    // re-queued) deliberately does NOT touch state.
     this.worker.on("failed", (job, err) => {
       this.logger.error(`KB job ${job?.id} failed: ${err.message}`);
+      void this.markFailed(job?.data?.workspaceId, err.message);
+    });
+    this.worker.on("stalled", (jobId) => {
+      this.logger.warn(`KB job ${jobId} stalled; BullMQ will re-queue it`);
     });
     this.logger.log(`KB worker listening on "${KB_QUEUE_NAME}"`);
   }
@@ -275,6 +293,20 @@ export class KbProcessor implements OnModuleInit, OnModuleDestroy {
     message: string,
   ): Promise<void> {
     await this.queue.publishProgress({ workspaceId, status, embedded, total, message, at: Date.now() });
+  }
+
+  /**
+   * Mark a workspace's onboarding as failed from the worker's `failed` event —
+   * the only path that catches a terminal stalled-out job (which never re-enters
+   * process()). Best-effort + idempotent: swallows errors so the handler can't
+   * crash, and re-running it after the catch block already set "error" is a no-op.
+   */
+  private async markFailed(workspaceId: string | undefined, message: string): Promise<void> {
+    if (!workspaceId) return;
+    await this.prisma.kbSyncState
+      .update({ where: { workspaceId }, data: { status: "error" } })
+      .catch(() => undefined);
+    await this.emit(workspaceId, "error", 0, 0, message).catch(() => undefined);
   }
 
   async onModuleDestroy(): Promise<void> {
