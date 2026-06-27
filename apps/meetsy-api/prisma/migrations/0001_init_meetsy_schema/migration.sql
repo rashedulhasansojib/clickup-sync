@@ -12,8 +12,12 @@
 -- hand-author migrations or use `migrate dev --create-only` and strip any
 -- public DDL before applying.
 
--- CreateSchema
-CREATE SCHEMA IF NOT EXISTS "meetsy";
+-- NOTE: schema creation is intentionally NOT in this migration. The `meetsy`
+-- schema is provisioned by the operator via prisma/grants.sql
+-- (CREATE SCHEMA ... AUTHORIZATION meetsy), because the least-privilege `meetsy`
+-- role has CREATE on the *schema* but not on the *database* — so a `CREATE SCHEMA`
+-- here fails with "permission denied for database". Migrations create only the
+-- tables/types within the (pre-existing) meetsy schema.
 
 -- CreateEnum
 CREATE TYPE "meetsy"."RunStatus" AS ENUM ('queued', 'running', 'completed', 'failed');

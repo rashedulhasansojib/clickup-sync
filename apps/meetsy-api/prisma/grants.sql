@@ -20,6 +20,26 @@ $$;
 CREATE SCHEMA IF NOT EXISTS meetsy AUTHORIZATION meetsy;
 GRANT USAGE, CREATE ON SCHEMA meetsy TO meetsy;
 
+-- 2b) Pre-provision Meetsy's Prisma migrations table, owned by the meetsy role.
+--     REQUIRED: under multiSchema, with Clicksy's `public._prisma_migrations`
+--     already present, `prisma migrate deploy` does NOT auto-create the meetsy
+--     migrations table (it errors "migration persistence is not initialized"),
+--     and the least-privilege meetsy role lacks database-level CREATE to make one.
+--     Creating it here (as the meetsy owner) lets `migrate deploy` run as the
+--     meetsy role at container start. (Verified live 2026-06-27.)
+SET ROLE meetsy;
+CREATE TABLE IF NOT EXISTS meetsy."_prisma_migrations" (
+  id                  varchar(36)  PRIMARY KEY NOT NULL,
+  checksum            varchar(64)  NOT NULL,
+  finished_at         timestamptz,
+  migration_name      varchar(255) NOT NULL,
+  logs                text,
+  rolled_back_at      timestamptz,
+  started_at          timestamptz  NOT NULL DEFAULT now(),
+  applied_steps_count integer      NOT NULL DEFAULT 0
+);
+RESET ROLE;
+
 -- 3) Read-only access to the public schema. USAGE lets it resolve objects;
 --    SELECT is granted ONLY on the three tables Meetsy reads. No CREATE on
 --    public, no INSERT/UPDATE/DELETE anywhere in public.
