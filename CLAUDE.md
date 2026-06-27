@@ -2,6 +2,21 @@
 
 This file gives Claude Code project-specific instructions for working on this repository.
 
+## Meetsy integration (READ FIRST if the task touches Meetsy)
+
+This repo is being extended into a **two-product ecosystem**: **Clicksy** (the existing
+ClickUp→Postgres sync, root `src/` + `apps/web`) and **Meetsy** (a folded-in meeting-intelligence
+service — `apps/meetsy-api`, `apps/meetsy-web`, shared code in `packages/*`). Before building or
+changing ANY Meetsy feature, read, in order:
+
+1. `docs/superpowers/plans/2026-06-27-meetsy-integration-plan.md` — the umbrella vision + phased build plan.
+2. The relevant phase spec under `docs/superpowers/specs/` (e.g. `2026-06-27-meetsy-phase0-plumbing-design.md`).
+3. `docs/meetsy/BUILD-JOURNAL.md` — what has actually been built so far + current state.
+
+Then **keep the build journal current** as part of your change. Meetsy shares Clicksy's auth/session,
+org/workspace model, Postgres (own `meetsy` schema, read-only on `public`), and ClickUp token — never
+duplicate or fork those. Clicksy's source stays untouched except the documented cookie-`Domain` change.
+
 ## Project purpose
 
 This repository is a NestJS backend starter that replaces the existing n8n ClickUp sync workflows with a code-based service.

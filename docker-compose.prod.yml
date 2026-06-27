@@ -12,6 +12,8 @@
 
 services:
   postgres:
+    # NOTE (Meetsy Phase 2): swap to `pgvector/pgvector:pg18` when RAG lands —
+    # it ships the `vector` extension. Phase 0 does NOT need it; keep stock here.
     image: postgres:18-alpine
     restart: unless-stopped
     environment:
@@ -66,6 +68,52 @@ services:
       retries: 5
       start_period: 40s
 
+  # ── Meetsy (sibling app: NestJS API + Next.js web) ──────────────────────────
+  # Shares the Postgres + Redis above; not published to the host (Caddy fronts
+  # them at meetsy.${DOMAIN}). Build context = monorepo ROOT.
+  meetsy-api:
+    build:
+      context: .
+      dockerfile: apps/meetsy-api/Dockerfile
+    restart: unless-stopped
+    # AZURE_*, AZURE_EMBED_*, ADMIN_API_KEY, SESSION_*, MEETSY_DATABASE_URL (set
+    # to the `postgres` service host in .env for prod) come from .env; the vars
+    # below pin connection/runtime values to the compose network.
+    env_file: .env
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      API_PORT: 3010
+      # Same-origin in prod (web + /api both served at meetsy.${DOMAIN} by Caddy),
+      # but set explicitly so a credentialed cross-origin call is allowed.
+      CORS_ORIGINS: https://meetsy.${DOMAIN:?set DOMAIN in .env}
+    expose:
+      - "3010"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # No `command:` override — the image ENTRYPOINT runs `prisma migrate deploy`
+    # against MEETSY_DATABASE_URL (the meetsy role) for meetsy's OWN schema ONLY;
+    # it never migrates `public` (Clicksy's read-models). The meetsy role must be
+    # created + granted first (apps/meetsy-api/prisma/grants.sql, applied
+    # out-of-band) or the migration's CREATE SCHEMA/TABLE will be denied.
+
+  meetsy-web:
+    build:
+      context: .
+      dockerfile: apps/meetsy-web/Dockerfile
+      args:
+        # Baked at build time → the web image is domain-specific (rebuild per
+        # domain). Caddy serves the API under meetsy.${DOMAIN}/api.
+        NEXT_PUBLIC_API_URL: https://meetsy.${DOMAIN:?set DOMAIN in .env}/api
+    restart: unless-stopped
+    expose:
+      - "3000"
+    depends_on:
+      - meetsy-api
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -80,6 +128,8 @@ services:
       - caddy_config:/config
     depends_on:
       - api
+      - meetsy-web
+      - meetsy-api
 
 volumes:
   postgres_data:

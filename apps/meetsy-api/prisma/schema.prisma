@@ -1,0 +1,208 @@
+// Prisma schema for the Meetsy API.
+//
+// Multi-schema, shared Postgres: Meetsy OWNS the `meetsy` schema (its meeting
+// pipeline tables) and READS Clicksy's `public` schema (users/sessions/workspaces)
+// through a least-privilege role (see prisma/grants.sql). The `public.*` models
+// below are UNMANAGED read-only mirrors — Meetsy migrations must NEVER create or
+// alter them. They exist only so the Prisma client can validate cookie sessions
+// and resolve the default workspace.
+//
+// Identity (Org/User) comes from `public` — Meetsy has no own identity tables.
+// Meeting/AnalysisRun/Feedback/ChatMessage carry `orgId`/`workspaceId` as plain
+// String columns (SOFT references to public — no cross-schema DB FK, per the
+// read-only boundary; existence is checked in application code).
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("MEETSY_DATABASE_URL")
+  schemas  = ["meetsy", "public"]
+}
+
+// ---------------------------------------------------------------------------
+// meetsy schema — managed by Meetsy migrations
+// ---------------------------------------------------------------------------
+
+enum RunStatus {
+  queued
+  running
+  completed
+  failed
+
+  @@schema("meetsy")
+}
+
+enum TaskVote {
+  up
+  down
+
+  @@schema("meetsy")
+}
+
+enum ChatRole {
+  user
+  assistant
+
+  @@schema("meetsy")
+}
+
+model Meeting {
+  id          String  @id @default(cuid())
+  // Soft references to public (no DB FK): org owns users, workspace owns meetings.
+  orgId       String
+  workspaceId String  @map("workspace_id")
+  title       String
+  // Raw uploaded transcript (plain text or Zoom VTT).
+  transcript  String  @db.Text
+  // Deterministically normalized transcript (VTT parsed to clean timestamped
+  // turns). The pipeline analyzes this; null for legacy rows.
+  normalizedTranscript String? @db.Text
+  // The date the meeting took place — anchor for resolving relative due dates.
+  meetingDate DateTime?
+  // Confirmed participant roster (Participant[] from @ma/shared). Null until the
+  // user confirms the Stage-0 extracted roster via POST /meetings/:id/roster.
+  roster      Json?
+  createdAt   DateTime @default(now())
+
+  runs AnalysisRun[]
+
+  @@index([orgId])
+  @@index([workspaceId])
+  @@schema("meetsy")
+}
+
+model AnalysisRun {
+  id          String    @id @default(cuid())
+  orgId       String
+  workspaceId String    @map("workspace_id")
+  meetingId   String
+  status      RunStatus @default(queued)
+  // Stores the AnalysisResult shape (@ma/shared) once the pipeline completes.
+  result      Json?
+  error       String?
+  // True once the user has accepted the result (or left it unreviewed = default
+  // accepted). Downvoted/commented tasks trigger a targeted re-run.
+  accepted    Boolean   @default(false)
+  // Observability: LLM usage accumulated across the pipeline for this run.
+  promptTokens     Int @default(0)
+  completionTokens Int @default(0)
+  llmCalls         Int @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  meeting      Meeting       @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  feedback     Feedback[]
+  chatMessages ChatMessage[]
+
+  @@index([orgId])
+  @@index([workspaceId])
+  @@index([meetingId])
+  @@schema("meetsy")
+}
+
+// Per-task user feedback on a run's result.
+model Feedback {
+  id        String   @id @default(cuid())
+  orgId     String
+  runId     String
+  taskId    String
+  vote      TaskVote
+  comment   String?  @db.Text
+  createdAt DateTime @default(now())
+
+  run AnalysisRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([orgId])
+  @@schema("meetsy")
+}
+
+// Chat-over-result conversation, scoped to a run.
+model ChatMessage {
+  id        String   @id @default(cuid())
+  orgId     String
+  runId     String
+  role      ChatRole
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+
+  run AnalysisRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@schema("meetsy")
+}
+
+// ---------------------------------------------------------------------------
+// public schema — UNMANAGED read-only mirrors of Clicksy's tables.
+// Column names/maps MUST match Clicksy's prisma/schema.prisma exactly.
+// Meetsy never writes these (enforced by DB grant). Mirror ONLY what Meetsy reads.
+// ---------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+
+  @@schema("public")
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+
+  @@schema("public")
+}
+
+enum WorkspaceStatus {
+  ACTIVE
+  DISABLED
+
+  @@schema("public")
+}
+
+model User {
+  id     String     @id @default(cuid())
+  orgId  String     @map("org_id")
+  email  String     @unique
+  name   String?
+  role   Role       @default(MEMBER)
+  status UserStatus @default(ACTIVE)
+
+  sessions Session[]
+
+  @@map("users")
+  @@schema("public")
+}
+
+model Session {
+  id         String    @id @default(cuid())
+  userId     String    @map("user_id")
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  lastSeenAt DateTime? @map("last_seen_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+  @@schema("public")
+}
+
+model Workspace {
+  id                 String          @id @default(cuid())
+  orgId              String          @map("org_id")
+  name               String
+  clickupTeamId      String          @map("clickup_team_id")
+  clickupApiTokenEnc String?         @map("clickup_api_token_enc")
+  isDefault          Boolean         @default(false) @map("is_default")
+  status             WorkspaceStatus @default(ACTIVE)
+
+  @@index([orgId])
+  @@map("workspaces")
+  @@schema("public")
+}

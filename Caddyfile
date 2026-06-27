@@ -17,3 +17,24 @@
 	# Everything (dashboard at "/" and API/webhooks under "/api") is one origin.
 	reverse_proxy api:3000
 }
+
+# ── Meetsy (sibling app) ──────────────────────────────────────────────────────
+# Same DNS parent as Clicksy: meetsy.<DOMAIN>. The shared `clickup_sync_sid`
+# cookie (Domain=.{$DOMAIN}) authenticates both apps.
+meetsy.{$DOMAIN} {
+	# API calls: strip the /api prefix and proxy to meetsy-api on 3010.
+	# `flush_interval -1` disables response buffering so SSE (run-progress
+	# streams) is delivered token-by-token. No gzip here — buffering would
+	# undermine the unbuffered SSE guarantee.
+	handle_path /api/* {
+		reverse_proxy meetsy-api:3010 {
+			flush_interval -1
+		}
+	}
+
+	# Everything else → the Next.js web app.
+	handle {
+		encode gzip
+		reverse_proxy meetsy-web:3000
+	}
+}

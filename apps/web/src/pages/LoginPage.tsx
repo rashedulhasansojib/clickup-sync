@@ -8,6 +8,7 @@ import {
 } from '../components/auth/AuthShell';
 import { Switch } from '../components/ui/Switch';
 import { isEmail } from '../lib/validation';
+import { safeMeetsyRedirect } from '../lib/redirect';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -19,7 +20,12 @@ export function LoginPage() {
   const { refresh, user } = useAuth();
 
   useEffect(() => {
-    if (user) navigate('/overview', { replace: true });
+    if (user) {
+      // Already authenticated: honor a safe Meetsy round-trip, else go to Overview.
+      const redirect = safeMeetsyRedirect();
+      if (redirect) window.location.href = redirect;
+      else navigate('/overview', { replace: true });
+    }
   }, [user, navigate]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -37,7 +43,10 @@ export function LoginPage() {
     try {
       await authApi.login(email.trim(), password);
       await refresh();
-      navigate('/overview', { replace: true });
+      // Cross-subdomain Meetsy return needs a full-page nav (not react-router).
+      const redirect = safeMeetsyRedirect();
+      if (redirect) window.location.href = redirect;
+      else navigate('/overview', { replace: true });
     } catch {
       setError('Invalid email or password');
       setLoading(false);

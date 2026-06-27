@@ -1,5 +1,8 @@
 services:
   postgres:
+    # NOTE (Meetsy Phase 2): swap this image to `pgvector/pgvector:pg18` when RAG
+    # lands — pgvector ships the `vector` extension. Phase 0 does NOT need it, so
+    # keep the stock image for now.
     image: postgres:18-alpine
     environment:
       POSTGRES_DB: clickup_sync
@@ -40,6 +43,54 @@ services:
       redis:
         condition: service_healthy
     command: sh -c "npm run prisma:deploy && npm run start:prod"
+
+  # ── Meetsy (sibling app: NestJS API + Next.js web) ──────────────────────────
+  # Shares the Postgres + Redis above. meetsy-api connects as the least-privilege
+  # `meetsy` role and OWNS the `meetsy` schema (reads Clicksy's public.* read-only).
+  # Build context is the monorepo ROOT (pnpm workspace + lockfile must be visible);
+  # the Dockerfile lives under apps/.
+  meetsy-api:
+    build:
+      context: .
+      dockerfile: apps/meetsy-api/Dockerfile
+    # Pull AZURE_*, AZURE_EMBED_*, ADMIN_API_KEY, SESSION_* from .env, then
+    # override the connection vars so they target the compose service names
+    # (the .env values point at localhost for host-run dev).
+    env_file: .env
+    environment:
+      # meetsy role on the shared DB, reached by service name on the compose net.
+      MEETSY_DATABASE_URL: postgresql://meetsy:meetsy@postgres:5432/clickup_sync
+      # meetsy-api reads REDIS_HOST/REDIS_PORT (NOT REDIS_URL) — must be set here.
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # App listens on 3010 (matches Caddy's `reverse_proxy meetsy-api:3010`).
+      API_PORT: 3010
+      # Allow the meetsy-web dev origin (host port 3001) + Clicksy dashboard.
+      CORS_ORIGINS: http://localhost:3001,http://localhost:5173
+    ports:
+      - "3010:3010"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # No `command:` override — the image ENTRYPOINT runs `prisma migrate deploy`
+    # for meetsy's OWN schema only (never public) before booting the server.
+
+  meetsy-web:
+    build:
+      context: .
+      dockerfile: apps/meetsy-web/Dockerfile
+      args:
+        # NEXT_PUBLIC_API_URL is BAKED at build time (browser reads it). In dev
+        # the browser reaches meetsy-api on the host-published port 3010.
+        NEXT_PUBLIC_API_URL: http://localhost:3010
+    # Internal port 3000 (Next standalone); host 3001 to avoid the Clicksy `api`
+    # service which publishes 3000.
+    ports:
+      - "3001:3000"
+    depends_on:
+      - meetsy-api
 
 volumes:
   postgres_data:

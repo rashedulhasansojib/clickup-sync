@@ -26,8 +26,13 @@ export class AuthController {
     const csrf = randomBytes(16).toString('hex');
     const secure = process.env.NODE_ENV === 'production';
     const maxAge = this.sessions.cookieMaxAgeMs();
-    res.cookie(SESSION_COOKIE, token, { httpOnly: true, secure, sameSite: 'lax', path: '/', maxAge });
-    res.cookie('csrf', csrf, { httpOnly: false, secure, sameSite: 'lax', path: '/', maxAge });
+    // COOKIE_DOMAIN (e.g. ".example.com") scopes the session + csrf cookies to the
+    // parent domain so they're also sent to sibling apps (Meetsy at
+    // meetsy.<domain>). Unset locally (localhost is subdomain-less) → undefined,
+    // which leaves the cookie host-only exactly as before.
+    const domain = process.env.COOKIE_DOMAIN || undefined;
+    res.cookie(SESSION_COOKIE, token, { httpOnly: true, secure, sameSite: 'lax', path: '/', maxAge, domain });
+    res.cookie('csrf', csrf, { httpOnly: false, secure, sameSite: 'lax', path: '/', maxAge, domain });
   }
 
   @Public()

@@ -7,6 +7,10 @@ coverage
 .prisma
 /logs
 .DS_Store
+# monorepo build caches / framework output (Meetsy fold)
+.turbo
+.next
+*.tsbuildinfo
 # /design
 
 # Local DB backup dumps (e.g. pre-migration pg_dump snapshots) — never commit

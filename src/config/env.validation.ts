@@ -31,6 +31,10 @@ const schema = z.object({
   SESSION_IDLE_TIMEOUT_DAYS: z.coerce.number().default(7),
   APP_BASE_URL: z.string().default('http://localhost:5173'),
   ALLOWED_ORIGINS: z.string().default('http://localhost:5173'),
+  // Optional parent-domain scope for the session + csrf cookies (e.g.
+  // ".example.com") so a Clicksy login also authenticates the Meetsy sibling app
+  // at meetsy.<domain>. Leave unset for localhost (host-only cookie, prior behavior).
+  COOKIE_DOMAIN: z.string().optional().default(''),
   SMTP_HOST: z.string().optional().default(''),
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional().default(''),

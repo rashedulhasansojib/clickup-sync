@@ -4,9 +4,7 @@
   "description": "NestJS backend replacement for n8n ClickUp to PostgreSQL sync workflows.",
   "private": true,
   "license": "UNLICENSED",
-  "workspaces": [
-    "apps/*"
-  ],
+  "packageManager": "pnpm@9.12.0",
   "engines": {
     "node": ">=22.0.0"
   },
@@ -26,9 +24,13 @@
     "prisma:studio": "prisma studio --config ./prisma.config.ts",
     "dev:deps": "docker compose up -d postgres redis",
     "dev:reset": "docker compose down -v && docker compose up -d postgres redis && npm run prisma:deploy",
-    "dev:web": "npm run dev --workspace=apps/web",
-    "build:web": "npm run build --workspace=apps/web",
-    "dev:all": "concurrently \"npm run start:dev\" \"npm run dev:web\""
+    "dev:web": "pnpm --filter web dev",
+    "build:web": "pnpm --filter web build",
+    "dev:all": "concurrently \"npm run start:dev\" \"npm run dev:web\"",
+    "dev:meetsy": "concurrently \"pnpm --filter @ma/api dev\" \"pnpm --filter @ma/web dev\"",
+    "turbo:build": "turbo run build",
+    "turbo:typecheck": "turbo run typecheck",
+    "turbo:lint": "turbo run lint"
   },
   "dependencies": {
     "@nestjs/axios": "4.0.1",
@@ -78,6 +80,7 @@
     "supertest": "7.2.2",
     "ts-jest": "29.4.9",
     "tsx": "4.21.0",
+    "turbo": "^2.3.0",
     "typescript": "6.0.3"
   },
   "jest": {
