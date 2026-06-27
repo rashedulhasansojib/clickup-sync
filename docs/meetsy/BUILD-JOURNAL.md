@@ -263,3 +263,26 @@ Spec: `docs/superpowers/specs/2026-06-27-clicksy-comment-sync-design.md`. Enable
 - **Test artifacts:** 2 comments on task `86ey2yc7a` in the throwaway "Meetsy Live Test" list (team `90181854711`) — deletable with the list.
 
 **Next:** Phase 2a — minimal KB slice (pgvector image swap + `meetsy` kb_chunk + onboarding embed). VALUE verification still gated on a ClickUp token with access to the real "Nifty" history.
+
+---
+
+## Phase 2a — minimal KB slice
+
+Spec: `docs/superpowers/specs/2026-06-28-meetsy-phase2a-kb-slice-design.md`. Per-workspace RAG KB: embed ClickUp tasks → hybrid-searchable index.
+
+### 2026-06-28 — Phase 2a — DONE / GREEN + LIVE-VERIFIED (incl. real semantic retrieval)
+Built (meetsy-api): `pgvector` enablement; `meetsy.KbChunk` (`vector(1024)` HNSW + generated `tsv` GIN + filter metadata) + `KbSyncState`; public read-models (clickup_tasks/comments/events/time_entries/sync_job_logs/workspace_spaces); deterministic **card builder** (comments folded only on `commentsSyncedAt` → one re-embed); embed via `AzureEmbeddingService` (`dimensions:1024`, batched); **`meetsy-kb` queue/worker** (coverage-check → trigger Clicksy `/admin/backfill` + `/admin/comments/backfill` via `x-admin-key`, poll, then embed; **graceful degrade** to "embed what's mirrored" on admin error/unreachable; transactional cursor advance); **hybrid search** (`$queryRaw` pgvector cosine `OPERATOR(public.<=>)` + `tsv websearch_to_tsquery` → **RRF k=60**; `hnsw.iterative_scan=relaxed_order`); endpoints `POST kb/onboard`, `GET kb/status`, `GET kb/search`. Env: `CLICKSY_ADMIN_URL` (+ reused `ADMIN_API_KEY`/`AZURE_EMBED_*`). grants.sql: `CREATE EXTENSION vector`, `ALTER ROLE meetsy SET search_path`, SELECT on the clickup_* mirror tables. **73 meetsy-api tests** (21 new) + build green; Clicksy untouched.
+
+**LIVE-VERIFIED** on team "Chishty" (real ClickUp data; Nifty `3450636` still inaccessible — 0 spaces — so seeded 10 varied tasks + the prior 1 into Chishty):
+- pgvector **0.8.3** enabled via image swap `postgres:18-alpine`→`pgvector/pgvector:pg18` (data survived); migration applied as the `meetsy` role (KbChunk `vector(1024)` + HNSW + GIN indexes present).
+- Onboarded `ws_seed` → **embedded 11/11** (1024-dim), `status=ready`.
+- **🎯 Semantic retrieval proven** — paraphrased queries with ZERO keyword overlap returned the correct task #1 every time: "users get logged out"→SSO session-expiry; "customers charged twice"→Stripe double-charge; "charts not showing on apple browser"→Safari chart; "database runs out of connections"→PG pool; "phone alerts not arriving"→iOS push. This is the actual point of the KB (meaning-match beyond keywords), proven live.
+- **Incremental** re-onboard → 0 re-embeds (content-hash + cursor gating holds).
+
+**Bug found by live-verify + FIXED (committed):** `lookbackDaysForRange("all")=36_500` exceeded Clicksy's 3650 cap → backfill 400. `ensureCoverage` now clamps the value sent to Clicksy to 3650 (the KB's own embed window is unaffected). The cross-service trigger itself works (meetsy worker reached Clicksy admin).
+
+**Test-environment notes (NOT code bugs):** Clicksy caches `workspace_spaces` at boot, so a space inserted via raw SQL reads as "Valid: (none)" to the admin backfill until Clicksy restarts / the space is added via its API (in real use it is) — so for the value test the 11 tasks were mirrored into `clickup_tasks` directly. There were two `is_default` workspaces (`ws_seed`=team 3450636, `ws_livetest`=team 90181854711) — consolidated onto `ws_seed` (repointed to the Chishty team) for a consistent test. The comment-debounce embed path wasn't exercised (mirrored tasks had no comments) — covered by unit tests; verify with comments on real data later.
+
+**Test artifacts:** 11 tasks in the throwaway "Meetsy Live Test" list (Chishty team `90181854711`), deletable. Local pgvector Postgres on 55432.
+
+## ✅ PHASE 2a COMPLETE & LIVE-VERIFIED (incl. real semantic retrieval). Next: 2a.1 "what we learned" card → 2b docs+improvement metric → 2c pipeline integration. Real-history VALUE at scale still awaits a token with Nifty access.

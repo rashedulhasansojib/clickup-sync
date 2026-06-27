@@ -6,6 +6,7 @@ import { PrismaModule } from "./prisma/prisma.module";
 import { AzureModule } from "./azure/azure.module";
 import { AnalysisModule } from "./analysis/analysis.module";
 import { ClickUpModule } from "./clickup/clickup.module";
+import { KbModule } from "./kb/kb.module";
 import { AuthModule } from "./auth/auth.module";
 import { AuthGuard } from "./auth/auth.guard";
 import { RolesGuard } from "./auth/roles.guard";
@@ -26,6 +27,7 @@ import { HealthController } from "./health/health.controller";
     AuthModule,
     AnalysisModule,
     ClickUpModule,
+    KbModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -59,6 +59,16 @@ enum PushStatus {
   @@schema("meetsy")
 }
 
+// Source of a KB chunk. Phase 2a only embeds `clickup_task`; `transcript` and
+// `document` are reserved for 2a.1 / 2b and unused now.
+enum KbSourceType {
+  clickup_task
+  transcript
+  document
+
+  @@schema("meetsy")
+}
+
 model Meeting {
   id          String  @id @default(cuid())
   // Soft references to public (no DB FK): org owns users, workspace owns meetings.
@@ -187,6 +197,65 @@ model TaskPush {
   @@schema("meetsy")
 }
 
+// One embedded chunk of the per-workspace RAG knowledge base. Phase 2a embeds
+// one "card" per ClickUp task (chunkIndex 0); the schema reserves multi-chunk
+// (long tasks) + transcript/document sources for later.
+//
+// NOTE: two DB-level columns are NOT modeled here because Prisma can't express
+// them — the migration HAND-ADDS them:
+//   - `embedding` is `Unsupported("vector(1024)")?` (pgvector); writes go through
+//     a raw `$executeRaw` upsert that casts a '[...]' literal to ::vector.
+//   - `tsv` (a generated `tsvector` column from `content`, for the keyword half
+//     of hybrid search) has no Prisma field at all; it exists only in the DB.
+model KbChunk {
+  id          String       @id @default(cuid())
+  workspaceId String
+  sourceType  KbSourceType
+  // For clickup_task this is the ClickUp `task_id`.
+  sourceId    String
+  chunkIndex  Int          @default(0)
+
+  // The embedded card text + its sha256 — the incremental-refresh gate.
+  content     String  @db.Text
+  contentHash String
+
+  // pgvector column; the migration adds the real `vector(1024)` + the HNSW index.
+  embedding   Unsupported("vector(1024)")?
+
+  // Filter metadata (workspace scope today; facet filters in 2c).
+  status        String?
+  assignee      String?
+  component     String?
+  client        String?
+  department    String?
+  taskUpdatedAt DateTime?
+
+  // Model provenance — a future model/dim bump becomes a controlled re-embed.
+  embeddingModel   String?
+  embeddingDims    Int
+  embeddingVersion Int      @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, sourceType, sourceId, chunkIndex])
+  @@index([workspaceId, sourceType])
+  @@schema("meetsy")
+}
+
+// Per-workspace onboarding cursor + status for the KB embed worker.
+model KbSyncState {
+  workspaceId    String    @id
+  // High-water mark on ClickUp `updated_date`; only rows past it are re-scanned.
+  lastTaskCursor DateTime?
+  embeddedCount  Int       @default(0)
+  // idle | onboarding | ready | error
+  status         String    @default("idle")
+  lastRunAt      DateTime?
+
+  @@schema("meetsy")
+}
+
 // ---------------------------------------------------------------------------
 // public schema — UNMANAGED read-only mirrors of Clicksy's tables.
 // Column names/maps MUST match Clicksy's prisma/schema.prisma exactly.
@@ -255,5 +324,127 @@ model Workspace {
 
   @@index([orgId])
   @@map("workspaces")
+  @@schema("public")
+}
+
+// Per-workspace ClickUp space scope. Phase 2a reads this to know which spaces a
+// workspace covers (coverage check + Clicksy backfill trigger). Maps match
+// Clicksy's `workspace_spaces` exactly. Read-only.
+model WorkspaceSpace {
+  id                   String   @id @default(cuid())
+  workspaceId          String   @map("workspace_id")
+  spaceId              String   @map("space_id")
+  name                 String
+  backfillLookbackDays Int      @default(30) @map("backfill_lookback_days")
+  enabled              Boolean  @default(true)
+
+  @@unique([workspaceId, spaceId])
+  @@index([workspaceId])
+  @@map("workspace_spaces")
+  @@schema("public")
+}
+
+// Clicksy's mirrored ClickUp tasks — the KB embed source. Maps match Clicksy's
+// `clickup_tasks` exactly; Phase 2a reads the descriptive fields + the comment-
+// completeness markers (`commentsSyncedAt` debounces comment folding). Read-only.
+model ClickupTask {
+  taskId           String    @id @map("task_id")
+  workspaceId      String    @map("workspace_id")
+  taskName         String    @map("task_name")
+  description      String?
+  url              String?
+  status           String?
+  statusType       String?   @map("status_type")
+  priority         String?
+  isDeleted        Boolean   @default(false) @map("is_deleted")
+  spaceId          String?   @map("space_id")
+  spaceName        String?   @map("space_name")
+  folderName       String?   @map("folder_name")
+  listId           String?   @map("list_id")
+  listName         String?   @map("list_name")
+  assigneesNames   String?   @map("assignees_names")
+  assigneesEmails  String?   @map("assignees_emails")
+  executiveName    String?   @map("executive_name")
+  department       String?
+  client           String?
+  sprintName       String?   @map("sprint_name")
+  tags             String?
+  createdDate      DateTime? @map("created_date")
+  updatedDate      DateTime? @map("updated_date")
+  closedDate       DateTime? @map("closed_date")
+  dueDate          DateTime? @map("due_date")
+  startDate        DateTime? @map("start_date")
+  commentsSyncedAt DateTime? @map("comments_synced_at")
+  commentCount     Int       @default(0) @map("comment_count")
+
+  @@index([workspaceId, spaceId])
+  @@index([updatedDate])
+  @@map("clickup_tasks")
+  @@schema("public")
+}
+
+// Clicksy's mirrored ClickUp task comments (the 2.0 table). Folded into a task's
+// card once `ClickupTask.commentsSyncedAt` is set. Read-only.
+model ClickupTaskComment {
+  commentId    String    @id @map("comment_id")
+  workspaceId  String    @map("workspace_id")
+  taskId       String    @map("task_id")
+  commentText  String?   @map("comment_text")
+  userId       String?   @map("user_id")
+  userName     String?   @map("user_name")
+  userEmail    String?   @map("user_email")
+  commentDate  DateTime? @map("comment_date")
+  isDeleted    Boolean   @default(false) @map("is_deleted")
+
+  @@index([taskId])
+  @@map("clickup_task_comments")
+  @@schema("public")
+}
+
+// Minimal read-only mirrors reserved for later phases (status history / time).
+model ClickupTaskEvent {
+  id          BigInt   @id @default(autoincrement())
+  workspaceId String   @map("workspace_id")
+  taskId      String   @map("task_id")
+  eventType   String   @map("event_type")
+  occurredAt  DateTime @map("occurred_at")
+
+  @@index([taskId, occurredAt])
+  @@map("clickup_task_events")
+  @@schema("public")
+}
+
+model ClickupTimeEntry {
+  timeEntryId String    @id @map("time_entry_id")
+  workspaceId String    @map("workspace_id")
+  taskId      String?   @map("task_id")
+  userId      String?   @map("user_id")
+  startTime   DateTime? @map("start_time")
+
+  @@index([taskId])
+  @@map("clickup_time_entries")
+  @@schema("public")
+}
+
+// Clicksy's per-job operational log. Phase 2a reads completed backfill rows
+// (`queue_name='clickup-backfills'`, `entity_type='space'`) to derive the
+// already-mirrored window per space for the coverage check. Read-only.
+model SyncJobLog {
+  id          BigInt    @id @default(autoincrement())
+  workspaceId String?   @map("workspace_id")
+  queueName   String    @map("queue_name")
+  jobName     String    @map("job_name")
+  status      String
+  entityType  String?   @map("entity_type")
+  entityId    String?   @map("entity_id")
+  payload     Json?
+  startedAt   DateTime? @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+  tasksSynced Int?      @map("tasks_synced")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([queueName, jobName])
+  @@index([workspaceId, createdAt])
+  @@map("sync_job_logs")
   @@schema("public")
 }

@@ -68,6 +68,13 @@ export const EnvSchema = z.object({
   // Fallback ClickUp token used when a workspace has no stored token (mirrors
   // Clicksy's CLICKUP_API_TOKEN fallback).
   CLICKUP_API_TOKEN: z.string().optional().default(""),
+
+  // Clicksy admin base URL for the Phase-2a KB coverage check — Meetsy calls
+  // Clicksy's `/admin/backfill` + `/admin/comments/backfill` (authenticated with
+  // the shared ADMIN_API_KEY) to mirror missing ClickUp history before embedding.
+  // OPTIONAL: when unset (or ADMIN_API_KEY empty) onboarding degrades gracefully
+  // and just embeds whatever is already mirrored. e.g. dev: http://localhost:3000/api
+  CLICKSY_ADMIN_URL: z.string().url("CLICKSY_ADMIN_URL must be a URL").optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

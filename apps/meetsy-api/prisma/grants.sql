@@ -40,15 +40,38 @@ CREATE TABLE IF NOT EXISTS meetsy."_prisma_migrations" (
 );
 RESET ROLE;
 
+-- 2c) pgvector extension (Meetsy Phase 2a KB). MUST be created by the operator/
+--     superuser BEFORE the meetsy Phase-2a migration runs — the least-privilege
+--     meetsy role cannot CREATE EXTENSION. Installs into `public` by default;
+--     the `vector` type + `<=>` operator then live in `public`.
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- 2d) Ensure the meetsy role resolves `public` objects (the `vector` type, the
+--     `<=>`/`vector_cosine_ops` from the extension) without schema-qualifying
+--     every operator. The migration schema-qualifies the column type + index
+--     opclass, but the bare `embedding <=> $vec` operator in hybrid search needs
+--     `public` on the search_path. (Belt-and-suspenders with the migration.)
+ALTER ROLE meetsy SET search_path = meetsy, public;
+
 -- 3) Read-only access to the public schema. USAGE lets it resolve objects;
---    SELECT is granted ONLY on the three tables Meetsy reads. No CREATE on
---    public, no INSERT/UPDATE/DELETE anywhere in public.
+--    SELECT is granted ONLY on the tables Meetsy reads. No CREATE on public,
+--    no INSERT/UPDATE/DELETE anywhere in public.
 GRANT USAGE ON SCHEMA public TO meetsy;
 GRANT SELECT ON public.users, public.sessions, public.workspaces TO meetsy;
 
 -- Read-only access to the Clicksy ClickUp comment mirror (Meetsy Phase 2 KB).
 GRANT SELECT ON public.clickup_task_comments TO meetsy;
 
+-- Phase 2a KB reads: the task source for embedding (clickup_tasks), the space
+-- scope (workspace_spaces) + the per-job log (sync_job_logs) for the coverage
+-- check, and the event/time mirrors reserved for later phases. Read-only only.
+GRANT SELECT ON
+  public.clickup_tasks,
+  public.workspace_spaces,
+  public.sync_job_logs,
+  public.clickup_task_events,
+  public.clickup_time_entries
+TO meetsy;
+
 -- Intentionally NOT granted: any write on public.*, CREATE on public,
--- or REFERENCES (so no cross-schema FK can be added). Phase 2 will add
--- SELECT on public.clickup_tasks / clickup_task_events / clickup_time_entries.
+-- or REFERENCES (so no cross-schema FK can be added).
