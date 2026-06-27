@@ -4,6 +4,9 @@ import { WorkspaceResolver } from "../analysis/workspace.resolver";
 import { KbController } from "./kb.controller";
 import { KbOnboardingService } from "./kb-onboarding.service";
 import { KbSearchService } from "./kb-search.service";
+import { SummaryFactsService } from "./summary-facts.service";
+import { NarrativeService } from "./narrative.service";
+import { SummaryService } from "./summary.service";
 import { KbQueue } from "./kb.queue";
 import { KbProcessor } from "./kb.processor";
 import { ClicksyAdminClient } from "./clicksy-admin.client";
@@ -19,6 +22,9 @@ import { ClicksyAdminClient } from "./clicksy-admin.client";
   providers: [
     KbOnboardingService,
     KbSearchService,
+    SummaryFactsService,
+    NarrativeService,
+    SummaryService,
     KbQueue,
     KbProcessor,
     ClicksyAdminClient,

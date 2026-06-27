@@ -243,6 +243,21 @@ model KbChunk {
   @@schema("meetsy")
 }
 
+// Phase 2a.1 "what we learned" summary card. One cached row per workspace:
+// `facts` is the exact aggregate SQL output (KbFacts JSON), `narrative` the single
+// gpt-5.4-mini paragraph (null when Azure is unavailable). `taskCountAtGen` is the
+// embedded chunk count at generation time — the staleness gate for regeneration.
+model KbSummary {
+  workspaceId    String   @id
+  facts          Json
+  narrative      String?  @db.Text
+  taskCountAtGen Int      @default(0)
+  generatedAt    DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@schema("meetsy")
+}
+
 // Per-workspace onboarding cursor + status for the KB embed worker.
 model KbSyncState {
   workspaceId    String    @id
@@ -408,6 +423,11 @@ model ClickupTaskEvent {
   taskId      String   @map("task_id")
   eventType   String   @map("event_type")
   occurredAt  DateTime @map("occurred_at")
+  // Before/after snapshots of the changed field(s) — 2a.1 reads these to detect
+  // reopened (closed→open status) transitions for the blockers fact. Shape is
+  // Clicksy-defined JSON; the reopened query degrades to 0 if it doesn't match.
+  before      Json?
+  after       Json?
 
   @@index([taskId, occurredAt])
   @@map("clickup_task_events")
@@ -415,11 +435,16 @@ model ClickupTaskEvent {
 }
 
 model ClickupTimeEntry {
-  timeEntryId String    @id @map("time_entry_id")
-  workspaceId String    @map("workspace_id")
-  taskId      String?   @map("task_id")
-  userId      String?   @map("user_id")
-  startTime   DateTime? @map("start_time")
+  timeEntryId   String    @id @map("time_entry_id")
+  workspaceId   String    @map("workspace_id")
+  taskId        String?   @map("task_id")
+  userId        String?   @map("user_id")
+  userName      String?   @map("user_name")
+  userEmail     String?   @map("user_email")
+  startTime     DateTime? @map("start_time")
+  // Decimal hours per entry (Clicksy converts ClickUp ms → hours). 2a.1 sums this
+  // per user over the workload window.
+  durationHours Decimal   @default(0) @map("duration_hours") @db.Decimal(12, 4)
 
   @@index([taskId])
   @@map("clickup_time_entries")

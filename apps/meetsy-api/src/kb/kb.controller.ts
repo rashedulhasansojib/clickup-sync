@@ -15,6 +15,8 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { WorkspaceResolver } from "../analysis/workspace.resolver";
 import { KbOnboardingService, KbStatusView } from "./kb-onboarding.service";
 import { KbSearchService, KbSearchHit } from "./kb-search.service";
+import { SummaryService } from "./summary.service";
+import { KbSummaryView } from "./summary.types";
 import { KbProgressEvent } from "./kb.queue";
 import { OnboardDto, OnboardSchema } from "./kb.dto";
 
@@ -27,6 +29,7 @@ export class KbController {
   constructor(
     private readonly onboarding: KbOnboardingService,
     private readonly search: KbSearchService,
+    private readonly summary: SummaryService,
     private readonly workspaces: WorkspaceResolver,
   ) {}
 
@@ -72,6 +75,21 @@ export class KbController {
         .catch((err) => subscriber.error(err));
       return () => inner?.unsubscribe();
     });
+  }
+
+  /**
+   * "What we learned" summary card: SQL-exact facts + a single LLM narrative.
+   * Cached per workspace; `?refresh=1` recomputes. Any authenticated user.
+   */
+  @Get("summary")
+  async summaryCard(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id") id: string,
+    @Query("refresh") refresh?: string,
+  ): Promise<KbSummaryView> {
+    const workspaceId = await this.workspaces.resolve(user.orgId, id);
+    const force = refresh !== undefined && refresh !== "" && refresh !== "0" && refresh !== "false";
+    return this.summary.getOrGenerate(workspaceId, force);
   }
 
   /** Hybrid (vector + keyword, RRF) search. Any authenticated user. */

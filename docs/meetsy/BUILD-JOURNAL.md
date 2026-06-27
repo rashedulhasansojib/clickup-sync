@@ -285,4 +285,28 @@ Built (meetsy-api): `pgvector` enablement; `meetsy.KbChunk` (`vector(1024)` HNSW
 
 **Test artifacts:** 11 tasks in the throwaway "Meetsy Live Test" list (Chishty team `90181854711`), deletable. Local pgvector Postgres on 55432.
 
-## ✅ PHASE 2a COMPLETE & LIVE-VERIFIED (incl. real semantic retrieval). Next: 2a.1 "what we learned" card → 2b docs+improvement metric → 2c pipeline integration. Real-history VALUE at scale still awaits a token with Nifty access.
+## ✅ PHASE 2a COMPLETE & LIVE-VERIFIED (incl. real semantic retrieval). Next: 2a.1 "what we learned" card → 2b docs+improvement metric → 2c pipeline integration.
+
+---
+
+## Phase 2a.1 — "what we learned" summary card
+
+Spec: `docs/superpowers/specs/2026-06-28-meetsy-phase2a1-summary-card-design.md`.
+
+### 2026-06-28 — Phase 2a.1 — DONE / GREEN + LIVE-VERIFIED ON REAL NIFTY DATA 🎉
+Built (meetsy-api): `meetsy.KbSummary` (cache) + migration; `SummaryFactsService` (aggregate SQL — roster+ownership, components, throughput/median-cycle, categories, workload, blockers, coverage; **zero Azure dependency**); `NarrativeService` (ONE gpt-5.4-mini `structured()` call, "no inventing numbers" guard); `SummaryService` (facts always + narrative-if-configured + cache w/ drift-based regenerate); `GET /workspaces/:id/kb/summary?refresh=`. **103 meetsy-api tests** (30 new); build green; Clicksy untouched.
+
+**🔑 NIFTY UNLOCKED:** the user provided a token with real "Nifty" (`3450636`) access (Ahmad, `ahmad@niftybookkeepers.com`) — 37 members, 5 spaces (3 match the prod config: Digital Marketing 3577824, R&D Apps 3589129, Projects 3525433). Verified read-only. Production webhook host `clicksy.niftyitsolution.com` reachable.
+
+**LIVE-VERIFIED on REAL production data:** mirrored **614 real R&D-Apps tasks** (Clicksy backfill with the Nifty token), embedded **614/614** (pgvector), then:
+- **Semantic search** over real tasks returned results for paraphrased queries (energy-report PDF, CRM→accounting sync, bookkeeping automation).
+- **"What we learned" card is accurate on real data:** roster = Shoabur (357 tasks), Rashedul Hasan (150, owns Energy Reporting), Ahmad (57), Sayem Billah (44), Zahidul Fahim (10); components = Sprint 13/14/15, [Nifty AI] Backlog, R&D sprints; status Closed 331/done 217/to-do 44; clients Nifty AI 349 / Energy Reporting 190 / AIT 6; cycle median p50≈0/p75≈4.9d (genuinely skewed — query verified correct vs direct SQL). **Narrative (gpt-5.4-mini, live)** produced an accurate team profile ("centered on Nifty AI and Energy Reporting… Shoabur is the main driver… Rashedul…"). Two suspected "bugs" (components-null, cycle≈0) were **false alarms** (my display-parse used wrong keys; both facets are correct).
+
+**Real onboarding-robustness findings (NOT card bugs; for a follow-up):**
+1. **Onboarding blocks on the time-entries backfill phase** — `ensureCoverage`→`pollUntilDrained` waits for the slow per-task time-entries sync (hundreds of reqs @ ≤100/min) that the *embed doesn't need*. Should stop waiting once the task-fetch phase completes (the `/admin/backfill/active` `phase` field already distinguishes `fetching` vs `time-entries`). Workaround used in verification: onboard without `CLICKSY_ADMIN_URL` (embeds already-mirrored).
+2. **A killed worker leaves the job locked** (`lockDuration: 10min`); a re-onboard (jobId=workspaceId) then deduped/stalled until the lock expired. Needs job-recovery/cleanup (or a shorter lock + idempotent resume). Cleared via Redis `bull:meetsy-kb:*` del in verification.
+3. Consider presenting cycle time as p50/p75 (skew-honest) rather than a single median.
+
+**Test artifacts:** ws_nifty (team 3450636) + R&D Apps space backfilled into the local test DB (614 tasks); throwaway. The slow time-entries backfill may still be draining locally. Nifty token in scratchpad only (user will rotate).
+
+## ✅ PHASE 2a.1 COMPLETE & LIVE-VERIFIED ON REAL NIFTY HISTORY. Next: 2b (docs + honest improvement metric) → 2c (pipeline integration). Follow-up: the 2 onboarding-robustness fixes above.
