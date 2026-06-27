@@ -271,6 +271,59 @@ model KbSyncState {
   @@schema("meetsy")
 }
 
+// Phase 2b — an uploaded context document (SOP / scope / spec PDF or text).
+// Its chunks live in KbChunk (sourceType=document, sourceId=this.id). We persist
+// the EXTRACTED TEXT (to re-chunk on a future model bump) and discard raw bytes;
+// `sha256` (over the raw bytes) is the idempotency/dedup key.
+model KbDocument {
+  id            String  @id @default(cuid())
+  workspaceId   String
+  filename      String
+  mimeType      String
+  // sha256 of the raw uploaded bytes — re-upload of identical bytes is a no-op.
+  sha256        String
+  byteSize      Int
+  pageCount     Int?
+  charCount     Int     @default(0)
+  chunkCount    Int     @default(0)
+  // Extracted plain text (kept so a model/dim bump can re-chunk without the file).
+  extractedText String? @db.Text
+  // pending | parsing | embedding | ready | error
+  status        String  @default("pending")
+  error         String? @db.Text
+  // The honest improvement metric output (novelty + answerability-lift), JSON.
+  // See KbDocMetric in the app — reported as two never-blended signals.
+  metric        Json?
+  // Soft ref to public.users (session user); no FK across the read-only boundary.
+  uploadedBy    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  links KbDocTaskLink[]
+
+  @@unique([workspaceId, sha256])
+  @@index([workspaceId])
+  @@schema("meetsy")
+}
+
+// Phase 2b — auto-discovered doc↔task relatedness (seed for 2c context injection).
+// `taskId` is a PLAIN string soft-ref to public.clickup_tasks.task_id (no FK, no
+// public write). `score` is the cosine that produced the link.
+model KbDocTaskLink {
+  id          String   @id @default(cuid())
+  workspaceId String
+  documentId  String
+  taskId      String
+  score       Float
+  createdAt   DateTime @default(now())
+
+  document KbDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, taskId])
+  @@index([workspaceId, taskId])
+  @@schema("meetsy")
+}
+
 // ---------------------------------------------------------------------------
 // public schema — UNMANAGED read-only mirrors of Clicksy's tables.
 // Column names/maps MUST match Clicksy's prisma/schema.prisma exactly.

@@ -1,7 +1,7 @@
 # Meetsy Phase 2b — Document Upload + Honest KB-Improvement Metric (Design Spec)
 
 **Date:** 2026-06-28
-**Status:** Draft — **awaiting product-owner approval before build**
+**Status:** **APPROVED 2026-06-28** — building. Locked decisions: (1) "answerable" = **Option C, hybrid blind-identical judge** on held-out transcript-derived questions; (2) first-onboarding answerability = **show it, labelled provisional** (novelty stays the headline); (3) upload limits **25 MB / 300 pages**; (4) doc deletion = **hard-delete** (doc + chunks + links).
 **Phase:** Meetsy 2b (after 2a KB slice ✅, 2a.1 summary card ✅, onboarding-robustness fixes ✅; before 2c pipeline integration)
 **Plan:** `docs/superpowers/plans/2026-06-27-meetsy-integration-plan.md` (Phase 2 table, row 2b)
 **Depends on:** 2a (KbChunk + embed + hybrid search + `meetsy-kb` worker); reuses `AzureEmbeddingService`, `KbSearchService`, `vtt.ts` transcript normalization.
