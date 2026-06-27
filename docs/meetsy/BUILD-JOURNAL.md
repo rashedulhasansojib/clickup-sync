@@ -310,3 +310,28 @@ Built (meetsy-api): `meetsy.KbSummary` (cache) + migration; `SummaryFactsService
 **Test artifacts:** ws_nifty (team 3450636) + R&D Apps space backfilled into the local test DB (614 tasks); throwaway. The slow time-entries backfill may still be draining locally. Nifty token in scratchpad only (user will rotate).
 
 ## ✅ PHASE 2a.1 COMPLETE & LIVE-VERIFIED ON REAL NIFTY HISTORY. Next: 2b (docs + honest improvement metric) → 2c (pipeline integration). Follow-up: the 2 onboarding-robustness fixes above.
+
+---
+
+## Onboarding-robustness fixes (the 2a.1 follow-ups) — DONE / GREEN + LIVE-VERIFIED
+
+### 2026-06-28 — Fix 1 (task-fetch-only poll) + Fix 2 (KB job recovery) — commit `c1f4426`
+The two follow-ups flagged in 2a.1 are fixed (meetsy-api only; Clicksy untouched). **108 meetsy-api tests** (5 new) + build green.
+
+**Fix 1 — onboarding no longer blocks on the slow time-entries backfill phase.**
+`ClicksyAdminClient.pollUntilDrained` → **`pollUntilTasksFetched`**: it now reads `/admin/backfill/active` and counts only spaces in **`phase: 'fetching'`** (tasks), returning once tasks are mirrored. Time-entry sync (hundreds of per-task calls @ ≤100/min) keeps draining asynchronously in Clicksy — the embed never needed it. (`getActiveSpaceCount`→`getFetchingSpaceCount`; `kb-onboarding.service.ts` caller updated.)
+
+**Fix 2 — a killed `meetsy-kb` worker no longer locks the job ~10min.**
+- `lockDuration` 10min → **120s** + `stalledInterval: 30s` + `maxStalledCount: 1` (`kb.processor.ts`). A healthy long run keeps its lock via BullMQ's timer-based auto-renewal (independent of awaited I/O); `lockDuration` now only governs post-crash reclaim latency.
+- **Authoritative `failed` handler** (the subtle one): a job exceeding `maxStalledCount` is moved to `failed` by BullMQ *without* re-entering `process()`, so the `catch` that sets `status:"error"` never runs — leaving `kbSyncState` stuck on `"onboarding"` forever. New `worker.on("failed")` → `markFailed()` sets `error` + emits the SSE error event (idempotent with the catch; the first `stalled` event only re-queues, doesn't touch state).
+- **`enqueue()` supersedes a retained completed/failed job** before re-adding (`kb.queue.ts`): the stable `jobId=workspaceId` otherwise made a re-onboard a silent no-op (BullMQ dedupes jobId across *all* states incl. retained completed) — which is exactly why every prior re-onboard needed a manual `redis-cli del`.
+- Unit tests added: `pollUntilTasksFetched` returns on `phase=time-entries`; `enqueue` removes a completed job before re-adding (`clicksy-admin.client.spec.ts`, `kb.queue.spec.ts`).
+
+**LIVE-VERIFIED on the real Nifty stack (Clicksy + meetsy-api against the 55432 pgvector DB):**
+- **Fix 2 / jobId collision:** ws_nifty had a *retained completed* `bull:meetsy-kb:ws_nifty` job. Re-onboard → worker actually re-ran (status `onboarding`→`ready`, fresh `lastRunAt`) with **no `redis-cli del`**. Old code = silent no-op.
+- **Fix 2 / crash recovery:** invalidated content-hashes to force a full re-embed, killed meetsy-api `-9` mid-embed (frozen at 100/614, job orphaned in the `active` set, lock TTL ~101s confirming the 120s lock). Restarted → BullMQ stalled-recovery reclaimed it after lock expiry and the worker **resumed from the committed cursor (100, not 0)**, reaching `ready` in **~111s** (vs the old ~600s lock).
+- **Fix 1 (the headline):** with `CLICKSY_ADMIN_URL` set, onboarded `12m` (gap vs 90d mirrored → triggered a real Clicksy backfill). Watched `/admin/backfill/active`: `phase: fetching` for ~46s (meetsy correctly *waited*), then it flipped to `phase: time-entries` (**1711 jobs queued, 0 done**) and meetsy proceeded to embed, reaching **`ready` at 75s while time-entries were still entirely undrained (remaining=1711, done=0)**. Old `pollUntilDrained` would have blocked on those 1711 jobs @ ~100/min ≈ **17+ min**. The wider window also pulled ~584 more real Nifty tasks → **KB grew 614 → 1198 chunks**, all embedded (`status=ready, embedded=1198`).
+
+**Notes:** Clicksy was booted only for verification (Nifty token as `CLICKUP_API_TOKEN` env fallback, read-only; no writes/task-creation) and stopped afterward; its leftover production-API time-entry jobs were cleared from Redis. Local test stack (pgvector 55432 / Redis 56379) left running with `ws_nifty` healthy at 1198 chunks.
+
+## ✅ ONBOARDING-ROBUSTNESS FIXES COMPLETE & LIVE-VERIFIED. Next: **Phase 2b** — write the spec, then build (PDF/SOP upload → embed into KB → honest improvement metric [answerability-lift + corpus novelty, never blended] + doc↔task linking) → 2c pipeline integration.

@@ -2,7 +2,7 @@
 
 > Single entry point to continue the Clicksy+Meetsy build in a fresh chat. Read this first,
 > then the three docs it points to. Everything is committed on branch **`feat/meetsy-phase0`**
-> (pushed to origin). Last commit at handoff: **`4d61a54`** (Phase 2a.1).
+> (pushed to origin). Last code commit: **`c1f4426`** (onboarding-robustness fixes, live-verified).
 
 ## Read these (in order), then start
 1. **`docs/meetsy/BUILD-JOURNAL.md`** — the full, dated build history + every live-verification + findings. **The source of truth for "what's done."**
@@ -15,23 +15,12 @@
 - **Phase 1** — ClickUp write-back (review → push real assigned tasks). Proven live (real task created, assignee set, idempotent).
 - **Phase 2.0** — Clicksy comment-sync (additive: `clickup_task_comments` + queue/worker + webhook + admin backfill). Proven live.
 - **Phase 2a** — RAG KB: pgvector, `meetsy.KbChunk` (vector(1024) HNSW + tsv GIN), onboarding embed, hybrid RRF search, incremental. Proven live — **paraphrased queries retrieve the right task**.
-- **Phase 2a.1** — "what we learned" card (SQL facts + 1 gpt-5.4-mini narrative). **Proven live on 614 REAL Nifty R&D-Apps tasks** — accurate roster/components/clients/narrative.
+- **Phase 2a.1** — "what we learned" card (SQL facts + 1 gpt-5.4-mini narrative). **Proven live on REAL Nifty R&D-Apps tasks** — accurate roster/components/clients/narrative.
+- **Onboarding-robustness fixes** (the 2a.1 follow-ups; commit `c1f4426`) — **DONE + LIVE-VERIFIED.** See the journal's last section for the full live trace. Summary:
+  - **Fix 1** — `pollUntilDrained`→**`pollUntilTasksFetched`** counts only `phase:'fetching'` spaces, so onboarding embeds once tasks are mirrored and never blocks on the time-entries phase. *Live: onboarding hit `ready` in 75s while 1711 time-entry jobs were still undrained (old code ≈17+min). KB grew 614→1198 chunks.*
+  - **Fix 2** — `lockDuration` 10min→120s + `stalledInterval`/`maxStalledCount:1`; **authoritative `failed` handler** (a stalled-out job is moved to `failed` without re-entering `process()`, so it must set `error` there or `kbSyncState` sticks on `"onboarding"` forever); **`enqueue()` supersedes a retained completed/failed job** (stable `jobId=workspaceId` otherwise makes re-onboard a silent no-op). *Live: crash mid-embed recovered from the committed cursor in ~111s; re-onboard ran with no `redis-cli del`.*
 
-## ▶ DO NEXT (the user's instruction): two onboarding-robustness fixes, THEN Phase 2b
-
-### Fix 1 — onboarding blocks on the slow time-entries backfill phase
-- **Symptom:** `POST /workspaces/:id/kb/onboard` with `CLICKSY_ADMIN_URL` set hangs ~10+ min: the coverage-check triggers a Clicksy backfill, then `pollUntilDrained` waits for the **time-entries** phase (hundreds of per-task calls @ ≤100/min) that the **embed doesn't need**.
-- **Where:** `apps/meetsy-api/src/kb/kb-onboarding.service.ts` (`ensureCoverage`) → `apps/meetsy-api/src/kb/clicksy-admin.client.ts` (`pollUntilDrained`, reads Clicksy `GET /admin/backfill/active`).
-- **Fix:** the `/admin/backfill/active` response has a per-space **`phase`** field — `"fetching"` (tasks) vs `"time-entries"`. `pollUntilDrained` should return once every space is **past `fetching`** (tasks mirrored); let time-entries continue async in Clicksy. Embed only needs tasks.
-- **Verify:** onboard a Nifty space with `CLICKSY_ADMIN_URL` set → proceeds to embed once tasks are fetched (not a 10-min hang).
-
-### Fix 2 — a killed/crashed worker leaves the meetsy-kb job locked ~10 min
-- **Symptom:** if the worker dies mid-onboard, the job (jobId = workspaceId) stays "active"/locked in Redis for `lockDuration: 10min`; a re-onboard dedupes against it and stalls until the lock expires. (Worked around in verification by `redis-cli del bull:meetsy-kb:*`.)
-- **Where:** `apps/meetsy-api/src/kb/kb.processor.ts` / `kb.queue.ts` (BullMQ worker config + enqueue).
-- **Fix (pick cleanest):** shorten `lockDuration` (~2–3 min) + add BullMQ stalled-recovery (`stalledInterval`, `maxStalledCount`) so a dead job is reclaimed fast; AND/OR on enqueue remove any existing job for that workspaceId (so a manual re-onboard always supersedes a stuck one). Ensure long embeds renew the lock.
-- **Verify:** kill meetsy-api mid-onboard, restart, re-onboard → recovers without the 10-min wait.
-
-### Then — Phase 2b (write the spec first, then build)
+## ▶ DO NEXT (the user's instruction): Phase 2b — write the spec first, then build
 PDF/SOP upload → parse/chunk/embed into the KB → **honest improvement metric** + doc↔task linking. **Research already done** (in the journal/plan): ship **answerability-lift** (questions derived from transcripts, before/after answerable count) as the headline + **corpus novelty** (per-chunk cosine vs existing) as support; NEVER a single blended "X% better"; "no improvement" is a valid honest result. At first onboarding (no transcripts) use a labeled-provisional task-derived baseline. Then Phase 2c = pipeline integration (KB context injection, field prediction [weak prior + range + evidence, abstain when thin], dedup, HITL sprint/client/points).
 
 ## Tokens/creds the new session needs (the scratchpad does NOT carry over)
@@ -47,7 +36,8 @@ Ask the user to re-provide (or read from `../meeting-analyzer/.env` for Azure):
 - **Operator flow (meetsy migrations):** run `apps/meetsy-api/prisma/grants.sql` (as superuser; `sed "s/'CHANGE_ME'/'meetsy'/"`) FIRST — it does `CREATE EXTENSION vector`, creates the `meetsy` role + schema + `_prisma_migrations`, sets `search_path`, and grants SELECT on the clickup_* mirror tables. Migrations contain NO `CREATE SCHEMA`/`CREATE EXTENSION` (the least-priv role can't). `MEETSY_DATABASE_URL=postgresql://meetsy:meetsy@localhost:55432/clickup_sync?schema=meetsy`.
 - **Running the stack:** Clicksy entry is `dist/src/main.js` (NOT `dist/main.js` — `prisma.config.ts` in tsconfig widens rootDir; pre-existing). meetsy-api entry `apps/meetsy-api/dist/main.js`. Both NestJS; routes under `/api` (Clicksy) / bare (meetsy-api). Clicksy **caches workspace_spaces at boot** — insert workspace/space rows BEFORE booting Clicksy (or it reads "Valid: (none)" for admin backfill). Use `docker exec -i` for multi-statement psql (without `-i`, stdin isn't attached and inserts silently no-op).
 - **ClickUp rate limit = 100/min** shared across the token. Use `x-admin-key` for admin endpoints (machine cred → Owner). meetsy-api admin/Owner endpoints accept `x-admin-key` too.
-- **Verify on real data:** mirror a Nifty space's TASKS via Clicksy `POST /api/admin/backfill {spaceId, lookbackDays}` (fast); onboard meetsy KB; `GET /workspaces/:id/kb/search` + `/kb/summary`. Tasks are fast; time-entries/comments are the slow per-task parts (that's Fix 1).
+- **Verify on real data:** mirror a Nifty space's TASKS via Clicksy `POST /api/admin/backfill {spaceId, lookbackDays}` (fast); onboard meetsy KB; `GET /workspaces/:id/kb/search` + `/kb/summary`. Tasks are fast; time-entries/comments are the slow per-task parts (now skipped by Fix 1).
+- **Booting the two apps (proven recipe):** meetsy-api — `cd apps/meetsy-api && PATH=/opt/homebrew/bin:$PATH npx dotenv -e <env> -- node dist/main` (entry `dist/main`, port 4000; needs `MEETSY_DATABASE_URL`, `REDIS_PORT=56379`, `AZURE_*`, `ADMIN_API_KEY`; set `CLICKSY_ADMIN_URL=http://localhost:3000/api` only when exercising the backfill path). Clicksy — root has **no** `dotenv-cli`, so `set -a; . <env>; set +a; PATH=/opt/homebrew/bin:$PATH node dist/src/main.js` (entry `dist/src/main.js`, port 3000; needs `DATABASE_URL=postgresql://clickup:clickup@localhost:55432/clickup_sync`, `REDIS_URL=redis://localhost:56379`, `CLICKUP_API_TOKEN`=Nifty token, matching `ADMIN_API_KEY`). PG superuser is **`clickup`** (not `postgres`). Auth meetsy/Clicksy admin calls with header `x-admin-key: <ADMIN_API_KEY>` (→ synthetic Owner). ws_nifty (team 3450636, space 3589129 R&D) has **no stored token** → Clicksy uses the `CLICKUP_API_TOKEN` env fallback. Stop Clicksy after verifying so its per-task time-entry jobs stop hitting the production API.
 
 ## Hard rules carried forward
 - Clicksy stays additive (its only Phase-0 src change was the cookie `Domain`; comment-sync is additive). Meetsy is READ-ONLY on `public` (DB-enforced). Never write `public` from meetsy.
