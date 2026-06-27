@@ -2,7 +2,7 @@
 
 > Single entry point to continue the Clicksy+Meetsy build in a fresh chat. Read this first,
 > then the three docs it points to. Everything is committed on branch **`feat/meetsy-phase0`**
-> (pushed to origin). Last code commit: **`c1f4426`** (onboarding-robustness fixes, live-verified).
+> (pushed to origin). Last code commit: **`ffcc295`** (Phase 2b — doc upload + improvement metric, live-verified).
 
 ## Read these (in order), then start
 1. **`docs/meetsy/BUILD-JOURNAL.md`** — the full, dated build history + every live-verification + findings. **The source of truth for "what's done."**
@@ -20,8 +20,10 @@
   - **Fix 1** — `pollUntilDrained`→**`pollUntilTasksFetched`** counts only `phase:'fetching'` spaces, so onboarding embeds once tasks are mirrored and never blocks on the time-entries phase. *Live: onboarding hit `ready` in 75s while 1711 time-entry jobs were still undrained (old code ≈17+min). KB grew 614→1198 chunks.*
   - **Fix 2** — `lockDuration` 10min→120s + `stalledInterval`/`maxStalledCount:1`; **authoritative `failed` handler** (a stalled-out job is moved to `failed` without re-entering `process()`, so it must set `error` there or `kbSyncState` sticks on `"onboarding"` forever); **`enqueue()` supersedes a retained completed/failed job** (stable `jobId=workspaceId` otherwise makes re-onboard a silent no-op). *Live: crash mid-embed recovered from the committed cursor in ~111s; re-onboard ran with no `redis-cli del`.*
 
-## ▶ DO NEXT (the user's instruction): Phase 2b — write the spec first, then build
-PDF/SOP upload → parse/chunk/embed into the KB → **honest improvement metric** + doc↔task linking. **Research already done** (in the journal/plan): ship **answerability-lift** (questions derived from transcripts, before/after answerable count) as the headline + **corpus novelty** (per-chunk cosine vs existing) as support; NEVER a single blended "X% better"; "no improvement" is a valid honest result. At first onboarding (no transcripts) use a labeled-provisional task-derived baseline. Then Phase 2c = pipeline integration (KB context injection, field prediction [weak prior + range + evidence, abstain when thin], dedup, HITL sprint/client/points).
+- **Phase 2b** — doc upload + honest improvement metric (commit `ffcc295`) — **DONE + LIVE-VERIFIED on real Nifty data.** SOP/PDF upload → `meetsy-kb-docs` worker (parse via `pdf-parse`/text → `chunkText` → embed into `KbChunk` sourceType=document) → metric → doc↔task links; `POST/GET/DELETE /workspaces/:id/kb/documents`. Metric = **novelty** (pgvector-only headline; today read `medianNovelty` — `pctNovel` cutoff wants tuning on multi-chunk docs) + **answerability-lift** (held-out transcript questions when present, else task-derived+provisional; blind identical gpt-5.4-mini judge before/after). *Live: PDF+md upload, novelty discriminates (0.243 vs 0.399), doc linked to the real "Energy Audit Web Portal" task, and the **positive answerability path proven** — a vendor-payment transcript + the vendor-policy PDF gave `provisional=false, newlyAnswerable=2 (N→Y)`.* 128 tests. Docs are intentionally NOT in `/kb/search` yet (2c surfaces them).
+
+## ▶ DO NEXT: Phase 2c — pipeline integration (write the spec first, then build)
+KB **context injection** into the analyze/critic/enrich pipeline (incl. surfacing uploaded docs in retrieval); **field prediction** (kNN prior + LLM clamped to neighbour range, due=p50/p80 from cycle-time, **abstain when thin**, evidence shown); **dedup** (flag ≥0.90 / suggest 0.82–0.90 / never auto-merge); **HITL** extension of the Phase-1 push (sprint=target list, client=dropdown custom field by option UUID, points=top-level `points`), overrides logged as the Phase-3 learning signal. Pre-meeting incremental remap (cursor + content-hash, upsert-only). See the plan's Phase-2 table row 2c.
 
 ## Tokens/creds the new session needs (the scratchpad does NOT carry over)
 Ask the user to re-provide (or read from `../meeting-analyzer/.env` for Azure):

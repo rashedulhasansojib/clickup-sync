@@ -335,3 +335,32 @@ The two follow-ups flagged in 2a.1 are fixed (meetsy-api only; Clicksy untouched
 **Notes:** Clicksy was booted only for verification (Nifty token as `CLICKUP_API_TOKEN` env fallback, read-only; no writes/task-creation) and stopped afterward; its leftover production-API time-entry jobs were cleared from Redis. Local test stack (pgvector 55432 / Redis 56379) left running with `ws_nifty` healthy at 1198 chunks.
 
 ## ✅ ONBOARDING-ROBUSTNESS FIXES COMPLETE & LIVE-VERIFIED. Next: **Phase 2b** — write the spec, then build (PDF/SOP upload → embed into KB → honest improvement metric [answerability-lift + corpus novelty, never blended] + doc↔task linking) → 2c pipeline integration.
+
+---
+
+## Phase 2b — Document upload + honest KB-improvement metric
+
+Spec: `docs/superpowers/specs/2026-06-28-meetsy-phase2b-docs-improvement-metric-design.md` (APPROVED — locked: hybrid blind judge; show provisional answerability labelled; 25 MB / 300 pages; hard-delete).
+
+### 2026-06-28 — Phase 2b — DONE / GREEN + LIVE-VERIFIED ON REAL NIFTY DATA — commit `ffcc295`
+Built (meetsy-api only; Clicksy untouched). **128 meetsy-api tests** (20 new) + build + typecheck green. New deps: `pdf-parse`, `multer`.
+
+- **Data model:** `KbDocument` (sha256 dedup, extracted text persisted / raw bytes discarded, status, `metric` JSON) + `KbDocTaskLink` (plain `taskId` soft-ref, no public write) + migration `20260628140000` (applied as the least-priv `meetsy` role). Doc chunks **reuse `KbChunk`** (`sourceType=document`, `sourceId=docId`) — no KbChunk change.
+- **Pipeline:** `POST /workspaces/:id/kb/documents` (multipart, 25 MB cap, Owner/Admin) → `meetsy-kb-docs` worker: parse (`doc-extract`: `pdf-parse` text-PDFs-only, OCR out, scanned→clear error; plain/markdown) → `chunkText` (paragraph-aware, ~400-token target, 15% overlap) → embed (reuses 2a `AzureEmbeddingService` + `embedInBatches`) → metric → `ready`. Worker **reuses the onboarding-robustness fixes** (120s lock + stalledInterval + maxStalledCount:1 + authoritative `failed` handler + enqueue-supersede).
+- **Honest metric — two NEVER-blended signals:** (1) **corpus novelty** (`NoveltyService`, pgvector-only, per-chunk nearest-neighbour cosine distance; novelty = minDistance) as the headline; (2) **answerability-lift** (`AnswerabilityService`: held-out questions — real transcripts when present else task-derived+`provisional`; a **blind, identical gpt-5.4-mini judge** before vs after, only the retrieved context differs; delta = `newlyAnswerable`). "No improvement" is first-class.
+- **Doc↔task auto-linking** (`DocTaskLinkService`, HNSW per-chunk nearest tasks, best-score aggregate, top-N ≥ 0.75). `GET` list/detail + hard-`DELETE` (chunks+links cascade).
+
+**LIVE-VERIFIED end-to-end on ws_nifty (1198 real Nifty task chunks):**
+- **Upload → parse → chunk → embed → ready** for both **markdown** and a **real PDF** (`pdf-parse` extracted "Nifty Vendor Payment Approval Policy… invoices above 5000 USD require dual approval…", pageCount=1).
+- **Novelty discriminates honestly:** an energy-themed doc scored medianNovelty **0.243** (more similar to existing energy tasks ⇒ less novel) vs a bookkeeping-SOP **0.399** (genuinely newer) — landing on the right side.
+- **Doc↔task linking found the real related task:** the energy doc linked to `86evkrgvw` (0.757) = "Energy Audit Web Portal".
+- **🎯 Answerability-lift POSITIVE path proven (the centerpiece):** inserted one `Meeting` whose transcript raised vendor-payment questions, uploaded the vendor-payment-policy PDF → **`provisional=false, source=transcript, before=1→after=3, newlyAnswerable=2, regressions=0`** — *"What is the approval threshold for large vendor invoices?"* and *"Who must sign off…?"* both flipped **N→Y**. This single run proved the transcript branch, that BEFORE/AFTER retrieval genuinely differs, and that the blind judge detects a real lift.
+- **Dedup** (identical bytes → `deduped:true`, no reprocess), **unsupported type → 400**, **hard-DELETE** removed doc+chunks+links while the 1198 task chunks stayed intact.
+
+**Honest caveats (recorded, not hidden):**
+- All live docs were small (single-chunk), so the novelty **distribution** wasn't exercised and `pctNovel` read 0 for both (maxSim just above the 0.6 cutoff). **`medianNovelty` is the de-facto headline today**; the `pctNovel` cutoff wants tuning on multi-chunk docs (follow-up).
+- Uploaded docs are intentionally **NOT** returned by `/kb/search` (it filters `sourceType='clickup_task'`) — docs feed the metric + linking in 2b; surfacing them in retrieval is a 2c decision.
+
+**Test artifacts:** all test docs + the test `Meeting` deleted; ws_nifty restored to 1198 task chunks / 0 docs / 0 meetings. Local stack (pgvector 55432 / Redis 56379) left running.
+
+## ✅ PHASE 2b COMPLETE & LIVE-VERIFIED ON REAL NIFTY DATA (incl. the positive answerability-lift path). Next: **Phase 2c** — pipeline integration (KB context injection into analyze/critic/enrich, field prediction [weak prior + range + evidence, abstain when thin], dedup, HITL sprint/client/points; surface docs in retrieval).
