@@ -45,10 +45,14 @@ export class TaskMapperService {
       if (Number.isFinite(id)) payload.assignees = [id];
     }
 
-    // Due date — ISO → epoch ms; skip if null/unparseable. due_date_time:false
-    // means a date-only due (no time-of-day), matching the pipeline's resolution.
+    // Due date — ISO → epoch ms; skip if null/unparseable. due_date_time:false =
+    // a date-only due (no time-of-day). For a bare YYYY-MM-DD we anchor at NOON UTC
+    // so ClickUp's workspace-timezone interpretation can't shift the date to the
+    // previous/next day (live-verified: UTC-midnight date-only showed as the prior
+    // day for a +06:00 workspace). A full datetime string is passed through as-is.
     if (task.dueDate) {
-      const ms = Date.parse(task.dueDate);
+      const bare = /^\d{4}-\d{2}-\d{2}$/.test(task.dueDate.trim());
+      const ms = Date.parse(bare ? `${task.dueDate.trim()}T12:00:00Z` : task.dueDate);
       if (Number.isFinite(ms)) {
         payload.due_date = ms;
         payload.due_date_time = false;

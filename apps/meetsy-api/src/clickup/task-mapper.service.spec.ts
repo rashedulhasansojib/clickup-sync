@@ -29,10 +29,16 @@ describe("TaskMapperService", () => {
     expect(svc.map({ ...base, priority: "low" }).priority).toBe(4);
   });
 
-  it("converts an ISO due date to epoch ms with due_date_time:false", () => {
+  it("converts a bare date to NOON-UTC epoch ms with due_date_time:false", () => {
+    // Anchored at noon UTC so a workspace timezone can't shift the date a day.
     const p = svc.map(base);
-    expect(p.due_date).toBe(Date.parse("2026-07-01"));
+    expect(p.due_date).toBe(Date.parse("2026-07-01T12:00:00Z"));
     expect(p.due_date_time).toBe(false);
+  });
+
+  it("passes a full datetime due string through as-is", () => {
+    const p = svc.map({ ...base, dueDate: "2026-07-01T09:30:00Z" });
+    expect(p.due_date).toBe(Date.parse("2026-07-01T09:30:00Z"));
   });
 
   it("skips an unparseable/natural-language due date", () => {

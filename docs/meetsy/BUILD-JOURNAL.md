@@ -228,4 +228,17 @@ Spec: `docs/superpowers/specs/2026-06-27-meetsy-phase1-clickup-writeback-design.
 - Per-task list **override** is a free-text list-id input (the `/clickup/lists` tree is Owner/Admin-only; a Member pushing can't fetch it) — admin tree-override is a fast-follow.
 - Subtasks/dependency-links folded into the description; real ClickUp child tasks + dep links = Phase 1.x.
 
-## ✅ PHASE 1 COMPLETE (code + tests; live-migrated). Remaining: live ClickUp push validation (needs a real ClickUp list/token).
+### 2026-06-27 — Phase 1 LIVE ClickUp push — DONE / PROVEN ✅
+Ran the real path end-to-end against the live ClickUp API (test team `90181854711`, token via scratchpad). Reused the Phase-0 test DB + session cookie; booted meetsy-api with `CLICKUP_API_TOKEN` as the env fallback (no per-workspace stored token → no decrypt needed). Created a dedicated throwaway list `Meetsy Live Test` (`901819060208`) so nothing existing was touched. Seeded a default workspace (`ws_livetest` → team `90181854711`) + a completed run.
+- `GET /clickup/members` (meetsy-api) → parsed live `.user.id` correctly → `clickupUserId:"242630708"`.
+- `PUT /workspaces/ws_livetest/push-config` (target list + assignable member) → 200 (CSRF).
+- `POST /runs/run_live/push` (1 task, assignee 242630708, priority high) → `pushed`, task `86ey2yc7a`.
+- **Read back from ClickUp:** name ✓, priority `high` ✓, tags `[meetsy]` ✓, description carries Acceptance criteria + Evidence ✓, list `901819060208` ✓, and **ASSIGNEES `[(242630708, 'Shoabur…')]`** ✓ — the assignee is ACTUALLY set (the advisor's string-vs-number "silent drop" risk disproven live; the mapper sends an integer).
+- **Idempotent re-push** → `skipped`, same task id; **list task count = 1** (no duplicate). ✓
+- Advisor's other two flagged risks (`.user` nesting, push DTO carrying criteria/evidence) verified earlier against the code AND now confirmed on real data.
+
+**Fix found by live-verify (committed):** date-only due dates (`YYYY-MM-DD`) were sent at UTC midnight and ClickUp shifted them to the prior day for a `+06:00` workspace (showed `2026-06-30` for `2026-07-01`). `TaskMapperService` now anchors a bare date at **noon UTC** (`T12:00:00Z`); full datetime strings pass through. +1 test (52 meetsy-api tests now).
+
+**Test-env note:** a real task (`86ey2yc7a`) exists in the throwaway list `Meetsy Live Test` (`901819060208`) in team `90181854711` — safe to delete the whole list. ClickUp token is in the scratchpad only; user will rotate it.
+
+## ✅✅ PHASE 1 COMPLETE & LIVE-VERIFIED — real ClickUp task created with assignee set, idempotent, correct fields. Next available: Phase 2 (RAG/KB) or polish (subtasks/dep-links Phase 1.x, meetsy Docker image build validation).
