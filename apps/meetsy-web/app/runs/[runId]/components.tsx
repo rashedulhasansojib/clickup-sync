@@ -8,17 +8,27 @@ import {
   useRef,
   useState,
 } from "react";
+import Link from "next/link";
 import type {
   AnalysisResult,
   ChatMessage,
   FeedbackItem,
   PersonTasks,
   Task,
+  TaskPriority,
   TaskVote,
   PipelineStage,
   ProgressEvent as PipelineProgressEvent,
 } from "@ma/shared";
-import { api, ApiError } from "@/lib/api";
+import {
+  api,
+  ApiError,
+  type AssignableMember,
+  type PushAuditRow,
+  type PushResult,
+  type PushTaskInput,
+  type RunPushStatus,
+} from "@/lib/api";
 import { Button, Card, ErrorBanner, PriorityBadge, Spinner, Tag } from "@/app/ui";
 
 // ── Live pipeline stepper ─────────────────────────────────────────────
@@ -636,5 +646,413 @@ export function ChatPanel({
         </Button>
       </form>
     </Card>
+  );
+}
+
+// ── ClickUp push editor (Phase 1) ───────────────────────────────────────
+// Shown on a completed run. Loads GET /runs/:id/push (config + suggestions +
+// existing pushes). If push isn't configured, links to the settings page.
+// Otherwise renders an editable row per task (assignee from the allowlist,
+// priority, due date, optional list override), with already-pushed tasks
+// locked to their ClickUp link, and a bulk "Push to ClickUp" button.
+
+const PRIORITY_OPTIONS: TaskPriority[] = ["urgent", "high", "normal", "low"];
+
+/** Per-task editable push state. */
+interface PushEdit {
+  /** ClickUp user id, or null for unassigned. */
+  clickupUserId: string | null;
+  priority: TaskPriority;
+  /** yyyy-mm-dd for the <input type=date>, or "" for none. */
+  dueDate: string;
+  /** Optional per-task target list override (list id); "" = use workspace default. */
+  listOverride: string;
+  /** Whether this row is included in the next bulk push. */
+  include: boolean;
+}
+
+/** Flatten a result into one ordered task list (assigned people, then unassigned). */
+function flattenTasks(result: AnalysisResult): Task[] {
+  return [...result.people.flatMap((p) => p.tasks), ...result.unassignedTasks];
+}
+
+/** ISO/date string → yyyy-mm-dd for a date input; "" when not a parseable date. */
+function toDateInputValue(due: string | null): string {
+  if (!due) return "";
+  const ms = Date.parse(due);
+  if (!Number.isFinite(ms)) return "";
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+export function PushSection({
+  runId,
+  result,
+}: {
+  runId: string;
+  result: AnalysisResult;
+}) {
+  const [status, setStatus] = useState<RunPushStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [edits, setEdits] = useState<Record<string, PushEdit>>({});
+  const [pushing, setPushing] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
+  /** Per-task result of the most recent push (taskId → outcome). */
+  const [results, setResults] = useState<Record<string, PushResult>>({});
+
+  const tasks = flattenTasks(result);
+
+  // Build the initial editable state from the loaded status + each task's
+  // pipeline defaults. Already-`pushed` tasks are excluded from the push by
+  // default (they're locked); failed/skipped stay editable.
+  const initEdits = useCallback(
+    (s: RunPushStatus) => {
+      const suggestionBy = new Map(
+        s.suggestions.map((sg) => [sg.meetsyTaskId, sg.suggestedClickupUserId]),
+      );
+      const allowed = new Set(
+        (s.config?.assignableMembers ?? []).map((m) => m.clickupUserId),
+      );
+      const pushedIds = new Set(
+        s.pushes.filter((p) => p.status === "pushed").map((p) => p.meetsyTaskId),
+      );
+
+      // Preserve any in-progress edits the user already made (re-fetches happen
+      // when feedback/chat revise the result); only seed defaults for new tasks.
+      // A task that just became `pushed` is force-excluded from the next push.
+      setEdits((prev) => {
+        const next: Record<string, PushEdit> = {};
+        for (const t of tasks) {
+          const existing = prev[t.id];
+          if (existing) {
+            next[t.id] = {
+              ...existing,
+              include: pushedIds.has(t.id) ? false : existing.include,
+            };
+            continue;
+          }
+          const suggested = suggestionBy.get(t.id) ?? null;
+          next[t.id] = {
+            clickupUserId: suggested && allowed.has(suggested) ? suggested : null,
+            priority: t.priority,
+            dueDate: toDateInputValue(t.dueDate),
+            listOverride: "",
+            include: !pushedIds.has(t.id),
+          };
+        }
+        return next;
+      });
+    },
+    // tasks is derived from `result` each render; key the init on result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [result],
+  );
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const s = await api.getRunPush(runId);
+      setStatus(s);
+      initEdits(s);
+    } catch (err) {
+      setLoadError(
+        err instanceof ApiError ? err.message : "Could not load push status.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [runId, initEdits]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const updateEdit = useCallback(
+    (taskId: string, patch: Partial<PushEdit>) => {
+      setEdits((prev) => ({ ...prev, [taskId]: { ...prev[taskId], ...patch } }));
+    },
+    [],
+  );
+
+  if (loading) {
+    return (
+      <Card className="p-5">
+        <Spinner label="Loading push status…" />
+      </Card>
+    );
+  }
+
+  if (loadError) return <ErrorBanner message={loadError} />;
+  if (!status) return null;
+
+  // Not configured → guide the user to settings (no editor).
+  if (!status.config) {
+    return (
+      <Card className="space-y-2 p-5">
+        <h2 className="text-sm font-semibold text-zinc-700">Push to ClickUp</h2>
+        <p className="text-sm text-zinc-600">
+          Configure ClickUp push settings (target list + assignable members) to
+          enable pushing tasks.
+        </p>
+        <Link
+          href="/settings/push"
+          className="text-sm font-medium text-zinc-900 underline underline-offset-2 hover:text-zinc-700"
+        >
+          Open push settings →
+        </Link>
+      </Card>
+    );
+  }
+
+  const config = status.config;
+  const pushedBy = new Map<string, PushAuditRow>(
+    status.pushes
+      .filter((p) => p.status === "pushed")
+      .map((p) => [p.meetsyTaskId, p]),
+  );
+
+  // Eligible = editable rows the user has ticked for the next push.
+  const eligible = tasks.filter(
+    (t) => !pushedBy.has(t.id) && edits[t.id]?.include,
+  );
+
+  // Plain handler (not a hook) — defined after the early returns above, so it
+  // must not be a useCallback. It closes over the latest edits/eligible.
+  const handlePush = async () => {
+    if (eligible.length === 0) return;
+    if (
+      !window.confirm(
+        `Create ${eligible.length} task${
+          eligible.length === 1 ? "" : "s"
+        } in ClickUp?`,
+      )
+    ) {
+      return;
+    }
+
+    setPushing(true);
+    setPushError(null);
+    try {
+      const payload: PushTaskInput[] = eligible.map((t) => {
+        const e = edits[t.id];
+        const listOverride = e.listOverride.trim();
+        return {
+          meetsyTaskId: t.id,
+          ...(listOverride ? { listId: listOverride } : {}),
+          clickupUserId: e.clickupUserId,
+          title: t.title,
+          description: t.description,
+          acceptanceCriteria: t.acceptanceCriteria,
+          evidence: t.evidence,
+          priority: e.priority,
+          dueDate: e.dueDate ? e.dueDate : null,
+          tags: t.tags,
+          subtasks: t.subtasks,
+          dependencies: t.dependencies,
+        };
+      });
+
+      const res = await api.pushRun(runId, payload);
+      setResults((prev) => {
+        const next = { ...prev };
+        for (const r of res.results) next[r.meetsyTaskId] = r;
+        return next;
+      });
+      // Re-fetch to lock newly-pushed rows authoritatively.
+      await load();
+    } catch (err) {
+      setPushError(
+        err instanceof ApiError ? err.message : "Could not push to ClickUp.",
+      );
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  return (
+    <Card className="space-y-4 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-zinc-700">
+            Push to ClickUp
+          </h2>
+          <p className="mt-0.5 text-xs text-zinc-500">
+            Target list:{" "}
+            <span className="font-medium text-zinc-600">
+              {config.targetListName ?? config.targetListId}
+            </span>
+          </p>
+        </div>
+        <Button onClick={handlePush} disabled={pushing || eligible.length === 0}>
+          {pushing ? (
+            <Spinner label="Pushing…" />
+          ) : (
+            `Push to ClickUp${eligible.length ? ` (${eligible.length})` : ""}`
+          )}
+        </Button>
+      </div>
+
+      {pushError && <ErrorBanner message={pushError} />}
+
+      <div className="space-y-2">
+        {tasks.map((t) => (
+          <TaskPushRow
+            key={t.id}
+            task={t}
+            edit={edits[t.id]}
+            members={config.assignableMembers}
+            pushed={pushedBy.get(t.id) ?? null}
+            result={results[t.id] ?? null}
+            disabled={pushing}
+            onChange={(patch) => updateEdit(t.id, patch)}
+          />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function TaskPushRow({
+  task,
+  edit,
+  members,
+  pushed,
+  result,
+  disabled,
+  onChange,
+}: {
+  task: Task;
+  edit: PushEdit | undefined;
+  members: AssignableMember[];
+  pushed: PushAuditRow | null;
+  result: PushResult | null;
+  disabled: boolean;
+  onChange: (patch: Partial<PushEdit>) => void;
+}) {
+  // Locked: already pushed (from a prior push or this session). Show the link.
+  if (pushed) {
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+        <span className="min-w-0 truncate text-sm font-medium text-zinc-800">
+          <span className="mr-1.5 text-green-600">✓</span>
+          {task.title}
+        </span>
+        {pushed.clickupUrl ? (
+          <a
+            href={pushed.clickupUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="shrink-0 text-xs font-medium text-green-700 underline underline-offset-2"
+          >
+            View in ClickUp →
+          </a>
+        ) : (
+          <span className="shrink-0 text-xs text-green-700">Pushed</span>
+        )}
+      </div>
+    );
+  }
+
+  if (!edit) return null;
+
+  return (
+    <div className="rounded-lg border border-zinc-200 px-3 py-2.5">
+      <div className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={edit.include}
+          disabled={disabled}
+          onChange={(e) => onChange({ include: e.target.checked })}
+          className="mt-1 h-4 w-4 rounded border-zinc-300"
+          aria-label={`Include "${task.title}" in push`}
+        />
+        <div className="min-w-0 flex-1 space-y-2">
+          <p className="truncate text-sm font-medium text-zinc-800">
+            {task.title}
+          </p>
+
+          <div className="flex flex-wrap gap-2">
+            {/* Assignee — from the allowlist only. */}
+            <label className="flex flex-col text-[11px] text-zinc-400">
+              Assignee
+              <select
+                value={edit.clickupUserId ?? ""}
+                disabled={disabled}
+                onChange={(e) =>
+                  onChange({ clickupUserId: e.target.value || null })
+                }
+                className="mt-0.5 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 focus:border-zinc-400 focus:outline-none"
+              >
+                <option value="">Unassigned</option>
+                {members.map((m) => (
+                  <option key={m.clickupUserId} value={m.clickupUserId}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {/* Priority. */}
+            <label className="flex flex-col text-[11px] text-zinc-400">
+              Priority
+              <select
+                value={edit.priority}
+                disabled={disabled}
+                onChange={(e) =>
+                  onChange({ priority: e.target.value as TaskPriority })
+                }
+                className="mt-0.5 rounded-md border border-zinc-300 px-2 py-1 text-sm capitalize text-zinc-800 focus:border-zinc-400 focus:outline-none"
+              >
+                {PRIORITY_OPTIONS.map((p) => (
+                  <option key={p} value={p} className="capitalize">
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {/* Due date. */}
+            <label className="flex flex-col text-[11px] text-zinc-400">
+              Due date
+              <input
+                type="date"
+                value={edit.dueDate}
+                disabled={disabled}
+                onChange={(e) => onChange({ dueDate: e.target.value })}
+                className="mt-0.5 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 focus:border-zinc-400 focus:outline-none"
+              />
+            </label>
+
+            {/* Optional per-task list override (list id). */}
+            <label className="flex flex-col text-[11px] text-zinc-400">
+              List override (optional)
+              <input
+                type="text"
+                value={edit.listOverride}
+                disabled={disabled}
+                placeholder="default list"
+                onChange={(e) => onChange({ listOverride: e.target.value })}
+                className="mt-0.5 w-32 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 placeholder:text-zinc-300 focus:border-zinc-400 focus:outline-none"
+              />
+            </label>
+          </div>
+
+          {/* Last push outcome for this row (failed/skipped surface here). */}
+          {result && result.status !== "pushed" && (
+            <p
+              className={`text-xs ${
+                result.status === "failed" ? "text-red-600" : "text-zinc-500"
+              }`}
+            >
+              {result.status === "failed"
+                ? `✗ ${result.error ?? "Push failed"}`
+                : "Skipped (already pushed)"}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

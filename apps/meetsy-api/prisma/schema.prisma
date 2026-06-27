@@ -50,6 +50,15 @@ enum ChatRole {
   @@schema("meetsy")
 }
 
+// Outcome of pushing a single Meetsy task to ClickUp.
+enum PushStatus {
+  pushed
+  failed
+  skipped
+
+  @@schema("meetsy")
+}
+
 model Meeting {
   id          String  @id @default(cuid())
   // Soft references to public (no DB FK): org owns users, workspace owns meetings.
@@ -133,6 +142,48 @@ model ChatMessage {
   run AnalysisRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@index([runId])
+  @@schema("meetsy")
+}
+
+// Per-workspace ClickUp write-back configuration: the default target list new
+// tasks are created in, plus the allowlist of members Meetsy may assign. Owned
+// and managed by Meetsy; workspaceId is a soft ref to public.workspaces.
+model WorkspacePushConfig {
+  id                String   @id @default(cuid())
+  workspaceId       String   @unique
+  targetListId      String
+  targetListName    String?
+  // [{ clickupUserId, name, email }] — the ONLY people Meetsy may offer as an
+  // assignee. Anyone not in this list is never assigned.
+  assignableMembers Json
+  // Optional ClickUp status for new tasks; null = use the list's default.
+  defaultStatus     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  updatedBy         String?
+
+  @@schema("meetsy")
+}
+
+// Audit trail + idempotency ledger for ClickUp task pushes. One row per
+// (runId, meetsyTaskId): a `pushed` row is the dedupe key so a re-push never
+// creates a duplicate ClickUp task.
+model TaskPush {
+  id            String     @id @default(cuid())
+  runId         String
+  meetsyTaskId  String
+  workspaceId   String
+  clickupTaskId String?
+  clickupUrl    String?
+  status        PushStatus
+  error         String?
+  // The ClickUp create payload that was (or would have been) sent.
+  payload       Json
+  pushedBy      String
+  createdAt     DateTime   @default(now())
+
+  @@unique([runId, meetsyTaskId])
+  @@index([workspaceId])
   @@schema("meetsy")
 }
 

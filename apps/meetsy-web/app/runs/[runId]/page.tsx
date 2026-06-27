@@ -9,6 +9,7 @@ import { Button, Card, ErrorBanner, Spinner } from "@/app/ui";
 import {
   ChatPanel,
   PipelineStepper,
+  PushSection,
   ResultsSection,
 } from "./components";
 
@@ -145,6 +146,9 @@ export default function RunPage() {
               onResultReplace={setResult}
             />
           )}
+
+          {/* ClickUp write-back — edit assignee/priority/due, then push. */}
+          {result && <PushSection runId={runId} result={result} />}
 
           {/* Chat panel — only meaningful once a result exists. Mounted once
               and left mounted (not keyed on result) so feedback/chat updates

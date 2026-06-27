@@ -55,6 +55,19 @@ export const EnvSchema = z.object({
   SESSION_IDLE_TIMEOUT_DAYS: z.coerce.number().int().positive().default(7),
   // Optional machine credential — mirrors Clicksy's x-admin-key → synthetic Owner.
   ADMIN_API_KEY: z.string().optional().default(""),
+
+  // ClickUp write-back (Phase 1). Both OPTIONAL at boot so the app starts
+  // without them — push fails with a clear error only when actually invoked
+  // unconfigured (mirrors the embeddings approach).
+  //
+  // APP_ENCRYPTION_KEY: the SAME key Clicksy uses to encrypt per-workspace
+  // ClickUp tokens at rest. Meetsy only DECRYPTS. Accepted formats mirror
+  // Clicksy: 64 hex chars, base64-encoded 32 bytes, or a raw 32-char string —
+  // validated lazily by parseEncryptionKey() at decrypt time, not here.
+  APP_ENCRYPTION_KEY: z.string().optional().default(""),
+  // Fallback ClickUp token used when a workspace has no stored token (mirrors
+  // Clicksy's CLICKUP_API_TOKEN fallback).
+  CLICKUP_API_TOKEN: z.string().optional().default(""),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
