@@ -13,6 +13,7 @@ export class QueueService {
     @InjectQueue(QUEUES.CLICKUP_BACKFILLS) private readonly backfills: Queue,
     @InjectQueue(QUEUES.MAINTENANCE) private readonly maintenance: Queue,
     @InjectQueue(QUEUES.CLICKUP_ASSIGNEE_REPLACEMENT) private readonly assigneeReplacement: Queue,
+    @InjectQueue(QUEUES.CLICKUP_COMMENTS) private readonly comments: Queue,
     private readonly settings: SettingsService,
   ) {}
 
@@ -24,6 +25,7 @@ export class QueueService {
       [QUEUES.CLICKUP_BACKFILLS]: this.backfills,
       [QUEUES.MAINTENANCE]: this.maintenance,
       [QUEUES.CLICKUP_ASSIGNEE_REPLACEMENT]: this.assigneeReplacement,
+      [QUEUES.CLICKUP_COMMENTS]: this.comments,
     };
     const queue = map[name];
     if (!queue) throw new Error(`Unknown queue: ${name}`);

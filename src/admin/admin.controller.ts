@@ -7,6 +7,7 @@ import { AuditLogInterceptor } from './audit-log.interceptor';
 import { AuditLogRepository } from './audit-log.repository';
 import { SyncTaskDto } from './dto/sync-task.dto';
 import { BackfillDto } from './dto/backfill.dto';
+import { CommentsBackfillDto } from './dto/comments-backfill.dto';
 import { BackfillReplacementDto } from './dto/backfill-replacement.dto';
 import { CreateRateDto } from './dto/create-rate.dto';
 import { UpdateRateDto } from './dto/update-rate.dto';
@@ -45,6 +46,22 @@ import { subtractDays } from '../common/utils/date-utils';
 function parseId(id: string): bigint {
   const n = BigInt(id);
   return n;
+}
+
+const COMMENT_BACKFILL_RECENT_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * BullMQ priority for a comment-backfill job (lower = sooner). The KB gets the
+ * comments that matter first: open/in-progress tasks (status not closed/done)
+ * rank highest, then recently-updated tasks, then everything else.
+ */
+function commentBackfillPriority(task: { statusType: string | null; updatedDate: Date | null }): number {
+  const st = (task.statusType ?? '').toLowerCase();
+  const closed = st === 'closed' || st === 'done';
+  if (!closed) return 1;
+  const updatedMs = task.updatedDate?.getTime() ?? 0;
+  if (Date.now() - updatedMs < COMMENT_BACKFILL_RECENT_MS) return 2;
+  return 3;
 }
 
 /**
@@ -232,6 +249,50 @@ export class AdminController {
       this.queues.defaultJobOptions(),
     );
     return { queued: true, taskId: dto.taskId, queue: QUEUES.CLICKUP_TIME_ENTRIES };
+  }
+
+  // ── ClickUp comment sync (opt-in; NOT part of the hourly reconcile) ──────────
+
+  @Post('comments/sync-task')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Enqueue a comment sync for a single task (re-fetch + idempotent upsert into clickup_task_comments).' })
+  syncTaskComments(@Body() dto: SyncTaskDto, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    this.queues.get(QUEUES.CLICKUP_COMMENTS).add(
+      JOBS.SYNC_TASK_COMMENTS,
+      { workspaceId: wsId, taskId: dto.taskId },
+      this.queues.defaultJobOptions(),
+    );
+    return { queued: true, taskId: dto.taskId, queue: QUEUES.CLICKUP_COMMENTS };
+  }
+
+  @Post('comments/backfill')
+  @HttpCode(200)
+  @ApiOperation({ summary: "Enqueue prioritized comment-sync jobs for every known task in a space (open/in-progress first). Opt-in history backfill — comments are NOT fetched by the hourly sweep." })
+  async backfillComments(@Body() dto: CommentsBackfillDto, @Query('workspaceId') workspaceId?: string) {
+    const wsId = this.workspaces.resolveWorkspaceId(workspaceId);
+    const space = this.workspaces.getSpace(wsId, dto.spaceId);
+    if (!space && !dto.allowUnknownSpaces) {
+      const valid = this.workspaces.getSpaces(wsId).map((s) => s.spaceId).join(', ');
+      throw new BadRequestException(`Unknown spaceId: ${dto.spaceId} for this workspace. Valid: ${valid || '(none)'}. Pass allowUnknownSpaces: true to override.`);
+    }
+    // Enqueue one comment-sync job per known (non-deleted) task in the space,
+    // prioritized by task value so the comments that matter drain first. The
+    // jobs are idempotent (re-fetch + upsert), so re-running is safe.
+    const tasks = await this.prisma.clickupTask.findMany({
+      where: { workspaceId: wsId, spaceId: dto.spaceId, isDeleted: false },
+      select: { taskId: true, statusType: true, updatedDate: true },
+    });
+    const queue = this.queues.get(QUEUES.CLICKUP_COMMENTS);
+    const jobOpts = this.queues.defaultJobOptions();
+    for (const task of tasks) {
+      await queue.add(
+        JOBS.SYNC_TASK_COMMENTS,
+        { workspaceId: wsId, taskId: task.taskId },
+        { ...jobOpts, priority: commentBackfillPriority(task) },
+      );
+    }
+    return { queued: tasks.length, spaceId: dto.spaceId };
   }
 
   @Post('backfill')

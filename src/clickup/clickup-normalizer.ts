@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ClickUpTask, ClickUpTimeEntry } from './clickup.types';
+import { ClickUpComment, ClickUpTask, ClickUpTimeEntry } from './clickup.types';
 import { CustomFieldExtractor } from './custom-field-extractor';
 import { fromClickupMillis } from '../common/utils/date-utils';
 import { joinNames, toNumberOrZero, toStringOrEmpty, toStringOrNull } from '../common/utils/safe-value';
@@ -16,6 +16,13 @@ export interface NormalizedTask {
 export interface NormalizedTimeEntry {
   timeEntryId: string; taskId: string | null; taskName: string | null; userId: string | null; userName: string | null; userEmail: string | null;
   startTime: Date | null; endTime: Date | null; durationHours: number; billable: boolean; description: string | null; raw: unknown;
+}
+
+export interface NormalizedComment {
+  commentId: string; taskId: string; parentCommentId: string | null;
+  commentText: string | null; userId: string | null; userName: string | null; userEmail: string | null;
+  resolved: boolean; assigneeId: string | null; assigneeName: string | null; replyCount: number;
+  reactions: unknown; commentDate: Date | null; raw: unknown;
 }
 
 @Injectable()
@@ -69,6 +76,38 @@ export class ClickupNormalizer {
       billable: !!entry.billable,
       description: toStringOrNull(entry.description),
       raw: entry,
+    };
+  }
+
+  /**
+   * Normalize a ClickUp comment to the `clickup_task_comments` shape. The owning
+   * `taskId` is passed in because the comment object from
+   * `GET /task/{id}/comment` does not echo it. Plaintext is read from
+   * `comment_text` first, falling back to joining the rich `comment[].text`
+   * fragments. `parentCommentId` is reserved for threaded replies (null today).
+   */
+  normalizeComment(c: ClickUpComment, taskId: string): NormalizedComment {
+    if (!c.id) throw new Error('ClickUp comment is missing id');
+    const text =
+      toStringOrNull(c.comment_text) ??
+      (Array.isArray(c.comment)
+        ? (c.comment.map((f) => f?.text ?? '').join('').trim() || null)
+        : null);
+    return {
+      commentId: String(c.id),
+      taskId,
+      parentCommentId: toStringOrNull(c.parent),
+      commentText: text,
+      userId: toStringOrNull(c.user?.id),
+      userName: toStringOrNull(c.user?.username),
+      userEmail: toStringOrNull(c.user?.email),
+      resolved: !!c.resolved,
+      assigneeId: toStringOrNull(c.assignee?.id),
+      assigneeName: toStringOrNull(c.assignee?.username),
+      replyCount: Math.max(0, Math.round(toNumberOrZero(c.reply_count))),
+      reactions: c.reactions ?? null,
+      commentDate: fromClickupMillis(c.date),
+      raw: c,
     };
   }
 }

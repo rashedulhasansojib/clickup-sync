@@ -7,7 +7,11 @@ const DEFAULT_TEAM_ID = '3450636';
 const DEFAULT_SPIKE_HOURS_CAP = 12;
 const DEFAULT_MAX_BACKFILL_LOOKBACK = 1095; // 3 years
 const MAX_BACKFILL_LOOKBACK_BACKSTOP = 3650; // 10 years — absolute upper bound
-const DEFAULT_EVENTS = 'taskCreated,taskUpdated,taskDeleted,taskTimeTrackedUpdated,taskStatusUpdated';
+// Kept in lock-step with env.validation.ts CLICKUP_WEBHOOK_EVENTS — this is the
+// effective fallback at registration time when the env var is unset (the service
+// reads process.env directly, not via ConfigService). Includes the comment
+// events so live comment capture works out of the box.
+const DEFAULT_EVENTS = 'taskCreated,taskUpdated,taskDeleted,taskTimeTrackedUpdated,taskStatusUpdated,taskCommentPosted,taskCommentUpdated';
 
 /** Per-workspace sync preferences (stored under workspace.preferences.sync). */
 export interface SyncPreferences {

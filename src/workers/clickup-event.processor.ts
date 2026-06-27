@@ -90,6 +90,12 @@ export class ClickupEventProcessor extends WorkerHost {
       // recover on its own. Both jobs are idempotent.
       await this.queues.get(QUEUES.CLICKUP_TASKS).add(JOBS.SYNC_CLICKUP_TASK, { workspaceId, taskId }, this.queues.defaultJobOptions());
       await this.queues.get(QUEUES.CLICKUP_TIME_ENTRIES).add(JOBS.SYNC_TASK_TIME_ENTRIES, { workspaceId, taskId, assigneeIds: loggedUserId ? [loggedUserId] : undefined }, this.queues.defaultJobOptions());
+    } else if (eventType === 'taskCommentPosted' || eventType === 'taskCommentUpdated') {
+      // Comment events carry the full comment object + top-level task_id, but we
+      // re-fetch (enqueue a comment sync) rather than parse inline so the
+      // webhook and backfill paths converge on one idempotent code path. Only a
+      // comment sync is enqueued — the task's own state is unchanged by a comment.
+      await this.queues.get(QUEUES.CLICKUP_COMMENTS).add(JOBS.SYNC_TASK_COMMENTS, { workspaceId, taskId }, this.queues.defaultJobOptions());
     } else {
       await this.queues.get(QUEUES.CLICKUP_TASKS).add(JOBS.SYNC_CLICKUP_TASK, { workspaceId, taskId }, this.queues.defaultJobOptions());
     }

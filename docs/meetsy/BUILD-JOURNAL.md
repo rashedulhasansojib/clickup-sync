@@ -242,3 +242,24 @@ Ran the real path end-to-end against the live ClickUp API (test team `9018185471
 **Test-env note:** a real task (`86ey2yc7a`) exists in the throwaway list `Meetsy Live Test` (`901819060208`) in team `90181854711` — safe to delete the whole list. ClickUp token is in the scratchpad only; user will rotate it.
 
 ## ✅✅ PHASE 1 COMPLETE & LIVE-VERIFIED — real ClickUp task created with assignee set, idempotent, correct fields. Next available: Phase 2 (RAG/KB) or polish (subtasks/dep-links Phase 1.x, meetsy Docker image build validation).
+
+---
+
+## Phase 2.0 — Clicksy ClickUp comment-sync (the first substantive Clicksy feature)
+
+Spec: `docs/superpowers/specs/2026-06-27-clicksy-comment-sync-design.md`. Enables Meetsy's KB to read task comments (Clicksy mirrored descriptions but not comments).
+
+### 2026-06-28 — Phase 2.0 — DONE / GREEN + LIVE-VERIFIED
+**Purely additive to Clicksy** (11 files modified — all additions; new `src/comments/` module + `comment-sync.processor` + migration `0014_clickup_task_comments`). Existing task/time-entry/webhook paths untouched.
+- **Schema:** `ClickupTaskComment` (no FK on `task_id` — append-log like `ClickupTaskEvent`, so a comment webhook before the task is mirrored still inserts; upsert by `commentId`) + `commentsSyncedAt`/`commentCount` markers on `ClickupTask` (so Meetsy re-embeds a task once on comment completion, not per page).
+- **Client:** `getTaskComments` — `GET /task/{id}/comment`, pages backward via `start`+`start_id` (25/page, no "since" filter), dedupes, reuses 429 handling.
+- **Queue/worker:** `clickup-comments` queue + `CommentSyncProcessor`; own **40/min limiter** (under the verified 100/min token budget shared with the 30/min task/time-entry sync); BullMQ **priority** by task value (open/in-progress > recently-updated > else). `markTaskCommentsSynced` uses `updateMany` → safely no-ops if the task isn't mirrored.
+- **Webhook:** `taskCommentPosted`/`taskCommentUpdated` added to default `CLICKUP_WEBHOOK_EVENTS` (+ `workspace.service` `DEFAULT_EVENTS`); processor branch enqueues a comment re-fetch (idempotent; one code path with backfill). Parser unchanged (top-level `task_id` already extracted).
+- **Backfill:** opt-in only (NOT the hourly sweep). Admin endpoints `POST /admin/comments/sync-task` + `POST /admin/comments/backfill {spaceId}` (RBAC + audit free; Meetsy-triggerable via `x-admin-key`).
+- **Meetsy read:** `GRANT SELECT ON public.clickup_task_comments TO meetsy` added to `grants.sql`.
+- **Verify:** `nest build` ✅ · full suite **641 tests** ✅ (baseline 622 after origin/main merge + 19 new) · **lint regression FIXED** — added `globals` devDep (eslint flat config imports it; pnpm didn't hoist it since the Phase-0 npm→pnpm conversion → `pnpm lint` had been broken; now passes, 0 errors).
+- **LIVE-VERIFIED on team "Chishty" (`90181854711`)** with the real token: posted 2 comments to test task `86ey2yc7a` → `POST /admin/comments/sync-task` → both stored in `clickup_task_comments` with author + text; `commentsSyncedAt` set, `commentCount=2`; **re-run idempotent** (still 2 rows, `sync_count` 1→2). The webhook *live-capture* path is unit-tested only (needs a public endpoint; verify at deploy).
+- **Deferred (TODO in-code):** threaded replies (`parentCommentId` reserved, no ClickUp reply webhook), comment-delete reconciliation (no ClickUp comment-deleted webhook).
+- **Test artifacts:** 2 comments on task `86ey2yc7a` in the throwaway "Meetsy Live Test" list (team `90181854711`) — deletable with the list.
+
+**Next:** Phase 2a — minimal KB slice (pgvector image swap + `meetsy` kb_chunk + onboarding embed). VALUE verification still gated on a ClickUp token with access to the real "Nifty" history.

@@ -2,6 +2,8 @@ import { Injectable, Logger } from "@nestjs/common";
 import { HttpService } from "@nestjs/axios";
 import { firstValueFrom } from "rxjs";
 import {
+  ClickUpComment,
+  ClickUpCommentPage,
   ClickUpMember,
   ClickUpTask,
   ClickUpTaskPage,
@@ -101,6 +103,54 @@ export class ClickupClient {
 
   getTask(workspaceId: string, taskId: string): Promise<ClickUpTask> {
     return this.request("GET", workspaceId, `/task/${taskId}?include_subtasks=true`);
+  }
+
+  /**
+   * Fetch every comment on a task. ClickUp's `GET /task/{id}/comment` returns 25
+   * comments per call, newest-first, with NO "comments since" filter — the only
+   * pagination is cursor-based BACKWARD via `start` (the last comment's `date`,
+   * Unix ms) + `start_id` (the last comment's id). We walk pages until one comes
+   * back short (< 25) or empty, concatenating, and dedupe by id in case a
+   * boundary comment repeats across pages. 429s are handled by `request`.
+   */
+  async getTaskComments(workspaceId: string, taskId: string): Promise<ClickUpComment[]> {
+    const PAGE_SIZE = 25;
+    // Runaway guard: 1000 pages = 25k comments on a single task, far beyond any
+    // realistic thread. Bounds the loop if ClickUp ever returns a non-shrinking
+    // page (e.g. a cursor it doesn't honor).
+    const MAX_PAGES = 1000;
+    const out: ClickUpComment[] = [];
+    const seen = new Set<string>();
+    let start: number | undefined;
+    let startId: string | undefined;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const params = new URLSearchParams();
+      if (start != null && Number.isFinite(start)) params.append("start", String(start));
+      if (startId) params.append("start_id", startId);
+      const qs = params.toString();
+      const res = await this.request<ClickUpCommentPage>(
+        "GET",
+        workspaceId,
+        `/task/${taskId}/comment${qs ? `?${qs}` : ""}`,
+      );
+      const comments = res?.comments ?? [];
+      if (comments.length === 0) break;
+      for (const c of comments) {
+        const id = c?.id != null ? String(c.id) : undefined;
+        if (id) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+        }
+        out.push(c);
+      }
+      if (comments.length < PAGE_SIZE) break;
+      const last = comments[comments.length - 1];
+      start = Number(last?.date);
+      startId = last?.id != null ? String(last.id) : undefined;
+      // Without a usable cursor we'd re-request the same page forever — stop.
+      if (!Number.isFinite(start) || !startId) break;
+    }
+    return out;
   }
 
   getTasksBySpace(

@@ -16,7 +16,7 @@ const schema = z.object({
   CLICKUP_WEBHOOK_ENDPOINT: z.string().optional().default(''),
   CLICKUP_WEBHOOK_SECRET: z.string().optional().default(''),
   CLICKUP_WEBHOOK_EVENTS: z.string().default(
-    'taskCreated,taskUpdated,taskDeleted,taskTimeTrackedUpdated,taskStatusUpdated'
+    'taskCreated,taskUpdated,taskDeleted,taskTimeTrackedUpdated,taskStatusUpdated,taskCommentPosted,taskCommentUpdated'
   ),
   ADMIN_API_KEY: z.string().optional().default(''),
   JOB_ATTEMPTS: z.coerce.number().default(5),

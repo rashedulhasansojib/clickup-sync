@@ -25,6 +25,22 @@ export interface CreateTimeEntryPayload {
   tid?: string;           // task id
   assignee?: number;      // real user's ClickUp user ID (numeric)
 }
+export interface ClickUpComment {
+  id: string;
+  // Rich-text fragments; `comment_text` is the flattened plaintext. We read
+  // comment_text first and fall back to joining comment[].text.
+  comment?: Array<{ text?: string }>;
+  comment_text?: string;
+  user?: { id?: string | number; username?: string; email?: string };
+  resolved?: boolean;
+  assignee?: { id?: string | number; username?: string } | null;
+  reactions?: unknown;
+  reply_count?: string | number;
+  date?: string | number;
+  // Reserved for threaded replies (top-level comments have no parent today).
+  parent?: string | null;
+}
+export interface ClickUpCommentPage { comments: ClickUpComment[]; }
 export interface ClickUpMember {
   user: {
     id: string | number;

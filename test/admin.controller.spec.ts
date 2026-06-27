@@ -199,6 +199,55 @@ describe('AdminController', () => {
     });
   });
 
+  describe('comments sync-task', () => {
+    it('queues SYNC_TASK_COMMENTS on the clickup-comments queue and returns taskId', () => {
+      const queues = makeQueues();
+      const result = makeCtrl(queues).syncTaskComments({ taskId: '86abc' });
+      expect(result).toEqual({ queued: true, taskId: '86abc', queue: 'clickup-comments' });
+      expect(queues.get).toHaveBeenCalledWith('clickup-comments');
+      const add = (queues.get as jest.Mock).mock.results[0].value.add as jest.Mock;
+      expect(add).toHaveBeenCalledWith('sync-task-comments', { workspaceId: 'ws1', taskId: '86abc' }, {});
+    });
+  });
+
+  describe('comments backfill', () => {
+    it('enqueues one prioritized comment-sync job per known task in the space', async () => {
+      const prisma = makePrisma();
+      prisma.clickupTask.findMany.mockResolvedValue([
+        { taskId: 'open1', statusType: 'open', updatedDate: new Date() },
+        { taskId: 'recent1', statusType: 'closed', updatedDate: new Date() },
+        { taskId: 'stale1', statusType: 'done', updatedDate: new Date(0) },
+      ]);
+      const queues = makeQueues();
+      const result = await makeCtrl(queues, undefined, undefined, undefined, undefined, undefined, prisma).backfillComments({ spaceId: '3577824' });
+
+      expect(result).toEqual({ queued: 3, spaceId: '3577824' });
+      expect(queues.get).toHaveBeenCalledWith('clickup-comments');
+      const add = (queues.get as jest.Mock).mock.results[0].value.add as jest.Mock;
+      expect(add).toHaveBeenCalledTimes(3);
+      const priorityFor = (taskId: string) =>
+        add.mock.calls.find((c) => c[1].taskId === taskId)![2].priority;
+      // open/in-progress=1, recently-updated closed=2, old closed=3.
+      expect(priorityFor('open1')).toBe(1);
+      expect(priorityFor('recent1')).toBe(2);
+      expect(priorityFor('stale1')).toBe(3);
+      // scoped to the space's non-deleted tasks
+      expect(prisma.clickupTask.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ spaceId: '3577824', isDeleted: false }) }),
+      );
+    });
+
+    it('throws BadRequestException for an unknown space without the override', async () => {
+      await expect(makeCtrl().backfillComments({ spaceId: 'bad-id' })).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows an unknown space when allowUnknownSpaces is true', async () => {
+      const prisma = makePrisma(); // findMany → []
+      const result = await makeCtrl(undefined, undefined, undefined, undefined, undefined, undefined, prisma).backfillComments({ spaceId: 'x', allowUnknownSpaces: true });
+      expect(result).toEqual({ queued: 0, spaceId: 'x' });
+    });
+  });
+
   describe('backfill', () => {
     it('uses configured lookback when lookbackDays is not provided', () => {
       const result = makeCtrl().backfill({ spaceId: '3577824' });

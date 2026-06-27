@@ -46,6 +46,9 @@ RESET ROLE;
 GRANT USAGE ON SCHEMA public TO meetsy;
 GRANT SELECT ON public.users, public.sessions, public.workspaces TO meetsy;
 
+-- Read-only access to the Clicksy ClickUp comment mirror (Meetsy Phase 2 KB).
+GRANT SELECT ON public.clickup_task_comments TO meetsy;
+
 -- Intentionally NOT granted: any write on public.*, CREATE on public,
 -- or REFERENCES (so no cross-schema FK can be added). Phase 2 will add
 -- SELECT on public.clickup_tasks / clickup_task_events / clickup_time_entries.

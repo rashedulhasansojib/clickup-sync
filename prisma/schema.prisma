@@ -51,6 +51,11 @@ model ClickupTask {
   sprintPoints    Int      @default(0) @map("sprint_points")
   tags            String?
   customTags      String?  @map("custom_tags")
+  // Comment-completeness markers, set once a task's comment sync finishes (see
+  // CommentsService). Lets downstream consumers (Meetsy's KB) re-embed a task
+  // once its comments are complete instead of once per paginated page.
+  commentsSyncedAt DateTime? @map("comments_synced_at")
+  commentCount     Int       @default(0) @map("comment_count")
   raw             Json?
 
   timeEntries     ClickupTimeEntry[]
@@ -325,6 +330,39 @@ model ClickupTaskEvent {
   @@index([eventType, occurredAt])
   @@index([workspaceId, occurredAt])
   @@map("clickup_task_events")
+}
+
+// ClickUp task comments. Modeled on ClickupTaskEvent (the no-FK append-log
+// pattern), NOT ClickupTimeEntry: `taskId` is a plain indexed reference with NO
+// Prisma relation / no foreign key, because a `taskCommentPosted` webhook can
+// arrive before the task is mirrored and a real FK would throw on insert.
+// `parentCommentId` is kept nullable so threaded replies can slot in later.
+model ClickupTaskComment {
+  commentId        String    @id @map("comment_id")
+  workspaceId      String    @map("workspace_id")
+  taskId           String    @map("task_id")
+  // TODO(replies): threaded replies (ClickUp has no reply webhook; needs an N+1
+  // GET /comment/{id}/reply) will populate parent_comment_id — Phase 1.x.
+  parentCommentId  String?   @map("parent_comment_id")
+  commentText      String?   @map("comment_text")
+  userId           String?   @map("user_id")
+  userName         String?   @map("user_name")
+  userEmail        String?   @map("user_email")
+  resolved         Boolean   @default(false)
+  assigneeId       String?   @map("assignee_id")
+  assigneeName     String?   @map("assignee_name")
+  replyCount       Int       @default(0) @map("reply_count")
+  reactions        Json?
+  commentDate      DateTime? @map("comment_date")
+  isDeleted        Boolean   @default(false) @map("is_deleted")
+  deletedAt        DateTime? @map("deleted_at")
+  syncedAt         DateTime  @default(now()) @updatedAt @map("synced_at")
+  syncCount        Int       @default(0) @map("sync_count")
+  raw              Json?
+
+  @@index([taskId])
+  @@index([workspaceId, commentDate])
+  @@map("clickup_task_comments")
 }
 
 // ---------------------------------------------------------------------------

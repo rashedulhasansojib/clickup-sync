@@ -2,7 +2,9 @@ import { QueueService } from '../src/queues/queue.service';
 
 function makeQueues() {
   const q = {} as any;
-  return [q, q, q, q, q, q] as const;
+  // One placeholder per @InjectQueue param on QueueService (webhooks, tasks,
+  // time-entries, backfills, maintenance, assignee-replacement, comments).
+  return [q, q, q, q, q, q, q] as const;
 }
 
 describe('QueueService.webhookJobOptions', () => {

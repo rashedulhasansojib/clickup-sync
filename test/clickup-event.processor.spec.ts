@@ -117,6 +117,17 @@ describe('ClickupEventProcessor — event dispatch', () => {
     expect(queues._queue.add).toHaveBeenCalledWith(JOBS.SYNC_TASK_TIME_ENTRIES, { taskId: 't9', assigneeIds: undefined }, {});
   });
 
+  for (const eventType of ['taskCommentPosted', 'taskCommentUpdated']) {
+    it(`${eventType} → enqueues SYNC_TASK_COMMENTS on the comments queue ONLY (no task re-sync) and marks processed`, async () => {
+      const { queues, events, done } = run({ eventType, taskId: 'tc1', fingerprint: 'fp', loggedUserId: null });
+      await done;
+      expect(queues.get).toHaveBeenCalledWith(QUEUES.CLICKUP_COMMENTS);
+      expect(queues._queue.add).toHaveBeenCalledTimes(1);
+      expect(queues._queue.add).toHaveBeenCalledWith(JOBS.SYNC_TASK_COMMENTS, { taskId: 'tc1' }, {});
+      expect(events.markProcessed).toHaveBeenCalledWith('fp');
+    });
+  }
+
   it('unknown event with a taskId → default task sync', async () => {
     const { queues, events, done } = run({ eventType: 'taskUpdated', taskId: 't5', fingerprint: 'fp', loggedUserId: null });
     await done;
