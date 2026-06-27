@@ -147,3 +147,27 @@ These **block Phase 2**, not Phase 0/1:
 - All Meetsy work is spec-driven: a spec in `docs/superpowers/specs/` → an implementation plan → build.
 - Maintain a **Meetsy build journal** (what was built, why, current state) so future agents have continuity.
 - Add a **CLAUDE.md pointer** instructing any agent building Meetsy features to first read this plan, the relevant spec, and the journal — so future work stays accurate to the goal and the established patterns.
+
+---
+
+## Phase 2 — detailed plan (2026-06-27 update, post-research)
+
+Phase 2 = the RAG/KB + onboarding. Research done (RAG stack, KB-improvement metrics, field
+prediction, ClickUp comments/custom-fields/sprints, Clicksy backfill). Restructured into discrete,
+shippable units (advisor-guided):
+
+| Unit | What | Verifiable now? |
+|---|---|---|
+| **2.0 — Clicksy comment-sync** (`docs/superpowers/specs/2026-06-27-clicksy-comment-sync-design.md`) | Pure-Clicksy: `clickup_task_comments` table + queue + worker + `getTaskComments` + comment webhooks + prioritized conservative limiter + opt-in backfill + admin trigger + Meetsy SELECT grant. **First substantive Clicksy feature.** Built/verified FIRST. | **Yes** — plumbing testable on team "Chishty" with the working token, independent of pgvector/Meetsy/Nifty |
+| **2a — Minimal KB slice** | pgvector enablement (`postgres:18-alpine`→`pgvector/pgvector:pg18`); `meetsy` KB schema (`kb_chunk` w/ `vector(1024)` via `dimensions=1024`, tsvector, metadata, content_hash, embedding_model+version); onboarding: connect → date-range preset → coverage-check → trigger Clicksy task backfill → embed task cards (descriptions first; comments enrich via **debounced single re-embed** keyed on `commentsSyncedAt`) → hybrid retrieval (RRF). Background job + progress. | Plumbing yes (on Chishty); **VALUE (quality) needs Nifty data** |
+| **2a.1 — "What we learned" card** (separable) | Aggregate-SQL facts (roster+ownership, components, throughput, blockers) + ONE gpt-5.4-mini narrative pass. | Needs real history (Nifty) |
+| **2b — Docs + honest improvement metric** | SOP/PDF upload → parse/chunk/embed → **novelty** + **answerability-lift** (transcript-derived questions; provisional task-derived baseline at first onboarding) → honest card incl. "no improvement"; doc↔task auto-linking. | Needs real data |
+| **2c — Pipeline integration** | Pre-meeting incremental remap (cursor + content-hash, upsert-only, no full re-index); KB context injection into analyze/critic/enrich; **field prediction** (kNN prior + LLM adjudication **clamped to neighbor range**; due as p50/p80 from existing cycle-time reports; **abstain when thin**; evidence shown); **duplicate detection** (flag ≥0.90, suggest 0.82–0.90, never auto-merge); **HITL extension** of the Phase-1 push: **sprint = target list**, **client = dropdown custom field (set by option UUID)**, **points** (top-level `points`), all editable; **overrides logged** as the Phase-3 learning signal. | Needs real data + the live sprint/client structure |
+
+**Locked technical facts (research):** ClickUp comment webhooks exist (`taskCommentPosted/Updated`); comment fetch is cursor-paginated (25/page, no "since" filter); **rate limit 100/min** (verified live on the prod token) → comment backfill must be throttled+prioritized. Sprints have **no REST API** — a task is "in sprint X" by living in that sprint's **list** (so Phase-1's list picker already covers it); **client = dropdown custom field** (set via `POST /task/{id}/field/{id}` with the option **UUID**); **sprint points = top-level `points`** on create. Field prediction is a **weak prior** (literature: ~0.34 corr, no sig RAG lift) → present as range+evidence+human-confirm, never confident point-prediction.
+
+### ⚠️ CRITICAL user action (gates Phase-2 VALUE verification — start now)
+The ClickUp token provided can read team "Chishty" (`90181854711`, ~empty) but returns **0 spaces for production "Nifty" (`3450636`)** — it has no space access there. So Phase-2 units can be **built and plumbing-verified** on Chishty, but their **value** (summary quality, field-prediction neighbors, dedup) **cannot be verified without a token that can read the real Nifty history**. This is the Phase-2 analog of "no embedding deployment provisioned." **Needed: a ClickUp token with space access to the Nifty workspace** (or share the relevant space with the current token). Until then, do not read a green build on empty data as "Phase 2 works."
+
+### Build order
+**2.0 (comment-sync, now) → 2a (KB slice) → 2a.1 (summary) → 2b (docs/metric) → 2c (pipeline).** Each gets its own spec when it starts (per the spec-driven discipline). pgvector image swap is the hard prerequisite for 2a+.
