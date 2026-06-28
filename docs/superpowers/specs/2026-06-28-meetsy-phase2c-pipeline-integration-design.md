@@ -1,7 +1,7 @@
 # Meetsy Phase 2c — Pipeline Integration (KB context, field prediction, dedup, HITL push) (Design Spec)
 
 **Date:** 2026-06-28
-**Status:** Draft — **awaiting product-owner approval before build**
+**Status:** **APPROVED 2026-06-28** — build slice-by-slice. Locked decisions: (1) **slice 2c.1 → 2c.2 → 2c.3**, each built + live-verified + committed before the next; (2) 2c.2 predicts **client / sprint·component / due / estimate** (abstain-first); **assignee is a soft hint only** — confident smart-assignment is Phase 3; (3) **all live-verify pushes go to a throwaway list on the test team `90181854711`** (Chishty) — the Nifty production team `3450636` stays READ-ONLY, never written; (4) abstain default = predict only if top-1 neighbour share ≥ 0.5 **and** support ≥ 3; (5) sprint = pick the target **list** (Sprints ClickApp; we never create lists).
 **Phase:** Meetsy 2c (after 2a KB ✅, 2a.1 card ✅, onboarding fixes ✅, 2b docs+metric ✅) — the last Phase-2 slice; precedes Phase 3 (smart-assign + learning loop)
 **Plan:** `docs/superpowers/plans/2026-06-27-meetsy-integration-plan.md` (Phase 2 table, row 2c)
 **Depends on:** 2a (`KbChunk` + `KbSearchService` hybrid retrieval), 2b (`KbDocument` chunks + doc↔task links), Phase 1 (`WorkspacePushConfig`, `TaskMapperService`, `PushService`), the existing analysis pipeline (`analyzeMeeting`→`criticPass`→`enrichTasks`), `SummaryFactsService` cycle-time.
