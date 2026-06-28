@@ -1,7 +1,7 @@
 # Meetsy Phase 3 — Smart Assignment + Learning Loop (Design Spec)
 
 **Date:** 2026-06-28
-**Status:** Draft — **awaiting product-owner approval before build**
+**Status:** **APPROVED 2026-06-28** — build slice-by-slice. Locked decisions: (1) **slice 3.1 (smart assignment) → 3.2 (learning loop)**, each built + live-verified + committed before the next; (2) **always require a human click** — the top owner is pre-filled as a labelled suggestion with rationale, never auto-assigned (the project's no-automation stance holds); (3) learning-loop gate = **nudge `predicted P → suggest C` only at ≥3 corrections AND C ≥60% of P's corrections**; below that, "not enough to learn yet" (tunable on real data); (4) workload window = last 30 days (open-task count + tracked hours); (5) verification pushes (if any) ONLY to a throwaway list on test team `90181854711`.
 **Phase:** Meetsy 3 (after Phase 2 COMPLETE — 2.0/2a/2a.1/2b/2c.1/2c.2/2c.3 all live-verified)
 **Plan:** `docs/superpowers/plans/2026-06-27-meetsy-integration-plan.md` (Phase 3 row)
 **Depends on:** 2c.2 (`FieldPredictionService` weak priors incl. the assignee *hint*), 2c.3 (`FieldOverride` log + the HITL push), `KbChunk` history (assignee/component metadata), `SummaryFactsService` (workload + ownership facts), `AssigneeResolverService` (name→member), `WorkspacePushConfig.assignableMembers` (the candidate pool).
