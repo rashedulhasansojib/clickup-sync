@@ -29,6 +29,10 @@ export interface CreateTaskPayload {
   due_date_time?: boolean;
   tags?: string[];
   status?: string;
+  /** Phase 2c.3 — dropdown custom field set by option UUID (e.g. client). */
+  custom_fields?: Array<{ id: string; value: unknown }>;
+  /** Phase 2c.3 — top-level sprint points. */
+  points?: number;
 }
 
 /** Normalized create-task result returned to callers. */

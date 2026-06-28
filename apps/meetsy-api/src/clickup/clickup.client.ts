@@ -66,6 +66,31 @@ export class ClickUpClient {
     };
   }
 
+  /**
+   * GET /list/{listId}/field — the custom fields available on a list. Used by the
+   * Phase-2c.3 "refresh field options" action to discover the client DROPDOWN
+   * field + its options ([{optionId(UUID), name}] from `type_config.options`).
+   */
+  async getListCustomFields(
+    workspaceId: string,
+    listId: string,
+  ): Promise<Array<{ id: string; name: string; type: string; options: Array<{ id: string; name: string }> }>> {
+    const res = await this.request<{
+      fields?: Array<{
+        id: string;
+        name?: string;
+        type?: string;
+        type_config?: { options?: Array<{ id: string; name?: string; label?: string }> };
+      }>;
+    }>("GET", workspaceId, `/list/${listId}/field`);
+    return (res.fields ?? []).map((f) => ({
+      id: f.id,
+      name: f.name ?? f.id,
+      type: f.type ?? "",
+      options: (f.type_config?.options ?? []).map((o) => ({ id: o.id, name: o.name ?? o.label ?? o.id })),
+    }));
+  }
+
   /** GET /team/{teamId} — the workspace's team members. */
   async getTeamMembers(workspaceId: string): Promise<ClickUpMember[]> {
     const { teamId } = await this.tokens.resolve(workspaceId);

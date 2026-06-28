@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Put } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
 import type { AuthPrincipal } from "@clicksy/shared";
 import { CurrentUser, Roles } from "../auth/decorators";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -33,5 +33,19 @@ export class PushConfigController {
   ): Promise<PushConfigView> {
     const workspaceId = await this.workspaces.resolve(user.orgId, id);
     return this.pushConfig.set(workspaceId, body, user.userId);
+  }
+
+  /**
+   * Phase 2c.3 — refresh the client dropdown options + sprint lists from ClickUp
+   * for the configured target list. Owner/Admin only.
+   */
+  @Post("refresh-fields")
+  @Roles("OWNER", "ADMIN")
+  async refreshFields(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id") id: string,
+  ): Promise<PushConfigView> {
+    const workspaceId = await this.workspaces.resolve(user.orgId, id);
+    return this.pushConfig.refreshFields(workspaceId);
   }
 }

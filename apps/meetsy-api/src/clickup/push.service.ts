@@ -116,6 +116,11 @@ export class PushService {
     const existing = await this.prisma.taskPush.findMany({ where: { runId } });
     const byTask = new Map(existing.map((p) => [p.meetsyTaskId, p]));
 
+    // Phase 2c.3 — the run's stored weak predictions, keyed by the SAME task id
+    // (`t1..tM`) the push request carries as meetsyTaskId (assemble preserves it).
+    const predictions =
+      (run.result as { fieldPredictions?: Record<string, unknown> } | null)?.fieldPredictions ?? {};
+
     // Allowlist enforcement at the boundary: POST is directly callable (not only
     // via the UI), so any clickupUserId NOT in the workspace's assignable members
     // is dropped to unassigned — "anyone not in settings is never assigned" (§2).
@@ -144,6 +149,7 @@ export class PushService {
       const payload = this.mapper.map(task, {
         clickupUserId,
         defaultStatus: config.defaultStatus,
+        clientFieldId: config.clientFieldId,
       });
 
       try {
@@ -153,6 +159,16 @@ export class PushService {
           clickupTaskId: created.id,
           clickupUrl: created.url,
           error: null,
+        });
+        // Phase 2c.3 — log the human's accept/override of the weak prediction (the
+        // Phase-3 learning signal). predicted comes from the STORED run result
+        // (server-authoritative); skip on an id-miss so the table is never
+        // null-poisoned. confirmed = what the user actually pushed.
+        await this.logFieldOverride(runId, task, run.workspaceId, predictions[task.meetsyTaskId], {
+          listId,
+          clientOptionId: task.clientOptionId ?? null,
+          points: task.points ?? null,
+          clickupUserId,
         });
         results.push({
           meetsyTaskId: task.meetsyTaskId,
@@ -218,5 +234,35 @@ export class PushService {
       create: { runId, meetsyTaskId, ...data },
       update: data,
     });
+  }
+
+  /**
+   * Append a FieldOverride row capturing predicted-vs-confirmed for a pushed task
+   * (the Phase-3 learning signal; not read yet). `predicted` is the run's stored
+   * 2c.2 prediction bundle for this task; when it's MISSING (an id-miss, never an
+   * abstain — an abstain is a real, defined prediction) we SKIP rather than write a
+   * null-poisoned row. Best-effort: a logging failure never blocks the push.
+   */
+  private async logFieldOverride(
+    runId: string,
+    task: { meetsyTaskId: string },
+    workspaceId: string,
+    predicted: unknown,
+    confirmed: { listId: string; clientOptionId: string | null; points: number | null; clickupUserId: string | null },
+  ): Promise<void> {
+    if (predicted === undefined || predicted === null) return; // id-miss → don't poison the table
+    try {
+      await this.prisma.fieldOverride.create({
+        data: {
+          runId,
+          meetsyTaskId: task.meetsyTaskId,
+          workspaceId,
+          predicted: predicted as Prisma.InputJsonValue,
+          confirmed: confirmed as unknown as Prisma.InputJsonValue,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`FieldOverride log failed for ${task.meetsyTaskId}: ${(err as Error).message}`);
+    }
   }
 }

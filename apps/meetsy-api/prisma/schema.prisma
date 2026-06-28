@@ -168,10 +168,39 @@ model WorkspacePushConfig {
   assignableMembers Json
   // Optional ClickUp status for new tasks; null = use the list's default.
   defaultStatus     String?
+  // Phase 2c.3 HITL fields — populated by the "refresh ClickUp field options"
+  // action (fetched from ClickUp), confirmed per-task on the push.
+  // The client dropdown custom field: its id + its options [{optionId(UUID),name}].
+  clientFieldId     String?
+  clientFieldName   String?
+  clientOptions     Json?
+  // Selectable sprint target lists [{listId,name}] (Sprints ClickApp = a sprint
+  // is its list; we never create lists). The push routes via the chosen listId.
+  sprintLists       Json?
+  // Whether to offer the top-level `points` field on the push.
+  pointsEnabled     Boolean  @default(false)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   updatedBy         String?
 
+  @@schema("meetsy")
+}
+
+// Phase 2c.3 — the human's accept/override of each weak field prediction, logged
+// at push time. NOT read yet — it's the Phase-3 learning signal. One row per
+// pushed task: `predicted` is the 2c.2 fieldPredictions bundle, `confirmed` is
+// what the user actually pushed (client/sprint/points/assignee).
+model FieldOverride {
+  id           String   @id @default(cuid())
+  runId        String
+  meetsyTaskId String
+  workspaceId  String
+  predicted    Json?
+  confirmed    Json
+  createdAt    DateTime @default(now())
+
+  @@index([workspaceId])
+  @@index([runId])
   @@schema("meetsy")
 }
 

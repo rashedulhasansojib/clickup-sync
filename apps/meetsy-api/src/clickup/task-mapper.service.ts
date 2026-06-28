@@ -13,6 +13,10 @@ export interface MappableTask {
   /** ISO date (YYYY-MM-DD or full ISO) or null. */
   dueDate?: string | null;
   tags?: string[];
+  /** Phase 2c.3 — confirmed client dropdown option UUID (paired with config.clientFieldId). */
+  clientOptionId?: string | null;
+  /** Phase 2c.3 — confirmed sprint points. */
+  points?: number | null;
 }
 
 const PRIORITY_MAP: Record<MappableTask["priority"], number> = {
@@ -31,7 +35,12 @@ const PRIORITY_MAP: Record<MappableTask["priority"], number> = {
 export class TaskMapperService {
   map(
     task: MappableTask,
-    opts: { clickupUserId?: string | null; defaultStatus?: string | null } = {},
+    opts: {
+      clickupUserId?: string | null;
+      defaultStatus?: string | null;
+      /** Phase 2c.3 — the workspace's client dropdown field id (from config). */
+      clientFieldId?: string | null;
+    } = {},
   ): CreateTaskPayload {
     const payload: CreateTaskPayload = {
       name: task.title,
@@ -61,6 +70,14 @@ export class TaskMapperService {
 
     if (task.tags && task.tags.length > 0) payload.tags = task.tags;
     if (opts.defaultStatus) payload.status = opts.defaultStatus;
+
+    // Phase 2c.3 — client dropdown custom field (set by option UUID) + points.
+    // Both omitted entirely unless configured + confirmed, so a Phase-1 push
+    // (no clientFieldId/clientOptionId/points) emits the EXACT same payload.
+    if (opts.clientFieldId && task.clientOptionId) {
+      payload.custom_fields = [{ id: opts.clientFieldId, value: task.clientOptionId }];
+    }
+    if (typeof task.points === "number") payload.points = task.points;
 
     return payload;
   }

@@ -19,6 +19,8 @@ export const PutPushConfigSchema = z.object({
   targetListName: z.string().nullable().optional(),
   assignableMembers: z.array(AssignableMemberSchema),
   defaultStatus: z.string().nullable().optional(),
+  /** Phase 2c.3 — whether to offer the top-level `points` field on the push. */
+  pointsEnabled: z.boolean().optional(),
 });
 export type PutPushConfigDto = z.infer<typeof PutPushConfigSchema>;
 
@@ -44,6 +46,10 @@ export const PushTaskSchema = z.object({
   tags: z.array(z.string()).default([]),
   subtasks: z.array(z.string()).default([]),
   dependencies: z.array(z.string()).default([]),
+  /** Phase 2c.3 — confirmed client dropdown option UUID (HITL). */
+  clientOptionId: z.string().nullable().optional(),
+  /** Phase 2c.3 — confirmed sprint points (HITL). */
+  points: z.number().int().nonnegative().nullable().optional(),
 });
 export type PushTaskDto = z.infer<typeof PushTaskSchema>;
 
