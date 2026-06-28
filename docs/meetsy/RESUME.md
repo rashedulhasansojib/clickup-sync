@@ -2,7 +2,7 @@
 
 > Single entry point to continue the Clicksy+Meetsy build in a fresh chat. Read this first,
 > then the three docs it points to. Everything is committed on branch **`feat/meetsy-phase0`**
-> (pushed to origin). Last code commit: **`3802f6a`** (Phase 2c.1 — KB context injection, live-verified).
+> (pushed to origin). Last code commit: **`05d8fe2`** (Phase 2c.2 — field prediction + dedup, live-verified).
 
 ## Read these (in order), then start
 1. **`docs/meetsy/BUILD-JOURNAL.md`** — the full, dated build history + every live-verification + findings. **The source of truth for "what's done."**
@@ -24,12 +24,15 @@
 
 - **Phase 2c.1** — KB context injection (commit `3802f6a`) — **DONE + LIVE-VERIFIED on real Nifty data.** `KbSearchService` gained a `sourceTypes` filter + `retrieveContext()` (provenance); `criticPass`/`enrichTasks` take an optional `context` arg (default byte-identical, test-locked); the processor injects summary-keyed context into critic+enrich and surfaces provenance on `result.kbContext`; fire-and-forget incremental remap. *Live: an energy-reporting transcript run retrieved the 8 right "[Energy Reporting]" tasks, visible in `result.kbContext`.* **Fast-follow:** inject context into `analyzeMeeting` too (deferred).
 
-## ▶ DO NEXT: Phase 2c.2 — field prediction + duplicate detection (build, then 2c.3)
-Spec (APPROVED): `docs/superpowers/specs/2026-06-28-meetsy-phase2c-pipeline-integration-design.md` §2–3. Build:
-- **Field prediction** (weak, abstain-first): for each extracted task, kNN over `KbChunk` task neighbours (metadata already carries client/component/assignee/status) → prior; **LLM clamped to the neighbours' observed values**; due = **p50/p80 cycle-time** (reuse `summary-facts.service.ts` `percentile_cont`); **ABSTAIN** if top-1 neighbour share <0.5 OR support <3. Predict **client/sprint·component/due/estimate**; assignee = **soft hint only** (confident assign = Phase 3). Surface as suggestion + evidence + confidence on the run.
-- **Duplicate detection:** hybrid-search existing tasks per extracted task → **flag ≥0.90 / suggest 0.82–0.90 / <0.82 ignore; never auto-merge.** Show on the run with the existing task link.
-- Then **2c.3** — HITL push extension (`WorkspacePushConfig` + client dropdown options/sprint lists/points; `TaskMapperService.map` adds `custom_fields` by option UUID + `points` + sprint-list routing; review UI; `FieldOverride` log). **Live-verify pushes go ONLY to a throwaway list on test team `90181854711`** — Nifty prod `3450636` stays read-only.
-- Grounding mapped: push in `src/clickup/` (`WorkspacePushConfig`, `TaskMapperService.map`, `PushService`); cycle-time p50 in `summary-facts.service.ts`; kNN metadata on `KbChunk`.
+- **Phase 2c.2** — field prediction + dedup (commit `05d8fe2`) — **DONE + LIVE-VERIFIED.** Per extracted task: card-shaped kNN over `clickup_task` chunks with a **cosine FLOOR** (so abstain is real, not base-rate echo); client/sprint/assignee = similarity-weighted modal prior **clamped by a gpt-5.4-mini call** (the echo-breaker — confidence rides on the distribution); due = **p80** cycle-time; abstain on thin history. Dedup bands **empirically recalibrated to flag ≥0.72 / suggest ≥0.64** (true near-dup peaks ~0.73 due to sparse-query/rich-card asymmetry). Attached to `result.fieldPredictions[id]` / `result.duplicates[id]`. *Live: AIT minority→AIT (not majority echo); OOD→abstain; energy→Energy Reporting high-conf; re-extracted task→FLAG.* `ClickupTask.estimation` added to the read-model.
+
+## ▶ DO NEXT: Phase 2c.3 — HITL push extension (the last 2c slice)
+Spec (APPROVED) §4. Build:
+- **Config:** extend `WorkspacePushConfig` (meetsy) with the **client dropdown** field id + options (`[{optionId(UUID),name}]`), selectable **sprint lists** (`[{listId,name}]`), and a **points-enabled** flag; populate via a "refresh ClickUp field options" admin action (fetch `type_config.options` + lists from ClickUp).
+- **Mapper:** `src/clickup/task-mapper.service.ts` `map()` adds `custom_fields: [{id, value: optionUUID}]` for client, top-level `points`, and routes the create to the chosen **sprint list** (push already targets a list id).
+- **Review/push:** surface the 2c.2 predictions (abstain-aware) + dupe flags in the review UI; `POST /runs/:id/push` accepts confirmed `sprintListId`/`clientOptionId`/`points` per task and writes a new **`meetsy.FieldOverride`** row (predicted vs confirmed) — the Phase-3 learning signal (written, not yet read).
+- **SAFETY (hard):** live-verify pushes go ONLY to a **throwaway list on test team `90181854711`** (Chishty). **Never** write Nifty prod `3450636`. Keep `TaskPush` idempotency; no ClickUp write without explicit confirmation.
+- Grounding mapped: `src/clickup/` (`WorkspacePushConfig`, `TaskMapperService.map`, `PushService`, `push-config.service.ts`).
 
 ## Tokens/creds the new session needs (the scratchpad does NOT carry over)
 Ask the user to re-provide (or read from `../meeting-analyzer/.env` for Azure):

@@ -382,4 +382,18 @@ Ground transcript→task analysis in the client's KB history (tasks + 2b docs). 
 
 **Fast-follow (documented):** inject context into `analyzeMeeting` too (needs a cheap pre-analyze key: roster+title+bounded head) — deferred from 2c.1 to keep the primary retrieval summary-keyed.
 
-## ▶ 2c.1 DONE. Next: **2c.2** — field prediction (kNN prior + LLM clamped to neighbour range + abstain-first; client/sprint/due/estimate; assignee soft-hint) + duplicate detection (flag ≥0.90 / suggest 0.82–0.90 / never auto-merge). Then 2c.3 (HITL sprint/client/points push + `FieldOverride` log).
+### 2026-06-28 — Phase 2c.2 — Field prediction + duplicate flags — DONE / GREEN + LIVE-VERIFIED — commit `05d8fe2`
+Attach weak, history-grounded predictions + dupe flags to the run result (`result.fieldPredictions[id]` / `result.duplicates[id]`); no `@ma/shared` Task change, no push (that's 2c.3). **149 meetsy-api tests** (12 new) + build green.
+- **Card-shaped kNN + similarity FLOOR (the echo-trap fix):** per task, build a card comparable to the stored card embeddings, kNN over `clickup_task` chunks, keep only neighbours above a cosine floor (`SIM_FLOOR=0.5`). Plain top-K always returns K → modal-of-K just echoes the corpus base rate; the floor means a task with no genuinely-similar history has `< MIN_QUALIFYING(3)` qualifying neighbours and **abstains for real**.
+- **LLM clamp = echo-breaker:** client/sprint/assignee predicted via a similarity-weighted modal prior that a gpt-5.4-mini call may CLAMP to (pick among observed candidates, or abstain). Confidence/support always ride on the **distribution**, never the model's assertion. Due = **p80** cycle-time of closed neighbours (p50 ≈ "due today" here); abstain with <3 closed qualifying.
+- **Duplicate flags — EMPIRICALLY calibrated:** measured live that a near-verbatim re-extraction peaks ~**0.73** against the exact existing task (sparse-query vs rich-stored-card asymmetry) with the next distinct task ~0.69 — so the spec's 0.90/0.82 would **never** fire. Bands set to **flag ≥0.72 / suggest ≥0.64** (corpus-tuned; richer query card / per-workspace calibration is a follow-up). Never auto-merge.
+- read-model: `ClickupTask.estimation` (Decimal; unmanaged mirror, no migration).
+
+**LIVE-VERIFIED on ws_nifty (1198 chunks) — the discrimination test the advisor required (not just "a prediction appeared"):**
+- **AIT (MINORITY client) → predicted AIT**, NOT the majority — the statistical modal was **Nifty AI (9) vs AIT (5)**, but the LLM clamp picked **AIT** from the task text ("explicitly mention AIT"), honestly `conf=low` with the full distribution shown. The echo trap is broken.
+- **Majority sanity:** energy → **Energy Reporting [15/15, conf=high]**. **OOD** "holiday party" → **ABSTAIN** every task. **Due** → real p80 future dates (2026-07-01/04/09), not "due today".
+- **Dedup:** a re-extracted "Energy Audit Web Portal" **FLAGGED** the real existing task `86evkrgvw` (@0.764) + a second energy task — calibrated bands fire correctly.
+
+All test meetings/runs deleted; ws_nifty restored (1198 chunks, 0 docs, 0 meetings).
+
+## ▶ 2c.2 DONE. Next: **2c.3** — HITL push extension (`WorkspacePushConfig` + client dropdown options/sprint lists/points; `TaskMapperService.map` adds `custom_fields` by option UUID + `points` + sprint-list routing; review UI surfaces the 2c.2 predictions/dupes; `FieldOverride` log). **Live-verify pushes go ONLY to a throwaway list on test team `90181854711`** — Nifty prod `3450636` stays read-only.
