@@ -2,7 +2,7 @@
 
 > Single entry point to continue the Clicksy+Meetsy build in a fresh chat. Read this first,
 > then the three docs it points to. Everything is committed on branch **`feat/meetsy-phase0`**
-> (pushed to origin). Last code commit: **`0ad2312`** (review UI — surfaces all Phase-2c/3 signals; **Phase 0→3 roadmap COMPLETE**).
+> (pushed to origin). Last code commit: **`cb855ef`** (getRun passthrough fix; review UI **in-browser smoke-tested**; **Phase 0→3 roadmap COMPLETE**).
 
 ## Read these (in order), then start
 1. **`docs/meetsy/BUILD-JOURNAL.md`** — the full, dated build history + every live-verification + findings. **The source of truth for "what's done."**
@@ -37,8 +37,8 @@
 ## ✅ PHASE 0 → 3 ROADMAP COMPLETE. All live-verified on real Nifty data. The end-to-end product works: shared auth/org → ClickUp write-back → RAG KB + summary + honest doc-improvement metric → pipeline grounding (context + abstain-first prediction + dedup + HITL push) → smart assignment + support-gated learning loop.
 
 ## ▶ DO NEXT: no planned phase remains — pick a fast-follow
-1. **Review-UI in-browser smoke test** (the one gap from the UI build, commit `0ad2312`): the review UI is built + typecheck/`next build`/lint-clean + correct-by-construction against verified backend shapes, but no authed-browser visual pass was run (the run page fetches with the Clicksy `clickup_sync_sid` cookie; a headless session wasn't stood up). Stand up Clicksy+meetsy-api+meetsy-web with a real session and eyeball `/runs/[runId]` (signal chips, push controls, learning panel) on a fresh run with the assignable pool configured.
-2. **analyze-injection** (2c.1 deferred): inject KB context into `analyzeMeeting` too (needs a cheap pre-summary key: roster+title+bounded head).
+1. **analyze-injection** (2c.1 deferred): inject KB context into `analyzeMeeting` too (needs a cheap pre-summary key: roster+title+bounded head).
+- *(DONE — review-UI in-browser smoke test, commit `cb855ef`: 13/13 checks green via Playwright + a minted session; found+fixed the getRun `.passthrough()` bug. To repeat it: insert a `public.sessions` row with `token_hash = sha256(token)` for an org_seed user, set the run's `orgId` to that org, boot meetsy-api+meetsy-web, add the `clickup_sync_sid` cookie [domain `localhost`], load `/runs/:id`. `playwright-core` was installed in the session scratchpad, not the repo.)*
 3. **Tuning on more data:** the novelty `pctNovel` cutoff (2b) + dedup bands (2c.2) were calibrated on single-chunk/one-workspace data; revisit with multi-chunk docs / a second workspace.
 4. **`CorrectionStat` cache** if `/learning` read cost grows (currently computed on demand, small N).
 5. **Production rollout** items: per-ORG data isolation is still pending for Clicksy (Spec 2, see CLAUDE.md) — Meetsy is workspace-scoped but rides Clicksy's single seed org today.
