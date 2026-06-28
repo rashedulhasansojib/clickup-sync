@@ -69,6 +69,13 @@ export async function criticPass(
   transcript: string,
   roster: Participant[],
   tasks: Task[],
+  /**
+   * Phase 2c — optional KB context (related existing tasks/docs from this client's
+   * history). REFERENCE ONLY: helps spot overlap with existing work and surface
+   * missed-but-discussed tasks. Never a source of facts not in the transcript.
+   * Omitted (default) ⇒ byte-identical to the pre-2c behaviour.
+   */
+  context?: string,
 ): Promise<CriticOutput> {
   const rosterBlock = roster
     .map((p) => `- ${p.id}: ${p.displayName}${p.aliases.length ? ` (aliases: ${p.aliases.join(", ")})` : ""}`)
@@ -85,17 +92,28 @@ export async function criticPass(
     confidence: t.confidence,
   }));
 
+  // Default (no context) keeps the prompt byte-identical to the pre-2c behaviour;
+  // the block is only inserted when context is actually provided.
+  const userParts = [
+    `Roster (valid assigneeId values):\n${rosterBlock || "(none)"}`,
+    ``,
+    `Candidate tasks (JSON):\n${JSON.stringify(taskView, null, 2)}`,
+    ``,
+    `Transcript:\n${transcript}`,
+  ];
+  if (context?.trim()) {
+    userParts.push(
+      ``,
+      `Related existing work from this client's history (REFERENCE ONLY — use to ` +
+        `spot overlap with work that already exists and to notice clearly-discussed ` +
+        `tasks that were missed; do NOT treat as facts from this meeting):\n${context.trim()}`,
+    );
+  }
+  userParts.push(``, `Return the corrected task list and the changes you made.`);
+
   const out = await azure.structured({
     system: SYSTEM,
-    user: [
-      `Roster (valid assigneeId values):\n${rosterBlock || "(none)"}`,
-      ``,
-      `Candidate tasks (JSON):\n${JSON.stringify(taskView, null, 2)}`,
-      ``,
-      `Transcript:\n${transcript}`,
-      ``,
-      `Return the corrected task list and the changes you made.`,
-    ].join("\n"),
+    user: userParts.join("\n"),
     schema: CriticLLMSchema,
     schemaName: "critique",
     reasoningEffort: "high",

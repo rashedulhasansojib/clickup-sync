@@ -10,6 +10,9 @@ import { analyzeMeeting, assemble, criticPass, enrichTasks } from "../pipeline";
 import { runWithUsage } from "../../observability/usage.context";
 import { AnalysisJobData, AnalysisQueue } from "./analysis.queue";
 import { ANALYSIS_QUEUE_NAME } from "./redis";
+import { KbSearchService, type KbContextHit } from "../../kb/kb-search.service";
+import { KbQueue } from "../../kb/kb.queue";
+import { buildContextQuery, formatContextForPrompt } from "../pipeline-context";
 
 /**
  * BullMQ Worker that runs IN THE SAME Nest process (started in onModuleInit).
@@ -31,6 +34,8 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly azure: AzureOpenAIService,
     private readonly queue: AnalysisQueue,
+    private readonly kbSearch: KbSearchService,
+    private readonly kbQueue: KbQueue,
   ) {}
 
   onModuleInit(): void {
@@ -65,6 +70,37 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
     await this.queue.publishProgress(event);
   }
 
+  /**
+   * Retrieve KB grounding context for the meeting (tasks + uploaded docs).
+   * Best-effort: any failure (embeddings unconfigured, KB empty) returns [] so
+   * the pipeline runs exactly as it did pre-2c.
+   */
+  private async retrieveKbContext(workspaceId: string, query: string): Promise<KbContextHit[]> {
+    try {
+      return await this.kbSearch.retrieveContext(workspaceId, query, {
+        k: 8,
+        sourceTypes: ["clickup_task", "document"],
+      });
+    } catch (err) {
+      this.logger.warn(`KB context retrieval skipped: ${(err as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Fire-and-forget incremental KB refresh for an ALREADY-onboarded workspace.
+   * Never first-onboards from the analysis path; never blocks the pipeline.
+   */
+  private async maybeRefreshKb(workspaceId: string): Promise<void> {
+    try {
+      const state = await this.prisma.kbSyncState.findUnique({ where: { workspaceId } });
+      if (!state || state.status === "onboarding") return; // not onboarded / already running
+      await this.kbQueue.enqueue({ workspaceId, range: "3m" });
+    } catch (err) {
+      this.logger.warn(`KB refresh enqueue skipped: ${(err as Error).message}`);
+    }
+  }
+
   private async process(job: Job<AnalysisJobData>): Promise<void> {
     const { runId, meetingId } = job.data;
 
@@ -81,6 +117,16 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
     const meetingDateISO = (meeting.meetingDate ?? meeting.createdAt)
       .toISOString()
       .slice(0, 10);
+    const workspaceId = meeting.workspaceId;
+
+    // Phase 2c.1 — fire-and-forget incremental KB remap so the workspace KB trends
+    // fresh. Collision-safe (enqueue supersedes a finished job; see KbQueue). The
+    // CURRENT run grounds against the already-embedded KB; the next is fresher.
+    // Only for already-onboarded workspaces (never first-onboard from this path).
+    await this.maybeRefreshKb(workspaceId);
+
+    // Captured for the run result so the injected KB context is INSPECTABLE.
+    let kbContext: KbContextHit[] = [];
 
     try {
       await this.prisma.analysisRun.update({
@@ -106,9 +152,19 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
         const extracted = analysis.tasks;
         await this.emit(runId, "extract", "completed", `Extracted ${extracted.length} candidate tasks`, 0.55);
 
+        // ── Phase 2c.1: retrieve grounding context (KB history + docs) ─────
+        // Keyed on the summary/topics/titles (concise, embeddable) — not the raw
+        // transcript. Injected into critic + enrich below. Best-effort: a KB miss
+        // or unconfigured embeddings leaves the pipeline exactly as pre-2c.
+        kbContext = await this.retrieveKbContext(
+          workspaceId,
+          buildContextQuery(analysis.summary, analysis.topics, extracted.map((t) => t.title)),
+        );
+        const contextStr = formatContextForPrompt(kbContext);
+
         // ── Stage 5: critic (verify grounding/owners, dedup, completeness) ─
         await this.emit(runId, "critic", "started", "Verifying tasks", 0.6);
-        const critiqued = await criticPass(this.azure, transcript, roster, extracted);
+        const critiqued = await criticPass(this.azure, transcript, roster, extracted, contextStr);
         await this.emit(
           runId,
           "critic",
@@ -119,7 +175,7 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
 
         // ── Stage 4: enrich (ClickUp fields + absolute due dates) ──────────
         await this.emit(runId, "enrich", "started", "Enriching task details", 0.78);
-        const tasks = await enrichTasks(this.azure, critiqued.tasks, analysis.summary, meetingDateISO);
+        const tasks = await enrichTasks(this.azure, critiqued.tasks, analysis.summary, meetingDateISO, contextStr);
         await this.emit(runId, "enrich", "completed", "Tasks enriched", 0.9);
 
         // ── Stage 6: assemble (pure) ──────────────────────────────────────
@@ -133,7 +189,9 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
         where: { id: runId },
         data: {
           status: "completed",
-          result: result as unknown as Prisma.InputJsonValue,
+          // Attach the retrieved KB provenance so the injected context is visible
+          // on the run (Phase 2c.1 — context is inspectable, not just plumbed).
+          result: { ...(result as object), kbContext } as unknown as Prisma.InputJsonValue,
           error: null,
           promptTokens: usage.promptTokens,
           completionTokens: usage.completionTokens,

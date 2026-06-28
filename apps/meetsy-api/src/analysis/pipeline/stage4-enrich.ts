@@ -55,6 +55,12 @@ export async function enrichTasks(
   tasks: Task[],
   summary: string,
   meetingDateISO: string,
+  /**
+   * Phase 2c — optional KB context (related existing tasks/docs). REFERENCE ONLY:
+   * helps keep estimates/tags/components consistent with how this team actually
+   * scopes similar work. Omitted (default) ⇒ byte-identical to the pre-2c behaviour.
+   */
+  context?: string,
 ): Promise<Task[]> {
   if (tasks.length === 0) return tasks;
 
@@ -67,14 +73,24 @@ export async function enrichTasks(
     spokenDueDate: t.dueDate,
   }));
 
+  const userParts = [
+    `Meeting summary: ${summary}`,
+    ``,
+    `Tasks to enrich (JSON):`,
+    JSON.stringify(taskView, null, 2),
+  ];
+  if (context?.trim()) {
+    userParts.push(
+      ``,
+      `Related existing work from this client's history (REFERENCE ONLY — align ` +
+        `estimates/tags/components with how similar work is usually scoped here; do ` +
+        `NOT invent facts not in the meeting):\n${context.trim()}`,
+    );
+  }
+
   const out = await azure.structured({
     system: systemPrompt(meetingDateISO),
-    user: [
-      `Meeting summary: ${summary}`,
-      ``,
-      `Tasks to enrich (JSON):`,
-      JSON.stringify(taskView, null, 2),
-    ].join("\n"),
+    user: userParts.join("\n"),
     schema: EnrichLLMSchema,
     schemaName: "enriched_tasks",
     reasoningEffort: "low",

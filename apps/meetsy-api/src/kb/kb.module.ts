@@ -45,5 +45,8 @@ import { AnswerabilityService } from "./answerability.service";
     AnswerabilityService,
     WorkspaceResolver,
   ],
+  // Phase 2c.1 — the analysis pipeline grounds itself via these (one-way dep
+  // analysis → kb; KbModule imports nothing from the analysis pipeline).
+  exports: [KbSearchService, KbQueue],
 })
 export class KbModule {}
