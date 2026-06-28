@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Meetsy — Implementation &amp; User Guide</title>
+<style>
+  :root { --ink:#18181b; --muted:#52525b; --soft:#71717a; --line:#e4e4e7; --bg:#ffffff;
+          --accent:#1d4ed8; --accent2:#7c3aed; --green:#15803d; --amber:#b45309; --red:#b91c1c; }
+  * { box-sizing:border-box; }
+  html { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         color:var(--ink); line-height:1.55; font-size:11pt; margin:0; }
+  .page { padding:6px 52px; }
+  h1 { font-size:30pt; line-height:1.1; margin:0 0 6px; letter-spacing:-0.5px; }
+  h2 { font-size:17pt; margin:26px 0 10px; padding-top:14px; border-top:2px solid var(--ink); letter-spacing:-0.3px; page-break-after:avoid; page-break-before:auto; }
+  h3 { font-size:13pt; margin:18px 0 6px; color:var(--ink); page-break-after:avoid; }
+  h4 { font-size:11.5pt; margin:16px 0 4px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; }
+  p, li { color:var(--ink); }
+  .muted { color:var(--muted); }
+  .small { font-size:9.5pt; }
+  code { font-family:"SF Mono",Menlo,Consolas,monospace; font-size:9.5pt; background:#f4f4f5; padding:1px 5px; border-radius:4px; color:#3f3f46; }
+  pre.code { background:#0f172a; color:#e2e8f0; padding:12px 14px; border-radius:8px; font-size:8.8pt; overflow:auto; line-height:1.45; }
+  a { color:var(--accent); text-decoration:none; }
+  table { width:100%; border-collapse:collapse; margin:12px 0; font-size:9.5pt; }
+  th,td { border:1px solid var(--line); padding:7px 9px; text-align:left; vertical-align:top; }
+  th { background:#f4f4f5; font-weight:600; }
+  .tag { display:inline-block; border:1px solid var(--line); border-radius:6px; padding:1px 7px; font-size:8.5pt; }
+  .tag.blue{ background:#eff6ff; color:var(--accent); border-color:#bfdbfe; }
+  .tag.violet{ background:#f5f3ff; color:var(--accent2); border-color:#ddd6fe; }
+  .tag.green{ background:#f0fdf4; color:var(--green); border-color:#bbf7d0; }
+  .tag.amber{ background:#fffbeb; color:var(--amber); border-color:#fde68a; }
+  .callout { border:1px solid var(--line); border-left:4px solid var(--accent); background:#f8fafc; border-radius:6px; padding:12px 16px; margin:14px 0; }
+  .callout.honest { border-left-color:var(--accent2); background:#faf5ff; }
+  .callout.safety { border-left-color:var(--red); background:#fef2f2; }
+  .mermaid { margin:14px 0; text-align:center; page-break-inside:avoid; }
+  .mermaid svg { max-width:100% !important; width:auto !important; height:auto !important; max-height:540px; }
+  .callout, .step, table, figure, .grid2 { page-break-inside:avoid; }
+  figure { margin:18px 0; text-align:center; }
+  figure img { max-width:100%; border:1px solid var(--line); border-radius:8px; box-shadow:0 1px 6px rgba(0,0,0,.08); }
+  figcaption { font-size:9pt; color:var(--soft); margin-top:6px; }
+  .toc { columns:2; column-gap:36px; font-size:10pt; }
+  .toc a { color:var(--ink); }
+  .toc .n { color:var(--soft); margin-right:6px; }
+  /* Sections flow naturally; only a few major parts force a fresh page. */
+  .pagebreak { page-break-before:auto; }
+  #p4, #p6, #p9, #p11 { page-break-before:always; }
+  .cover { height:1000px; display:flex; flex-direction:column; justify-content:center; page-break-after:always; }
+  .cover .kicker { color:var(--accent); font-weight:600; letter-spacing:1px; text-transform:uppercase; font-size:11pt; }
+  .cover .sub { font-size:15pt; color:var(--muted); margin-top:10px; max-width:620px; }
+  .cover .meta { margin-top:40px; font-size:10pt; color:var(--soft); border-top:1px solid var(--line); padding-top:16px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .step { border:1px solid var(--line); border-radius:8px; padding:12px 16px; margin:10px 0; }
+  .step .num { display:inline-flex; width:24px; height:24px; align-items:center; justify-content:center;
+               background:var(--ink); color:#fff; border-radius:50%; font-size:10pt; font-weight:600; margin-right:8px; }
+  ul { margin:6px 0; padding-left:20px; }
+  li { margin:2px 0; }
+  .legend span { margin-right:14px; font-size:9pt; }
+  footer { margin-top:40px; border-top:1px solid var(--line); padding-top:10px; font-size:8.5pt; color:var(--soft); }
+</style>
+</head>
+<body>
+
+<!-- ───────────────────────── COVER ───────────────────────── -->
+<div class="page cover">
+  <div class="kicker">Implementation &amp; User Guide</div>
+  <h1>Meetsy</h1>
+  <div class="sub">Turning meeting transcripts into well-scoped, history-grounded, human-confirmed ClickUp tasks — built on the Clicksy data foundation, powered by Azure OpenAI and a per-workspace RAG knowledge base.</div>
+  <div class="meta">
+    Full-proof technical documentation + step-by-step user journey &nbsp;·&nbsp; Phases 0&nbsp;→&nbsp;3 complete &amp; live-verified<br/>
+    Generated 2026-06-28 &nbsp;·&nbsp; Branch <code>feat/meetsy-phase0</code> &nbsp;·&nbsp; Monorepo: Clicksy (root) + Meetsy (<code>apps/meetsy-api</code>, <code>apps/meetsy-web</code>)
+  </div>
+</div>
+
+<!-- ───────────────────────── TOC ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 style="border-top:none;margin-top:0">Contents</h2>
+  <div class="toc">
+    <p><span class="n">1</span><a href="#p1">What Meetsy is &amp; the design philosophy</a></p>
+    <p><span class="n">2</span><a href="#p2">System architecture &amp; the shared foundation</a></p>
+    <p><span class="n">3</span><a href="#p3">The AI models — which model, which stage, why</a></p>
+    <p><span class="n">4</span><a href="#p4">The Knowledge Base (RAG) &amp; onboarding</a></p>
+    <p><span class="n">5</span><a href="#p5">Documents &amp; the honest improvement metric</a></p>
+    <p><span class="n">6</span><a href="#p6">The transcript → tasks pipeline (stage by stage)</a></p>
+    <p><span class="n">7</span><a href="#p7">The intelligence layer: prediction, dedup, assignment</a></p>
+    <p><span class="n">8</span><a href="#p8">The learning loop</a></p>
+    <p><span class="n">9</span><a href="#p9">End-to-end flow (sequence)</a></p>
+    <p><span class="n">10</span><a href="#p10">Queues, workers &amp; data stores</a></p>
+    <p><span class="n">11</span><a href="#p11">User journey guidebook (UI, step by step)</a></p>
+    <p><span class="n">12</span><a href="#p12">Honesty &amp; safety principles</a></p>
+    <p><span class="n">13</span><a href="#p13">Operating it locally (ops appendix)</a></p>
+  </div>
+
+  <h2 id="p1">1 · What Meetsy is &amp; the design philosophy</h2>
+  <p><b>Clicksy</b> is the existing service that mirrors a company's ClickUp workspace into PostgreSQL (tasks, comments, time entries, status history) for reporting and dashboards. <b>Meetsy</b> is a folded-in sibling that uses that mirrored history to do something new: it takes a <b>meeting transcript</b> and produces <b>ClickUp-ready tasks</b> that are grounded in how the team actually works — then lets a human confirm and push them back into ClickUp.</p>
+  <p>The two share <b>one</b> foundation: one login/session, one organization/workspace model, one PostgreSQL database (Meetsy owns a <code>meetsy</code> schema and reads Clicksy's <code>public</code> schema read-only), and one ClickUp token. Nothing is forked or duplicated.</p>
+  <div class="callout honest">
+    <b>The guiding principle — honesty by construction.</b> Every "smart" output is a <b>weak, evidence-backed suggestion that abstains when the signal is thin</b>, never a confident guess and never auto-applied. A human confirms every field before anything is written to ClickUp. Where the system reports "improvement" or "learning", it shows the exact evidence and the sample size, and "not enough data yet" / "no clear answer" is always a valid, first-class result. This principle shaped every component below.
+  </div>
+
+  <h4>What a user gets, in one sentence</h4>
+  <p>Upload a transcript → the pipeline extracts grounded tasks, suggests the client / sprint / due date / owner (or honestly abstains), flags likely duplicates of existing work, and lets you confirm and push them into the right ClickUp list — and the system quietly learns from your corrections over time.</p>
+</div>
+
+<!-- ───────────────────────── 2 ARCHITECTURE ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p2">2 · System architecture &amp; the shared foundation</h2>
+  <p>Three deployable apps sit on one shared data plane. The browser app (<b>meetsy-web</b>, Next.js) talks to the <b>meetsy-api</b> (NestJS); meetsy-api reads Clicksy's mirrored data, calls Azure OpenAI, and pushes to ClickUp. Clicksy owns ingestion from ClickUp.</p>
+
+  <div class="mermaid">
+flowchart LR
+  user(["User (browser)"])
+  subgraph WEB["meetsy-web · Next.js"]
+    review["Run / Review screen (Push + Learning UI)"]
+  end
+  subgraph API["meetsy-api · NestJS"]
+    auth["Shared cookie auth (read-only)"]
+    pipe["Transcript pipeline"]
+    kb["KB + RAG + metrics"]
+    intel["Prediction, Dedup, Assignment, Learning"]
+    push["ClickUp write-back"]
+  end
+  subgraph CLK["Clicksy · NestJS"]
+    sync["ClickUp sync + backfill workers"]
+  end
+  subgraph DATA["PostgreSQL (one DB)"]
+    pub[("public schema — tasks, comments, time, sessions, users")]
+    mts[("meetsy schema — KbChunk (pgvector), Meeting, FieldOverride ...")]
+  end
+  redis[("Redis + BullMQ")]
+  azc["Azure OpenAI — chat (niftyai · gpt-5.4 / mini)"]
+  aze["Azure OpenAI — embeddings (niftyocr · text-embedding-3-large)"]
+  cu["ClickUp API"]
+
+  user --> review --> API
+  auth -. validates cookie .- pub
+  CLK --> cu
+  CLK --> pub
+  kb -- read-only --> pub
+  kb <--> mts
+  pipe --> azc
+  kb --> aze
+  intel <--> mts
+  push --> cu
+  API <--> redis
+  CLK <--> redis
+  classDef db fill:#f5f3ff,stroke:#ddd6fe,color:#4c1d95;
+  class pub,mts db;
+  </div>
+
+  <h3>The shared foundation (Phase 0 &amp; 1)</h3>
+  <table>
+    <tr><th>Concern</th><th>How it is shared</th></tr>
+    <tr><td>Identity / login</td><td>One Clicksy cookie session (<code>clickup_sync_sid</code>, SHA-256-hashed token in <code>public.sessions</code>). meetsy-api validates it <b>read-only</b> — there is no separate Meetsy login. One sign-in works across both apps.</td></tr>
+    <tr><td>Org / workspace / roles</td><td>Clicksy's <code>Organization → Workspace</code> model + Owner/Admin/Member roles, enforced app-wide by a global auth guard.</td></tr>
+    <tr><td>Database</td><td>One Postgres. Meetsy <b>owns</b> the <code>meetsy</code> schema (a least-privilege DB role) and reads Clicksy's <code>public.*</code> mirror tables. A DB grant makes writes to <code>public</code> impossible from Meetsy.</td></tr>
+    <tr><td>ClickUp token</td><td>Per-workspace, encrypted at rest (AES-256-GCM) with the same key Clicksy uses. Meetsy only decrypts to read/write tasks.</td></tr>
+    <tr><td>ClickUp write-back (Phase 1)</td><td>Meetsy's own <code>createTask</code> client + per-workspace push config (target list, assignable members), an idempotent audited push (<code>meetsy.TaskPush</code>), and a review screen.</td></tr>
+  </table>
+  <div class="callout"><b>Why read-only on <code>public</code> matters:</b> Meetsy can be wrong without ever corrupting Clicksy's source-of-truth mirror. The boundary is enforced by the database itself, not by convention.</div>
+</div>
+
+<!-- ───────────────────────── 3 MODELS ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p3">3 · The AI models — which model, which stage, why</h2>
+  <p>Meetsy uses <b>Azure OpenAI only</b>, across <b>two separate Azure resources</b>: a chat resource (<code>niftyai.openai.azure.com</code>) and a dedicated embeddings resource (<code>niftyocr.openai.azure.com</code>). The chat tier is chosen per call: the heavy reasoning stages use <b>gpt-5.4</b>; the cheap, bounded, high-volume helpers use <b>gpt-5.4-mini</b>. Reasoning effort (low / medium / high) is tuned per stage.</p>
+
+  <table>
+    <tr><th>Where</th><th>Model</th><th>Effort</th><th>What it does &amp; why this tier</th></tr>
+    <tr><td>Stage 0 — Normalize &amp; roster</td><td><span class="tag blue">gpt-5.4</span></td><td>low</td><td>Extracts the participant roster from the (deterministically VTT-parsed) transcript. Light task → low effort.</td></tr>
+    <tr><td>Stage 1+2 — Analyze</td><td><span class="tag blue">gpt-5.4</span></td><td>medium</td><td>Comprehends the meeting and extracts grounded candidate tasks (each tied to a verbatim quote). The core reasoning step.</td></tr>
+    <tr><td>Stage 5 — Critic</td><td><span class="tag blue">gpt-5.4</span></td><td>high</td><td>Adversarially verifies grounding, fixes owners, merges duplicates, calibrates confidence. Highest-stakes reasoning → high effort.</td></tr>
+    <tr><td>Stage 4 — Enrich</td><td><span class="tag blue">gpt-5.4</span></td><td>low</td><td>Fills ClickUp-ready fields (acceptance criteria, tags, estimate) and resolves the spoken due-date phrase to an absolute date.</td></tr>
+    <tr><td>"What we learned" narrative</td><td><span class="tag violet">gpt-5.4-mini</span></td><td>low</td><td>One pass that turns exact SQL facts into a short team-profile paragraph (forbidden from inventing numbers). Cheap, summarization-only.</td></tr>
+    <tr><td>Field-prediction clamp</td><td><span class="tag violet">gpt-5.4-mini</span></td><td>low</td><td>Picks a client/sprint/assignee <b>only from values observed in similar past tasks</b>, or abstains. The "echo-breaker" (see §7).</td></tr>
+    <tr><td>Answerability judge + question extraction</td><td><span class="tag violet">gpt-5.4-mini</span></td><td>low</td><td>Derives held-out questions and judges whether retrieved context answers them (doc-improvement metric, §5).</td></tr>
+    <tr><td>All embeddings</td><td><span class="tag green">text-embedding-3-large</span></td><td>—</td><td>Every task card, document chunk, and query is embedded to a <code>vector(1024)</code> (the 1024-dim option is honored on this model). Powers all RAG retrieval &amp; similarity.</td></tr>
+  </table>
+
+  <div class="callout"><b>The pattern:</b> reasoning that shapes the actual tasks → <b>gpt-5.4</b>. Bounded, high-frequency, judge/clamp/summarize helpers → <b>gpt-5.4-mini</b>. Anything that compares meaning → <b>text-embedding-3-large</b> + pgvector. The model is selected per call, so cost scales with how much reasoning a step truly needs.</div>
+</div>
+
+<!-- ───────────────────────── 4 KB ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p4">4 · The Knowledge Base (RAG) &amp; onboarding</h2>
+  <p>Before Meetsy can ground anything, a workspace is <b>onboarded</b>: its ClickUp history is mirrored (by Clicksy) and embedded into a per-workspace vector index. This is what lets the pipeline answer "how does this team usually describe / scope / own work like this?"</p>
+
+  <div class="mermaid">
+flowchart TD
+  A["User clicks Onboard (choose a time window)"] --> B["meetsy-kb worker picks up the job"]
+  B --> C{"Is the requested history mirrored?"}
+  C -- "gap" --> D["Trigger Clicksy backfill (tasks fetched fast)"]
+  C -- "covered" --> E
+  D --> E["Scan mirrored tasks past a cursor"]
+  E --> F["Build a deterministic card per task (title, fields, comments)"]
+  F --> G{"content hash changed?"}
+  G -- "no" --> E
+  G -- "yes" --> H["Embed card to vector(1024) — text-embedding-3-large"]
+  H --> I["Upsert into meetsy.KbChunk (HNSW + tsvector indexes)"]
+  I --> E
+  E --> J["status: ready"]
+  classDef ai fill:#f0fdf4,stroke:#bbf7d0,color:#14532d;
+  class H ai;
+  </div>
+
+  <h3>How retrieval works — hybrid search</h3>
+  <p>Every search runs <b>two branches</b> and fuses them, so it catches both meaning and exact keywords:</p>
+  <ul>
+    <li><b>Vector branch</b> — pgvector cosine over the HNSW index (semantic match; paraphrases retrieve the right task even with zero word overlap).</li>
+    <li><b>Keyword branch</b> — a generated <code>tsvector</code> + Postgres full-text search (exact terms, ids, codes).</li>
+    <li><b>Fusion</b> — Reciprocal Rank Fusion (RRF, k=60) merges the two ranked lists into one.</li>
+  </ul>
+  <p>Incremental &amp; cheap: a content-hash per card means a task re-embeds <b>only</b> when it actually changes; a per-workspace cursor means re-runs scan only what's new.</p>
+
+  <h3>The "What we learned" summary card</h3>
+  <p>Right after onboarding, the user sees a profile of the connected team. <b>Every number is exact aggregate SQL</b> over the mirrored data (roster &amp; who owns what, components/areas, throughput, blockers, top clients); <b>one</b> gpt-5.4-mini pass writes a short narrative on top of those facts (and is forbidden from inventing figures). Honest by construction — the facts are queryable; only the prose is generated.</p>
+  <div class="callout small"><b>Proven on real data:</b> on 1,198 real "Nifty" R&amp;D tasks, the card correctly surfaced the real roster (Rashedul / Shoabur / Ahmad…), real components (R&amp;D Sprints, [Nifty AI] Backlog), and real clients (Nifty AI, Energy Reporting, AIT) — with an accurate generated narrative.</div>
+</div>
+
+<!-- ───────────────────────── 5 DOCS METRIC ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p5">5 · Documents &amp; the honest improvement metric</h2>
+  <p>Users can upload <b>context documents</b> (SOPs, scopes, spec PDFs) into a workspace's KB so future analysis is grounded in more than ClickUp history. A document is parsed (text PDFs via <code>pdf-parse</code>; OCR is out of scope), chunked (paragraph-aware), and embedded into the same <code>KbChunk</code> store as <code>sourceType=document</code>.</p>
+  <p>The hard question — <i>"did adding this actually make the KB better?"</i> — is answered with <b>two signals that are reported separately and never blended</b>:</p>
+  <div class="grid2">
+    <div class="step"><b>① Corpus novelty</b> <span class="tag green">exact · no LLM</span><br/><span class="small muted">For each chunk, its cosine distance to the nearest existing chunk. "62% of this document is information the KB did not already contain." A near-duplicate honestly scores low.</span></div>
+    <div class="step"><b>② Answerability-lift</b> <span class="tag violet">held-out · judged</span><br/><span class="small muted">Over questions derived from real meeting transcripts (independent of the doc), how many become answerable <i>after</i> the doc is added vs before — judged by a blind, identical gpt-5.4-mini pass on each side.</span></div>
+  </div>
+  <div class="callout honest"><b>"No improvement" is a valid result.</b> Novelty is the solid headline; answerability-lift is the proxy. When a workspace has no transcripts yet, answerability falls back to a task-derived baseline that is <b>clearly labelled provisional</b>. The system never fuses these into a single "X% better" score.</div>
+  <p class="small"><b>Live-verified:</b> a real bookkeeping SOP scored meaningfully novel; a vendor-payment policy made the questions "what is our approval threshold?" and "who signs off?" flip from <b>No → Yes</b> (newly-answerable = 2), while a near-duplicate upload honestly showed ~0 lift.</p>
+</div>
+
+<!-- ───────────────────────── 6 PIPELINE ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p6">6 · The transcript → tasks pipeline (stage by stage)</h2>
+  <p>When a transcript is analyzed, it flows through ordered stages. The diagram labels the <b>AI model at each stage</b>; the KB and intelligence layers attach <b>after</b> the tasks are produced.</p>
+
+  <div class="mermaid">
+flowchart TD
+  T(["Transcript uploaded"]) --> S0["Stage 0 · Normalize (deterministic VTT) + extract roster — gpt-5.4 low"]
+  S0 --> RC{"User confirms roster"}
+  RC --> RM["Incremental KB remap (fire-and-forget; fresh for next run)"]
+  RC --> S12["Stage 1+2 · Analyze — comprehend + extract grounded tasks — gpt-5.4 medium"]
+  S12 --> CTX["Retrieve KB context (tasks + docs, by meeting summary) — text-embedding-3-large"]
+  CTX --> S5["Stage 5 · Critic — verify, dedup, fix owners, calibrate — gpt-5.4 high"]
+  S5 --> S4["Stage 4 · Enrich — ClickUp fields + absolute due dates — gpt-5.4 low"]
+  S4 --> S6["Stage 6 · Assemble (group by person) — deterministic"]
+  S6 --> INT["Attach intelligence per task — predictions, duplicates, owner, nudges"]
+  INT --> R(["Review screen"])
+  classDef chat fill:#eff6ff,stroke:#bfdbfe,color:#1e3a8a;
+  classDef emb fill:#f0fdf4,stroke:#bbf7d0,color:#14532d;
+  class S0,S12,S5,S4 chat;
+  class CTX emb;
+  </div>
+
+  <table>
+    <tr><th>Stage</th><th>Input → Output</th><th>Notes</th></tr>
+    <tr><td><b>0 · Normalize</b></td><td>Raw transcript → clean timestamped turns + roster</td><td>VTT parsing is deterministic (no model); only the roster extraction calls the LLM.</td></tr>
+    <tr><td><b>1+2 · Analyze</b></td><td>Transcript + roster → summary, topics, decisions, candidate tasks</td><td>Each task is grounded in a verbatim evidence quote; owners resolved to roster ids only.</td></tr>
+    <tr><td><b>Context inject</b></td><td>Summary/topics/titles → top-k history (tasks + docs)</td><td>Retrieval is keyed on the concise summary (not the raw transcript). Provenance is kept and shown on the run.</td></tr>
+    <tr><td><b>5 · Critic</b></td><td>Candidate tasks (+ context) → corrected, de-duplicated set</td><td>Runs before enrich so enrichment applies to the verified set. Drops ungrounded items, merges dupes.</td></tr>
+    <tr><td><b>4 · Enrich</b></td><td>Verified tasks (+ context) → ClickUp-ready fields</td><td>Resolves "by Wednesday" → an absolute date relative to the meeting date; aligns tags/estimates with house style.</td></tr>
+    <tr><td><b>6 · Assemble</b></td><td>Enriched tasks → grouped by assignee + unassigned</td><td>Pure. Each task keeps a stable id (<code>t1…tM</code>) that all the per-task signals are keyed by.</td></tr>
+  </table>
+  <p class="small muted">Context is injected as <b>reference only</b> ("use as context; do not treat as facts from this meeting"); with the KB unavailable the pipeline degrades to exactly its pre-grounding behaviour.</p>
+</div>
+
+<!-- ───────────────────────── 7 INTELLIGENCE ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p7">7 · The intelligence layer: prediction, dedup, assignment</h2>
+  <p>After the tasks are assembled, each one is enriched with weak, abstain-first signals. All of these reuse one <b>card-shaped k-NN</b> over the workspace's task history (so the query is comparable to what's stored), keeping only neighbours above a cosine <b>floor</b> — the floor is what makes "abstain" real (a task with no genuinely-similar history simply has too few qualifying neighbours).</p>
+
+  <h3>Field prediction (client · sprint · due · estimate)</h3>
+  <div class="mermaid">
+flowchart LR
+  task["Extracted task"] --> emb["Embed a card-shaped query"]
+  emb --> knn["k-NN over task history (keep sim ≥ floor)"]
+  knn --> thin{"≥ 3 qualifying neighbours?"}
+  thin -- no --> ab["ABSTAIN — not enough history"]
+  thin -- yes --> prior["Similarity-weighted modal prior + candidates"]
+  prior --> clamp["gpt-5.4-mini CLAMP — pick a candidate from the task text, or abstain"]
+  clamp --> out["Suggestion + support / share (confidence from the DISTRIBUTION)"]
+  classDef ai fill:#f5f3ff,stroke:#ddd6fe,color:#4c1d95;
+  class clamp ai;
+  </div>
+  <div class="callout"><b>The base-rate echo trap &amp; the fix.</b> A naïve k-NN would just predict the corpus's most common client for everything. Two guards prevent this: (a) the <b>similarity floor</b> so out-of-distribution tasks abstain; (b) the <b>LLM clamp</b>, which reads the task text and can pull a <i>minority</i> value (e.g. "AIT") instead of the majority — while confidence always rides on the real distribution, never the model's say-so. <i>Verified:</i> an AIT task predicted <b>AIT</b>, not the far more prolific "Energy Reporting"; an out-of-domain task abstained; due dates use the p80 cycle-time (not p50, which here is ≈ "due today").</p></div>
+
+  <h3>Duplicate detection</h3>
+  <p>Each task's nearest existing tasks are classified by raw cosine into <span class="tag red" style="border-color:#fecaca;background:#fef2f2">flag</span> ("very likely already exists") and <span class="tag amber">suggest</span> ("possibly related"). Bands were <b>empirically calibrated</b> against real near-duplicates (a re-created task peaks ~0.73 against its twin, so the literal-spec 0.90 would never fire). It <b>never auto-merges</b> — purely advisory.</p>
+
+  <h3>Smart assignment (Phase 3.1)</h3>
+  <p>For each task, candidates from the workspace's <b>assignable pool</b> are ranked by <b>ownership precedent</b> — who closed similar work, weighted by similarity (closed &gt; open), <b>conditioned on the predicted client/area</b> so a minority-area task gets its real owner, not the busiest contributor. <b>Workload</b> (open tasks + tracked hours) only breaks near-ties; it never assigns someone with no precedent. It <b>abstains</b> when there's no clear owner, and names an out-of-pool owner rather than silently giving up. <i>Verified:</i> energy task → Rashedul; AIT task → Ahmad (not the prolific Rashedul); off-topic task → abstain.</p>
+</div>
+
+<!-- ───────────────────────── 8 LEARNING ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p8">8 · The learning loop</h2>
+  <p>Every push records what the model <b>predicted</b> versus what the human <b>confirmed</b> (a <code>FieldOverride</code> row), plus what nudge the loop showed. When users <b>consistently</b> correct the model the same way, future predictions are nudged toward the corrected value — gated, labelled, and honestly measured. It is a <b>deterministic correction memory, not a trained model.</b></p>
+
+  <div class="mermaid">
+flowchart TD
+  push["User confirms and pushes a task"] --> log["Log FieldOverride — predicted P, confirmed C, nudge shown"]
+  log --> agg["Aggregate per field — P to C counts (ORGANIC only)"]
+  agg --> gate{"≥ 3 corrections, and C is ≥ 60% of P's corrections?"}
+  gate -- no --> none["No nudge — not enough to learn yet"]
+  gate -- yes --> nudge["Next time P is predicted, SUGGEST C — adjusted from N past corrections (raw still shown)"]
+  classDef warn fill:#fff7ed,stroke:#fed7aa,color:#9a3412;
+  class gate warn;
+  </div>
+
+  <div class="callout honest">
+    <b>Two anti-traps make the loop honest.</b>
+    <ul style="margin-top:6px">
+      <li><b>Organic-only gate.</b> A correction made <i>after</i> a nudge was shown does <b>not</b> teach the gate — otherwise an accepted nudge would reinforce the very rule that produced it (a self-fulfilling loop).</li>
+      <li><b>Two separate metrics.</b> The <i>raw override rate</i> (how often you change the model) measures KB/model quality — it can't measure the loop, because an accepted nudge still differs from the raw prediction. So the loop's <i>real</i> effectiveness is the <b>nudge-acceptance rate</b>, reported separately, with sample sizes shown and never blended.</li>
+    </ul>
+  </div>
+  <p class="small muted"><b>Verified, both directions:</b> the gate fires at 3 consistent corrections (and the nudge appears on the next run), and does <b>not</b> fire at 2 corrections or a 50/50 split. Unresolved values are counted so a resolution bug can't masquerade as "sparse data".</p>
+</div>
+
+<!-- ───────────────────────── 9 SEQUENCE ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p9">9 · End-to-end flow (sequence)</h2>
+  <p>The full life of one transcript, from upload to a pushed ClickUp task and the resulting learning signal.</p>
+  <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant W as meetsy-web
+  participant A as meetsy-api
+  participant M as Azure (gpt-5.4 / mini)
+  participant E as Azure (embeddings)
+  participant DB as Postgres (meetsy + public)
+  participant CU as ClickUp
+  U->>W: Upload transcript
+  W->>A: POST /meetings
+  A->>M: Stage 0 — roster
+  A-->>W: roster to confirm
+  U->>W: Confirm roster
+  W->>A: POST /meetings/:id/roster (enqueue)
+  A->>M: Analyze (gpt-5.4)
+  A->>E: Embed summary → retrieve KB context
+  A->>DB: read mirrored history (read-only)
+  A->>M: Critic (gpt-5.4 · high)
+  A->>M: Enrich (gpt-5.4)
+  A->>E: k-NN per task (predict · dedup · assign)
+  A->>M: Field clamp (mini)
+  A->>DB: store result + signals
+  W->>A: GET /runs/:id (signals)
+  U->>W: Confirm fields + owner, Push
+  W->>A: POST /runs/:id/push
+  A->>CU: createTask (idempotent)
+  A->>DB: TaskPush + FieldOverride (learning)
+  A-->>W: ClickUp links
+  </div>
+</div>
+
+<!-- ───────────────────────── 10 QUEUES ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p10">10 · Queues, workers &amp; data stores</h2>
+  <h4>Background workers (Redis + BullMQ)</h4>
+  <table>
+    <tr><th>Queue</th><th>App</th><th>Job</th></tr>
+    <tr><td><code>analysis</code></td><td>meetsy-api</td><td>The transcript pipeline (analyze → critic → enrich → assemble → intelligence).</td></tr>
+    <tr><td><code>meetsy-kb</code></td><td>meetsy-api</td><td>KB onboarding/refresh: coverage check → backfill trigger → incremental embed. Crash-safe (short lock + stalled-recovery + supersede-on-enqueue).</td></tr>
+    <tr><td><code>meetsy-kb-docs</code></td><td>meetsy-api</td><td>Document ingest: parse → chunk → embed → novelty + answerability + doc↔task links.</td></tr>
+    <tr><td><code>clickup-backfills</code>, <code>clickup-tasks</code>, <code>clickup-time-entries</code>, <code>clickup-comments</code></td><td>Clicksy</td><td>Mirror ClickUp into <code>public.*</code> (the data Meetsy reads).</td></tr>
+  </table>
+  <h4>Key tables in the <code>meetsy</code> schema</h4>
+  <table>
+    <tr><th>Table</th><th>Role</th></tr>
+    <tr><td><code>KbChunk</code></td><td>One embedded card per task/document chunk: <code>vector(1024)</code> + a generated <code>tsvector</code> + filter metadata. The RAG index.</td></tr>
+    <tr><td><code>KbSyncState</code> · <code>KbSummary</code></td><td>Onboarding cursor/status · the cached "what we learned" card.</td></tr>
+    <tr><td><code>KbDocument</code> · <code>KbDocTaskLink</code></td><td>Uploaded docs (extracted text + the honest metric) · doc↔task relatedness.</td></tr>
+    <tr><td><code>Meeting</code> · <code>AnalysisRun</code></td><td>The uploaded transcript + confirmed roster · the pipeline result (incl. all per-task signals).</td></tr>
+    <tr><td><code>WorkspacePushConfig</code> · <code>TaskPush</code></td><td>Target list, assignable members, client/sprint/points options · the idempotent push audit ledger.</td></tr>
+    <tr><td><code>FieldOverride</code></td><td>predicted vs confirmed (+ the shown nudge) per pushed task — the learning loop's input.</td></tr>
+  </table>
+</div>
+
+<!-- ───────────────────────── 11 USER JOURNEY ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p11">11 · User journey guidebook (UI, step by step)</h2>
+  <p>This is the end-to-end experience for a user turning a meeting into ClickUp tasks. Screens are in the Meetsy web app; you are already signed in via the shared Clicksy login.</p>
+
+  <div class="step"><span class="num">1</span><b>Sign in (once, shared).</b> Use your normal Clicksy login. The session works across both apps — there is no separate Meetsy account. If your session expires, any action redirects you back to the Clicksy sign-in.</div>
+
+  <div class="step"><span class="num">2</span><b>Onboard the workspace's knowledge base.</b> Choose a history window and start onboarding. Meetsy mirrors and embeds the workspace's ClickUp tasks. A live status shows progress; when it reads <b>ready</b>, the KB is searchable. <span class="small muted">(One-time per workspace; it stays fresh automatically and refreshes before each analysis.)</span></div>
+
+  <div class="step"><span class="num">3</span><b>Read the "What we've learned" card.</b> Immediately after onboarding you see a profile of the team: who owns which areas, the main components, throughput, top clients, where work stalls — exact numbers, plus a short narrative. This is your confidence check that the right history is connected.</div>
+
+  <div class="step"><span class="num">4</span><b>(Optional) Upload context documents.</b> Add SOPs / scopes / spec PDFs. Each upload shows how <b>novel</b> it is vs what the KB already knew, which existing tasks it relates to, and (once you have transcripts) its answerability-lift. A near-duplicate honestly shows little novelty.</div>
+
+  <div class="step"><span class="num">5</span><b>Configure push settings.</b> On <i>Push settings</i>, set the target ClickUp list and the assignable members. On the review screen you can press <b>"Refresh ClickUp fields"</b> to pull the live client dropdown options and sprint lists so they appear as proper pickers.</div>
+
+  <div class="step"><span class="num">6</span><b>Upload a transcript &amp; confirm the roster.</b> Paste/upload the meeting transcript. Stage 0 extracts the participant roster; you confirm or correct it, then the analysis is enqueued.</div>
+
+  <div class="step"><span class="num">7</span><b>Watch the pipeline run.</b> A live stepper shows Normalize → Comprehend → Extract → Critic → Enrich → Assemble. When it completes, the review screen loads.</div>
+</div>
+
+<div class="page pagebreak">
+  <div class="step"><span class="num">8</span><b>Review the result — read the signals.</b> Each task card shows the AI's weak, abstain-first suggestions (all reference, nothing applied yet):
+    <ul>
+      <li><span class="tag blue">Grounded in N items</span> a banner showing the history the analysis was grounded in.</li>
+      <li><span class="tag blue">Suggested: Client · Sprint · Due · Estimate</span> with a "· N similar" confidence cue, or "—" when it abstains.</li>
+      <li><span class="tag amber">Possibly related / Likely already exists</span> duplicate flags against existing ClickUp tasks.</li>
+      <li><span class="tag green">Owner: Suggested &lt;name&gt; · N closed similar</span> the ownership-based recommendation (or "no clear owner").</li>
+      <li><span class="tag violet">Adjusted client: X → Y · from N past corrections</span> a learning-loop nudge, when one has been earned.</li>
+    </ul>
+  </div>
+
+  <figure>
+    <img src="review-ui.png" alt="Meetsy review screen" />
+    <figcaption>The real review screen (captured in an automated browser test): KB-context banner, per-task suggestion / duplicate / owner / learning chips, and the push controls with pre-filled assignee, sprint, client and points.</figcaption>
+  </figure>
+
+  <div class="step"><span class="num">9</span><b>Confirm fields &amp; owner, then push.</b> In the Push section each task row is editable: assignee (pre-filled from the ownership recommendation), priority, due date, <b>sprint/list</b>, <b>client</b> (pre-filled from the prediction), and <b>points</b>. Adjust anything, tick the tasks to include, and press <b>"Push to ClickUp"</b>. Tasks land in the right list with the chosen fields; pushes are idempotent (re-pushing never duplicates).</div>
+
+  <div class="step"><span class="num">10</span><b>See it improve over time.</b> Open <b>"What we've learned"</b> to see the corrections the system has aggregated and the two honest metrics. As you keep confirming/correcting, consistent patterns (≥3 times, ≥60% agreement) start appearing as labelled nudges on future runs — and the panel honestly says "not enough to learn yet" until then.</div>
+
+  <div class="callout"><b>What stays in your hands:</b> nothing is assigned, adjusted, or pushed without your click. Every suggestion shows its evidence, and the system prefers to say "not sure" over guessing.</div>
+</div>
+
+<!-- ───────────────────────── 12 PRINCIPLES ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p12">12 · Honesty &amp; safety principles</h2>
+  <table>
+    <tr><th>Principle</th><th>How it shows up</th></tr>
+    <tr><td>Abstain-first</td><td>A similarity floor + minimum support means thin/out-of-distribution inputs honestly say "not enough history" instead of guessing.</td></tr>
+    <tr><td>Recommendation, never automation</td><td>Predictions, owners, and nudges are defaults a human confirms. No auto-assign, no auto-push, no auto-merge of duplicates.</td></tr>
+    <tr><td>Evidence on everything</td><td>Suggestions show the count of similar tasks; assignment cites closed-similar work; nudges cite the number of past corrections; retrieval shows provenance.</td></tr>
+    <tr><td>Never blend metrics</td><td>Doc novelty vs answerability-lift, and raw-override-rate vs nudge-acceptance, are always reported separately with sample sizes.</td></tr>
+    <tr><td>Support-gated learning</td><td>The loop nudges only after ≥3 consistent corrections with ≥60% agreement; "not enough to learn yet" is a valid state.</td></tr>
+    <tr><td>Read-only on the source of truth</td><td>Meetsy can never corrupt Clicksy's mirror — the database grant forbids writes to <code>public</code>.</td></tr>
+    <tr><td>Idempotent &amp; audited writes</td><td>Every ClickUp push is recorded in <code>TaskPush</code>; a re-push of an already-pushed task is a no-op, not a duplicate.</td></tr>
+  </table>
+  <div class="callout safety"><b>Production safety.</b> The ClickUp token is least-privilege and per-workspace; verification work is performed only against a throwaway test team, never a production workspace; webhook signatures are verified; and a wrong Meetsy output is, by construction, never able to damage the customer's real ClickUp source data.</div>
+</div>
+
+<!-- ───────────────────────── 13 OPS ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p13">13 · Operating it locally (ops appendix)</h2>
+  <p class="muted small">For engineers running the stack. The full, current runbook lives in <code>docs/meetsy/RESUME.md</code> and <code>docs/meetsy/BUILD-JOURNAL.md</code>.</p>
+  <h4>Stack</h4>
+  <ul>
+    <li><b>PostgreSQL</b> on the <code>pgvector/pgvector:pg18</code> image (the <code>vector</code> extension is required) + <b>Redis</b>.</li>
+    <li><b>meetsy-api</b> (NestJS, Node ≥ 22.12, Prisma 7) on port 4000; <b>meetsy-web</b> (Next.js) on port 3000; <b>Clicksy</b> on port 3000-range for ingestion.</li>
+    <li><b>Azure OpenAI</b>: a chat resource (gpt-5.4 / gpt-5.4-mini) and a separate embeddings resource (text-embedding-3-large).</li>
+  </ul>
+  <h4>Bring-up order (the operator flow)</h4>
+  <pre class="code">1. Run prisma/grants.sql as superuser  → CREATE EXTENSION vector, the least-priv
+   'meetsy' role + schema, search_path, SELECT grants on the public mirror tables.
+2. Apply the meetsy migrations (they contain NO CREATE SCHEMA / CREATE EXTENSION).
+3. Set env: MEETSY_DATABASE_URL, REDIS_*, AZURE_OPENAI_* (chat), AZURE_EMBED_*
+   (embeddings), APP_ENCRYPTION_KEY, optional CLICKSY_ADMIN_URL + ADMIN_API_KEY.
+4. Start meetsy-api (dist/main) and meetsy-web (next start). Sign in via Clicksy.</pre>
+  <h4>Core environment variables</h4>
+  <table class="small">
+    <tr><th>Variable</th><th>Purpose</th></tr>
+    <tr><td><code>MEETSY_DATABASE_URL</code></td><td>The least-privilege <code>meetsy</code> role on the shared Postgres (<code>?schema=meetsy</code>).</td></tr>
+    <tr><td><code>AZURE_OPENAI_*</code></td><td>Chat resource + deployment (gpt-5.4). Reasoning effort is set per call in code.</td></tr>
+    <tr><td><code>AZURE_EMBED_*</code></td><td>Embeddings resource (text-embedding-3-large, dimensions 1024).</td></tr>
+    <tr><td><code>APP_ENCRYPTION_KEY</code></td><td>Decrypts the per-workspace ClickUp token (same key Clicksy encrypts with).</td></tr>
+    <tr><td><code>CLICKSY_ADMIN_URL</code> + <code>ADMIN_API_KEY</code></td><td>Lets KB onboarding trigger a Clicksy backfill for missing history (degrades gracefully if unset).</td></tr>
+  </table>
+
+  <h4>Roadmap status</h4>
+  <p class="small">Phases 0 → 3 are complete and live-verified on real data: shared auth/foundation → ClickUp write-back → RAG KB + summary + document metric → pipeline grounding (context, prediction, dedup, HITL push) → smart assignment + the learning loop, with the review UI surfacing it all (and browser-verified). Open follow-ups: injecting KB context into the very first analyze stage, tuning the novelty/dedup thresholds on more data, and Clicksy's per-org data isolation.</p>
+
+  <footer>
+    Meetsy — Implementation &amp; User Guide · generated from the live codebase on branch <code>feat/meetsy-phase0</code>.<br/>
+    Authoritative sources: <code>docs/meetsy/BUILD-JOURNAL.md</code>, <code>docs/superpowers/specs/*</code>, <code>docs/superpowers/plans/2026-06-27-meetsy-integration-plan.md</code>.
+  </footer>
+</div>
+
+<script>
+  // mermaid is injected + run by the renderer (offline, bundled).
+</script>
+</body>
+</html>
