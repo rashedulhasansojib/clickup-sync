@@ -416,3 +416,23 @@ The final Phase-2 slice: confirm sprint/client/points on the push + log the huma
 - Test tasks + throwaway lists deleted after; ws_nifty untouched (1198 chunks).
 
 ## ✅ PHASE 2c COMPLETE (2c.1 context + 2c.2 prediction/dedup + 2c.3 HITL push) & LIVE-VERIFIED. **Phase 2 (RAG/KB + pipeline integration) is DONE.** Next: **Phase 3** — smart assignment + the learning loop that consumes the `FieldOverride` log. Open fast-follows: inject context into `analyzeMeeting`; tune the novelty `pctNovel` cutoff + dedup bands on multi-chunk/cross-workspace data; a review-UI surface for the 2c.2 predictions/dupes + 2c.3 sprint/client/points controls.
+
+---
+
+## Phase 3 — Smart assignment + learning loop (sliced 3.1 → 3.2)
+
+Spec: `docs/superpowers/specs/2026-06-28-meetsy-phase3-smart-assign-learning-design.md` (APPROVED — slice it; always require a human click [no auto-assign]; learning gate ≥3 corrections + ≥60% agreement; workload 30d; verify pushes only to test team `90181854711`).
+
+### 2026-06-28 — Phase 3.1 — Smart assignment — DONE / GREEN + LIVE-VERIFIED — commit `05cf8b2`
+Per extracted task, rank the assignable-member pool by **ownership precedent** → `result.assignment[taskId]`; recommendation-only (no auto-assign; the human confirms → logged as a `FieldOverride`). **170 meetsy-api tests** (11 new) + build green.
+- **`rankOwners` (pure):** aggregate owners over the task's **qualifying kNN neighbours** (reused from 2c.2 — no re-embedding), **closed precedent weighted 2×**. **THE ECHO-BREAKER:** the floor alone doesn't fix majority-area domination *among* qualifying neighbours (an AIT task pulls Nifty-AI neighbours owned by a prolific cross-area dev). So when 2c.2 predicted a client, **condition ownership on same-client neighbours** → the minority-area owner wins. Falls back to all qualifying when the client abstained / has no matching neighbours.
+- **`AssignmentService`:** map history owner names → `assignableMembers` via `AssigneeResolverService` (verified the real names resolve, incl. "Ahmad"→"Ahmad Syed Anwar" and the double-spaced "Shoabur Rahman  Chishty"); **workload** (open-task count + 30d tracked hours) as a **featherweight tie-break only** (never reorders real ownership); **ABSTAIN** below `SIM_FLOOR`/`MIN_QUALIFYING`; when history points only OUTSIDE the pool, **name that owner** instead of a bare abstain.
+- Processor loads the pool from `WorkspacePushConfig` (direct Prisma; analysis→kb one-way dep preserved) + attaches `result.assignment`.
+
+**LIVE-VERIFIED on ws_nifty (1198 chunks) — the advisor's discrimination test, both directions:**
+- **Energy task → Rashedul Hasan** (the energy owner; ownership 0.54–0.69, conditionedOnClient=true). Ranked Rashedul > Shoabur > Sayem.
+- **AIT (MINORITY area) → Ahmad Syed Anwar**, **NOT** the globally-prolific Rashedul (114 closed energy tasks / **0 AIT**) — client-conditioning restricted ownership to AIT neighbours so Ahmad (the real AIT owner) wins and Rashedul doesn't appear. This is the echo broken in the assignment slice.
+- **OOD "holiday party" → ABSTAIN** ("No clear owner from history").
+- Every recommended name resolved from history into the pool. Test meetings/runs/config cleaned up; ws_nifty restored (1198 chunks).
+
+## ▶ 3.1 DONE. Next: **3.2 — learning loop** (aggregate `FieldOverride` → support-gated nudge [≥3 + ≥60%] + honest per-field override-rate-trend metric + "what we've learned" view; verify the gate does NOT fire on sparse/conflicting corrections).

@@ -2,7 +2,7 @@
 
 > Single entry point to continue the Clicksy+Meetsy build in a fresh chat. Read this first,
 > then the three docs it points to. Everything is committed on branch **`feat/meetsy-phase0`**
-> (pushed to origin). Last code commit: **`23e96f7`** (Phase 2c.3 — HITL push; **Phase 2 COMPLETE**, all live-verified).
+> (pushed to origin). Last code commit: **`05cf8b2`** (Phase 3.1 — smart assignment, live-verified).
 
 ## Read these (in order), then start
 1. **`docs/meetsy/BUILD-JOURNAL.md`** — the full, dated build history + every live-verification + findings. **The source of truth for "what's done."**
@@ -30,11 +30,18 @@
 
 ## ✅ PHASE 2 COMPLETE (2.0 comment-sync → 2a KB → 2a.1 card → 2b docs/metric → 2c.1/2c.2/2c.3 pipeline). All live-verified on real Nifty data.
 
-## ▶ DO NEXT: Phase 3 — smart assignment + learning loop (spec WRITTEN + APPROVED; build slice-by-slice)
-Spec: `docs/superpowers/specs/2026-06-28-meetsy-phase3-smart-assign-learning-design.md` (**APPROVED** — locked: slice 3.1→3.2; **always require a human click** (no auto-assign); learning gate = **≥3 corrections AND C ≥60% of P's corrections**, else "not enough to learn yet"; workload window 30d; verification pushes only to test team `90181854711`).
-- **Build 3.1 first — smart assignment:** per extracted task, rank the candidate pool (`WorkspacePushConfig.assignableMembers`) by **ownership precedent** (reuse the 2c.2 kNN neighbours' `assignee`, weight closed>open + by similarity, cite neighbour task ids) + **workload tie-break** (open-task count + tracked hours last 30d via `SummaryFactsService`/`clickup_time_entries`; load down-ranks, never solely assigns), restricted to the pool via `AssigneeResolverService`; **ABSTAIN** below the 2c.2 `SIM_FLOOR`/`MIN_QUALIFYING`. Attach to `result.assignment[taskId]`. Recommendation-only; the human confirms (logged via `FieldOverride`). Then **3.2 — learning loop:** aggregate `FieldOverride` per field into `predicted P → confirmed C` counts; nudge at the approved gate (labelled "adjusted from N past corrections", raw prediction still shown); honest per-field **override-rate trend** (`GET /workspaces/:id/learning`); verify the gate does NOT fire on sparse/conflicting corrections (the discrimination check).
-- Honesty spine (carry the Phase-2 discipline): recommendation never automation; support-gated learning ("not enough to learn yet" is valid); override-rate trend never blended + sample size shown; workload never overrides ownership; same echo-trap floor as 2c.2.
-- Grounding mapped: `FieldOverride` (meetsy, written by 2c.3); `FieldPredictionService` kNN/`SIM_FLOOR`/`MIN_QUALIFYING` (`src/kb/field-prediction.service.ts` + `prediction-prior.ts`); workload/ownership in `src/kb/summary-facts.service.ts`; `AssigneeResolverService` + `assignableMembers` in `src/clickup/`.
+- **Phase 3.1** — smart assignment (commit `05cf8b2`) — **DONE + LIVE-VERIFIED.** `rankOwners` (pure) aggregates owners over the task's qualifying kNN neighbours (reused from 2c.2), closed weighted 2×, **conditioned on the 2c.2 predicted client** (the echo-breaker); `AssignmentService` maps names→pool via `AssigneeResolverService`, workload (open + 30d hours) as a featherweight tie-break, abstain below the floor, names out-of-pool owners. Attached to `result.assignment[taskId]`; recommendation-only. *Live: energy→Rashedul; AIT (minority)→Ahmad NOT the prolific Rashedul (echo broken via client-conditioning); OOD→abstain.*
+
+## ▶ DO NEXT: Phase 3.2 — learning loop (build, the last planned slice)
+Spec (APPROVED) §2. Build:
+- **Aggregate** a workspace's `meetsy.FieldOverride` rows (written by 2c.3) per field into `predicted P → confirmed C` counts (a "correction" = P≠C).
+- **Nudge** at the approved gate — **≥3 corrections AND C ≥60% of P's corrections** — surface C as an *adjusted suggestion* labelled "adjusted from N past corrections", with the **raw 2c.2 prediction + distribution still shown**; below the gate, "not enough to learn yet" (the loop abstains). Attach to `result.adjustments[taskId]` parallel to `fieldPredictions`.
+- **Honest "is it helping?" metric:** per-field **override-rate trend** over the last K pushes (never blended, sample size shown; a flat/rising rate is reported truthfully). `GET /workspaces/:id/learning` (correction stats + the trend = "what we've learned").
+- **CRITICAL verify (discrimination):** the gate **does NOT fire** on sparse (<3) or conflicting (<60%) corrections — prove the gate, not just the nudge. It's a deterministic correction memory, NOT a trained model; sparse-data honesty is the spine.
+- Grounding: `FieldOverride` model (predicted bundle + confirmed); `FieldPredictionService` output shape (`src/kb/field-prediction.service.ts`); the processor attaches per-task result like 2c.2/3.1.
+
+## (After 3.2) Open fast-follows — not yet built
+Inject context into `analyzeMeeting` (2c.1 deferred); tune novelty `pctNovel` cutoff (2b) + dedup bands (2c.2) on more data; the **review-UI** in meetsy-web for the 2c.2 predictions/dupes + 2c.3 sprint/client/points controls + 3.1 assignment recs (all backends ready).
 **Open fast-follows (smaller, can fold into Phase 3 or do standalone):** inject KB context into `analyzeMeeting` (2c.1 deferred); tune the novelty `pctNovel` cutoff (2b) + dedup bands (2c.2) on multi-chunk/cross-workspace data; build the **review-UI** surface for the 2c.2 predictions/dupes + 2c.3 sprint/client/points controls (backend is ready; meetsy-web add).
 
 ## Tokens/creds the new session needs (the scratchpad does NOT carry over)
