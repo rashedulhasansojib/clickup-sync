@@ -436,6 +436,7 @@ model ClickupTask {
   department       String?
   client           String?
   sprintName       String?   @map("sprint_name")
+  estimation       Decimal?  @map("estimation")
   tags             String?
   createdDate      DateTime? @map("created_date")
   updatedDate      DateTime? @map("updated_date")

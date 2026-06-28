@@ -12,6 +12,7 @@ import { AnalysisJobData, AnalysisQueue } from "./analysis.queue";
 import { ANALYSIS_QUEUE_NAME } from "./redis";
 import { KbSearchService, type KbContextHit } from "../../kb/kb-search.service";
 import { KbQueue } from "../../kb/kb.queue";
+import { FieldPredictionService, type TaskAnalysis } from "../../kb/field-prediction.service";
 import { buildContextQuery, formatContextForPrompt } from "../pipeline-context";
 
 /**
@@ -36,6 +37,7 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly queue: AnalysisQueue,
     private readonly kbSearch: KbSearchService,
     private readonly kbQueue: KbQueue,
+    private readonly fieldPrediction: FieldPredictionService,
   ) {}
 
   onModuleInit(): void {
@@ -127,6 +129,8 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
 
     // Captured for the run result so the injected KB context is INSPECTABLE.
     let kbContext: KbContextHit[] = [];
+    // Phase 2c.2 — weak field predictions + duplicate flags, attached per task id.
+    let taskAnalysis: TaskAnalysis = { predictions: {}, duplicates: {} };
 
     try {
       await this.prisma.analysisRun.update({
@@ -178,6 +182,14 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
         const tasks = await enrichTasks(this.azure, critiqued.tasks, analysis.summary, meetingDateISO, contextStr);
         await this.emit(runId, "enrich", "completed", "Tasks enriched", 0.9);
 
+        // ── Phase 2c.2: weak field predictions + duplicate flags ───────────
+        // Best-effort: a KB miss / embeddings-unconfigured leaves predictions empty.
+        try {
+          taskAnalysis = await this.fieldPrediction.analyze(workspaceId, tasks, meetingDateISO);
+        } catch (err) {
+          this.logger.warn(`Field prediction skipped: ${(err as Error).message}`);
+        }
+
         // ── Stage 6: assemble (pure) ──────────────────────────────────────
         await this.emit(runId, "assemble", "started", "Assembling result", 0.93);
         const assembled = assemble(analysis.summary, roster, tasks);
@@ -189,9 +201,14 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
         where: { id: runId },
         data: {
           status: "completed",
-          // Attach the retrieved KB provenance so the injected context is visible
-          // on the run (Phase 2c.1 — context is inspectable, not just plumbed).
-          result: { ...(result as object), kbContext } as unknown as Prisma.InputJsonValue,
+          // Attach KB provenance (2c.1) + weak field predictions/dupe flags (2c.2)
+          // so the grounding is inspectable on the run, keyed by task id.
+          result: {
+            ...(result as object),
+            kbContext,
+            fieldPredictions: taskAnalysis.predictions,
+            duplicates: taskAnalysis.duplicates,
+          } as unknown as Prisma.InputJsonValue,
           error: null,
           promptTokens: usage.promptTokens,
           completionTokens: usage.completionTokens,
