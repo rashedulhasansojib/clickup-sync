@@ -138,8 +138,12 @@ export class AnalysisService {
       runId: run.id,
       meetingId: run.meetingId,
       status: run.status,
+      // `.passthrough()` so the Phase-2c/3 signal keys the processor attaches
+      // alongside the AnalysisResult (kbContext / fieldPredictions / duplicates /
+      // assignment / adjustments) survive to the review UI — plain `.parse()`
+      // strips unknown keys and the signals never reach the client.
       result: run.result
-        ? AnalysisResultSchema.parse(run.result)
+        ? AnalysisResultSchema.passthrough().parse(run.result)
         : null,
       error: run.error ?? null,
     };
