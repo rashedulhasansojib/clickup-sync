@@ -2,7 +2,7 @@
 
 > Single entry point to continue the Clicksy+Meetsy build in a fresh chat. Read this first,
 > then the three docs it points to. Everything is committed on branch **`feat/meetsy-phase0`**
-> (pushed to origin). Last code commit: **`f1c6a33`** (Phase 3.2 — learning loop; **Phase 0→3 roadmap COMPLETE**, all live-verified).
+> (pushed to origin). Last code commit: **`0ad2312`** (review UI — surfaces all Phase-2c/3 signals; **Phase 0→3 roadmap COMPLETE**).
 
 ## Read these (in order), then start
 1. **`docs/meetsy/BUILD-JOURNAL.md`** — the full, dated build history + every live-verification + findings. **The source of truth for "what's done."**
@@ -36,8 +36,8 @@
 
 ## ✅ PHASE 0 → 3 ROADMAP COMPLETE. All live-verified on real Nifty data. The end-to-end product works: shared auth/org → ClickUp write-back → RAG KB + summary + honest doc-improvement metric → pipeline grounding (context + abstain-first prediction + dedup + HITL push) → smart assignment + support-gated learning loop.
 
-## ▶ DO NEXT: no planned phase remains — pick a fast-follow (none built yet)
-1. **meetsy-web review UI** (highest user value; all backends ready): surface on the run/review screen the 2c.1 `kbContext`, 2c.2 `fieldPredictions`/`duplicates` (abstain-aware), 2c.3 sprint/client/points controls + `refresh-fields`, 3.1 `assignment` recs (rationale + abstain), 3.2 `adjustments` ("adjusted from N") + a `/learning` "what we've learned" panel.
+## ▶ DO NEXT: no planned phase remains — pick a fast-follow
+1. **Review-UI in-browser smoke test** (the one gap from the UI build, commit `0ad2312`): the review UI is built + typecheck/`next build`/lint-clean + correct-by-construction against verified backend shapes, but no authed-browser visual pass was run (the run page fetches with the Clicksy `clickup_sync_sid` cookie; a headless session wasn't stood up). Stand up Clicksy+meetsy-api+meetsy-web with a real session and eyeball `/runs/[runId]` (signal chips, push controls, learning panel) on a fresh run with the assignable pool configured.
 2. **analyze-injection** (2c.1 deferred): inject KB context into `analyzeMeeting` too (needs a cheap pre-summary key: roster+title+bounded head).
 3. **Tuning on more data:** the novelty `pctNovel` cutoff (2b) + dedup bands (2c.2) were calibrated on single-chunk/one-workspace data; revisit with multi-chunk docs / a second workspace.
 4. **`CorrectionStat` cache** if `/learning` read cost grows (currently computed on demand, small N).
