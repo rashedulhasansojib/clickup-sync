@@ -2,7 +2,7 @@
 
 > Single entry point to continue the Clicksy+Meetsy build in a fresh chat. Read this first,
 > then the three docs it points to. Everything is committed on branch **`feat/meetsy-phase0`**
-> (pushed to origin). Last code commit: **`05d8fe2`** (Phase 2c.2 — field prediction + dedup, live-verified).
+> (pushed to origin). Last code commit: **`23e96f7`** (Phase 2c.3 — HITL push; **Phase 2 COMPLETE**, all live-verified).
 
 ## Read these (in order), then start
 1. **`docs/meetsy/BUILD-JOURNAL.md`** — the full, dated build history + every live-verification + findings. **The source of truth for "what's done."**
@@ -26,13 +26,13 @@
 
 - **Phase 2c.2** — field prediction + dedup (commit `05d8fe2`) — **DONE + LIVE-VERIFIED.** Per extracted task: card-shaped kNN over `clickup_task` chunks with a **cosine FLOOR** (so abstain is real, not base-rate echo); client/sprint/assignee = similarity-weighted modal prior **clamped by a gpt-5.4-mini call** (the echo-breaker — confidence rides on the distribution); due = **p80** cycle-time; abstain on thin history. Dedup bands **empirically recalibrated to flag ≥0.72 / suggest ≥0.64** (true near-dup peaks ~0.73 due to sparse-query/rich-card asymmetry). Attached to `result.fieldPredictions[id]` / `result.duplicates[id]`. *Live: AIT minority→AIT (not majority echo); OOD→abstain; energy→Energy Reporting high-conf; re-extracted task→FLAG.* `ClickupTask.estimation` added to the read-model.
 
-## ▶ DO NEXT: Phase 2c.3 — HITL push extension (the last 2c slice)
-Spec (APPROVED) §4. Build:
-- **Config:** extend `WorkspacePushConfig` (meetsy) with the **client dropdown** field id + options (`[{optionId(UUID),name}]`), selectable **sprint lists** (`[{listId,name}]`), and a **points-enabled** flag; populate via a "refresh ClickUp field options" admin action (fetch `type_config.options` + lists from ClickUp).
-- **Mapper:** `src/clickup/task-mapper.service.ts` `map()` adds `custom_fields: [{id, value: optionUUID}]` for client, top-level `points`, and routes the create to the chosen **sprint list** (push already targets a list id).
-- **Review/push:** surface the 2c.2 predictions (abstain-aware) + dupe flags in the review UI; `POST /runs/:id/push` accepts confirmed `sprintListId`/`clientOptionId`/`points` per task and writes a new **`meetsy.FieldOverride`** row (predicted vs confirmed) — the Phase-3 learning signal (written, not yet read).
-- **SAFETY (hard):** live-verify pushes go ONLY to a **throwaway list on test team `90181854711`** (Chishty). **Never** write Nifty prod `3450636`. Keep `TaskPush` idempotency; no ClickUp write without explicit confirmation.
-- Grounding mapped: `src/clickup/` (`WorkspacePushConfig`, `TaskMapperService.map`, `PushService`, `push-config.service.ts`).
+- **Phase 2c.3** — HITL push (commit `23e96f7`) — **DONE + LIVE-VERIFIED on test team `90181854711`.** `WorkspacePushConfig` += client dropdown/sprint lists/points + `refresh-fields` action; `TaskMapperService.map()` adds `custom_fields` by option UUID + `points` (byte-identical when unconfigured); sprint = per-task `listId`; `FieldOverride` logs predicted (from the stored run result, skip-on-id-miss) vs confirmed. *Live: sprint-routing to a chosen list + points (8/3) on real ClickUp; FieldOverride rows written. Client dropdown set unit-tested only (test team has no dropdown; prod has it but is read-only).*
+
+## ✅ PHASE 2 COMPLETE (2.0 comment-sync → 2a KB → 2a.1 card → 2b docs/metric → 2c.1/2c.2/2c.3 pipeline). All live-verified on real Nifty data.
+
+## ▶ DO NEXT: Phase 3 — smart assignment + the learning loop
+Spec NOT yet written (write it first, per the discipline). Phase 3 = (1) **consume the `meetsy.FieldOverride` log** (predicted-vs-confirmed, written by 2c.3 but read by nothing yet) to improve the weak predictions over time; (2) **confident smart-assignment** (deferred from 2c.2, which only offers an abstain-aware assignee *hint*). Plan: `docs/superpowers/plans/2026-06-27-meetsy-integration-plan.md` (Phase 3 row).
+**Open fast-follows (smaller, can fold into Phase 3 or do standalone):** inject KB context into `analyzeMeeting` (2c.1 deferred); tune the novelty `pctNovel` cutoff (2b) + dedup bands (2c.2) on multi-chunk/cross-workspace data; build the **review-UI** surface for the 2c.2 predictions/dupes + 2c.3 sprint/client/points controls (backend is ready; meetsy-web add).
 
 ## Tokens/creds the new session needs (the scratchpad does NOT carry over)
 Ask the user to re-provide (or read from `../meeting-analyzer/.env` for Azure):

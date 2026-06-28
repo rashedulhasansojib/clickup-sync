@@ -401,4 +401,18 @@ All test meetings/runs deleted; ws_nifty restored (1198 chunks, 0 docs, 0 meetin
 - **`share` no longer zeroed for minority picks:** `PriorCandidate` now carries its own weighted `share`, and `field()` reports the PICKED value's true support/share + an `isModal` flag (the AIT pick is now `supp=5/15 share≈0.33 isModal=false`, not the contradictory `share=0`). Matters because 2c.3's `FieldOverride` logs this as the Phase-3 learning signal — no corrupted training data.
 - **`estimate` filters zero/blank** before the modal (many tasks have estimation 0 → a "0" suggestion is meaningless; abstains when no real estimate exists).
 
-## ▶ 2c.2 DONE. Next: **2c.3** — HITL push extension (`WorkspacePushConfig` + client dropdown options/sprint lists/points; `TaskMapperService.map` adds `custom_fields` by option UUID + `points` + sprint-list routing; review UI surfaces the 2c.2 predictions/dupes; `FieldOverride` log). **Live-verify pushes go ONLY to a throwaway list on test team `90181854711`** — Nifty prod `3450636` stays read-only.
+### 2026-06-28 — Phase 2c.3 — HITL push extension — DONE / GREEN + LIVE-VERIFIED — commit `23e96f7`
+The final Phase-2 slice: confirm sprint/client/points on the push + log the human's accept/override of the 2c.2 predictions (the Phase-3 signal). **159 meetsy-api tests** (10 new) + build green.
+- **Config:** `WorkspacePushConfig` += `clientFieldId`/`clientFieldName`/`clientOptions`/`sprintLists`/`pointsEnabled` (+ migration `20260628150000`, applied as the meetsy role). New **`FieldOverride`** model.
+- **`POST /workspaces/:id/push-config/refresh-fields`** — fetch the target list's custom fields (client **dropdown** → option UUIDs from `type_config.options`) + the space tree's lists (sprint targets) from ClickUp; persist on the config.
+- **`TaskMapperService.map()`** adds `custom_fields:[{id,value:optionUUID}]` (client) + top-level `points` — **both omitted entirely unless configured+confirmed**, so a Phase-1 push emits the EXACT same payload (the existing 11-case mapper spec still passes). Sprint = the existing per-task `listId` override.
+- **`PushService`** writes a `FieldOverride` per pushed task: `predicted` from the **stored run result** (server-authoritative; `assemble` preserves the `t1..tM` id the push carries as `meetsyTaskId`) — **skip on an id-miss** so the table is never null-poisoned (an abstain is real content, not a miss); `confirmed` = the actual list/client/points/assignee.
+
+**LIVE-VERIFIED on the TEST team `90181854711`** (throwaway lists; prod `3450636` **never written** — the test token can't even authenticate against it):
+- `refresh-fields` fetched the live **sprint lists** (both test lists); `clientFieldId` null (no dropdown on the test team — honest).
+- Pushed two tasks: one **routed to a chosen "Sprint 99" list** (sprint-routing) and **points set on both** (8 / 3 — the Sprints ClickApp is on); ClickUp confirmed placement + points.
+- **`FieldOverride` rows written** with the run's `predicted` bundle (abstain — empty-KB workspace, real content) + the `confirmed` list/points — id-correspondence holds.
+- **Client dropdown set is unit-tested only:** the test team has no dropdown field and ClickUp's API can't create one; real Nifty prod has the field but is read-only. Named gap, not a hole.
+- Test tasks + throwaway lists deleted after; ws_nifty untouched (1198 chunks).
+
+## ✅ PHASE 2c COMPLETE (2c.1 context + 2c.2 prediction/dedup + 2c.3 HITL push) & LIVE-VERIFIED. **Phase 2 (RAG/KB + pipeline integration) is DONE.** Next: **Phase 3** — smart assignment + the learning loop that consumes the `FieldOverride` log. Open fast-follows: inject context into `analyzeMeeting`; tune the novelty `pctNovel` cutoff + dedup bands on multi-chunk/cross-workspace data; a review-UI surface for the 2c.2 predictions/dupes + 2c.3 sprint/client/points controls.
