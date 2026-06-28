@@ -13,8 +13,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
+    // suppressHydrationWarning: browser extensions (e.g. Grammarly) inject
+    // attributes like `data-gr-ext-installed` onto <body> before React hydrates,
+    // which otherwise logs a benign hydration-mismatch warning. This suppresses
+    // only that one-level attribute diff on <body>, nothing else.
     <html lang="en">
-      <body className="min-h-screen">
+      <body className="min-h-screen" suppressHydrationWarning>
         <AppShell>{children}</AppShell>
       </body>
     </html>
