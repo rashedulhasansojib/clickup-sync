@@ -4,6 +4,7 @@ import { ClickUpClient } from "./clickup.client";
 import { TaskMapperService } from "./task-mapper.service";
 import { PushConfigService } from "./push-config.service";
 import { AssigneeResolverService } from "./assignee-resolver.service";
+import { LearningService } from "../kb/learning.service";
 
 function makeService(fieldPredictions: Record<string, unknown>) {
   const created: Array<{ predicted: unknown; confirmed: unknown; meetsyTaskId: string }> = [];
@@ -24,10 +25,15 @@ function makeService(fieldPredictions: Record<string, unknown>) {
   const client = { createTask: jest.fn().mockResolvedValue({ id: "ct1", url: "u" }) } as unknown as ClickUpClient;
   const pushConfig = {
     get: jest.fn().mockResolvedValue({
-      targetListId: "L1", assignableMembers: [], defaultStatus: null, clientFieldId: "f-client",
+      targetListId: "L1", assignableMembers: [], clientOptions: [], defaultStatus: null, clientFieldId: "f-client",
     }),
   } as unknown as PushConfigService;
-  const svc = new PushService(prisma, client, new TaskMapperService(), pushConfig, {} as AssigneeResolverService);
+  // Learning stub: empty snapshot, no nudges → adjustments stay null (existing assertions hold).
+  const learning = {
+    snapshot: jest.fn().mockResolvedValue({ client: {}, assignee: {} }),
+    applyNudges: jest.fn().mockReturnValue({}),
+  } as unknown as LearningService;
+  const svc = new PushService(prisma, client, new TaskMapperService(), pushConfig, {} as AssigneeResolverService, learning);
   return { svc, created, prisma };
 }
 

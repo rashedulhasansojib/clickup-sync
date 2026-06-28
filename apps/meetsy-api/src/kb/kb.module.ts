@@ -20,6 +20,8 @@ import { AnswerabilityService } from "./answerability.service";
 import { FieldPredictionService } from "./field-prediction.service";
 import { AssignmentService } from "./assignment.service";
 import { AssigneeResolverService } from "../clickup/assignee-resolver.service";
+import { LearningService } from "./learning.service";
+import { LearningController } from "./learning.controller";
 
 /**
  * Phase 2a knowledge-base slice: per-workspace onboarding (coverage check →
@@ -30,7 +32,7 @@ import { AssigneeResolverService } from "../clickup/assignee-resolver.service";
  */
 @Module({
   imports: [AzureModule],
-  controllers: [KbController, KbDocsController],
+  controllers: [KbController, KbDocsController, LearningController],
   providers: [
     KbOnboardingService,
     KbSearchService,
@@ -49,10 +51,11 @@ import { AssigneeResolverService } from "../clickup/assignee-resolver.service";
     FieldPredictionService,
     AssignmentService,
     AssigneeResolverService,
+    LearningService,
     WorkspaceResolver,
   ],
-  // Phase 2c/3 — the analysis pipeline grounds itself via these (one-way dep
-  // analysis → kb; KbModule imports nothing from the analysis pipeline).
-  exports: [KbSearchService, KbQueue, FieldPredictionService, AssignmentService],
+  // Phase 2c/3 — the analysis pipeline + push ground themselves via these (one-way
+  // deps analysis → kb and clickup → kb; KbModule imports neither at module level).
+  exports: [KbSearchService, KbQueue, FieldPredictionService, AssignmentService, LearningService],
 })
 export class KbModule {}

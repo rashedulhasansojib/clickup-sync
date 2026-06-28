@@ -48,12 +48,17 @@ function setup(opts: {
   const pushConfig = {
     get: jest.fn().mockResolvedValue(opts.config === undefined ? CONFIG : opts.config),
   } as unknown as PushConfigService;
+  const learning = {
+    snapshot: jest.fn().mockResolvedValue({ client: {}, assignee: {} }),
+    applyNudges: jest.fn().mockReturnValue({}),
+  } as unknown as import("../kb/learning.service").LearningService;
   const svc = new PushService(
     prisma,
     client,
     new TaskMapperService(),
     pushConfig,
     new AssigneeResolverService(),
+    learning,
   );
   return { svc, prisma, client, pushConfig };
 }

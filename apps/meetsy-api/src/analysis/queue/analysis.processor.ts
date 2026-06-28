@@ -14,6 +14,7 @@ import { KbSearchService, type KbContextHit } from "../../kb/kb-search.service";
 import { KbQueue } from "../../kb/kb.queue";
 import { FieldPredictionService, type TaskAnalysis } from "../../kb/field-prediction.service";
 import { AssignmentService, type TaskAssignment } from "../../kb/assignment.service";
+import { LearningService, type TaskAdjustments } from "../../kb/learning.service";
 import type { AssignableMember } from "../../clickup/clickup.types";
 import { buildContextQuery, formatContextForPrompt } from "../pipeline-context";
 
@@ -41,6 +42,7 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly kbQueue: KbQueue,
     private readonly fieldPrediction: FieldPredictionService,
     private readonly assignment: AssignmentService,
+    private readonly learning: LearningService,
   ) {}
 
   onModuleInit(): void {
@@ -150,6 +152,8 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
     let taskAnalysis: TaskAnalysis = { predictions: {}, duplicates: {}, neighboursByTask: {} };
     // Phase 3.1 — ranked, abstain-first owner recommendations per task id.
     let assignment: Record<string, TaskAssignment> = {};
+    // Phase 3.2 — support-gated learning nudges per task id ("adjusted from N…").
+    let adjustments: Record<string, TaskAdjustments> = {};
 
     try {
       await this.prisma.analysisRun.update({
@@ -214,8 +218,10 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
             taskAnalysis.predictions,
             members,
           );
+          // ── Phase 3.2: support-gated learning nudges from past corrections. ──
+          adjustments = await this.learning.adjustForTasks(workspaceId, taskAnalysis.predictions);
         } catch (err) {
-          this.logger.warn(`Field prediction / assignment skipped: ${(err as Error).message}`);
+          this.logger.warn(`Field prediction / assignment / learning skipped: ${(err as Error).message}`);
         }
 
         // ── Stage 6: assemble (pure) ──────────────────────────────────────
@@ -237,6 +243,7 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
             fieldPredictions: taskAnalysis.predictions,
             duplicates: taskAnalysis.duplicates,
             assignment,
+            adjustments,
           } as unknown as Prisma.InputJsonValue,
           error: null,
           promptTokens: usage.promptTokens,

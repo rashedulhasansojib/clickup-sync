@@ -7,6 +7,8 @@ import { PushConfigService } from "./push-config.service";
 import { AssigneeResolverService } from "./assignee-resolver.service";
 import { ClickUpClient } from "./clickup.client";
 import { PushRunDto } from "./clickup.dto";
+import { LearningService, type LearningSnapshot } from "../kb/learning.service";
+import type { PushConfigView } from "./push-config.service";
 
 export interface PushResult {
   meetsyTaskId: string;
@@ -46,6 +48,7 @@ export class PushService {
     private readonly mapper: TaskMapperService,
     private readonly pushConfig: PushConfigService,
     private readonly resolver: AssigneeResolverService,
+    private readonly learning: LearningService,
   ) {}
 
   /** GET /runs/:id/push — config + per-task audit + assignee suggestions. */
@@ -120,6 +123,10 @@ export class PushService {
     // (`t1..tM`) the push request carries as meetsyTaskId (assemble preserves it).
     const predictions =
       (run.result as { fieldPredictions?: Record<string, unknown> } | null)?.fieldPredictions ?? {};
+    // Phase 3.2 — the learning snapshot (organic corrections only), computed ONCE
+    // before the loop. Used to recompute the nudge the loop showed per task so the
+    // FieldOverride records {shown, accepted} — the honest loop-effectiveness signal.
+    const learningSnap = await this.learning.snapshot(run.workspaceId).catch(() => null);
 
     // Allowlist enforcement at the boundary: POST is directly callable (not only
     // via the UI), so any clickupUserId NOT in the workspace's assignable members
@@ -164,12 +171,15 @@ export class PushService {
         // Phase-3 learning signal). predicted comes from the STORED run result
         // (server-authoritative); skip on an id-miss so the table is never
         // null-poisoned. confirmed = what the user actually pushed.
-        await this.logFieldOverride(runId, task, run.workspaceId, predictions[task.meetsyTaskId], {
-          listId,
-          clientOptionId: task.clientOptionId ?? null,
-          points: task.points ?? null,
-          clickupUserId,
-        });
+        const predicted = predictions[task.meetsyTaskId];
+        await this.logFieldOverride(
+          runId,
+          task,
+          run.workspaceId,
+          predicted,
+          { listId, clientOptionId: task.clientOptionId ?? null, points: task.points ?? null, clickupUserId },
+          this.computeAdjustments(learningSnap, predicted, task, clickupUserId, config),
+        );
         results.push({
           meetsyTaskId: task.meetsyTaskId,
           status: "pushed",
@@ -249,6 +259,7 @@ export class PushService {
     workspaceId: string,
     predicted: unknown,
     confirmed: { listId: string; clientOptionId: string | null; points: number | null; clickupUserId: string | null },
+    adjustments: Record<string, { shown: string; accepted: boolean }> | null,
   ): Promise<void> {
     if (predicted === undefined || predicted === null) return; // id-miss → don't poison the table
     try {
@@ -259,10 +270,41 @@ export class PushService {
           workspaceId,
           predicted: predicted as Prisma.InputJsonValue,
           confirmed: confirmed as unknown as Prisma.InputJsonValue,
+          adjustments: (adjustments && Object.keys(adjustments).length > 0
+            ? (adjustments as unknown as Prisma.InputJsonValue)
+            : Prisma.JsonNull),
         },
       });
     } catch (err) {
       this.logger.warn(`FieldOverride log failed for ${task.meetsyTaskId}: ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * Phase 3.2 — recompute the nudge the learning loop showed for this task (from
+   * the pre-push snapshot) and record {shown, accepted} per field. This is what
+   * makes loop-effectiveness measurable (vs the raw override rate) AND lets the
+   * gate count only organic (no-nudge) corrections. `accepted` = the user's
+   * confirmed value (resolved id → name) equals the nudge's suggestion.
+   */
+  private computeAdjustments(
+    snap: LearningSnapshot | null,
+    predicted: unknown,
+    task: { clientOptionId?: string | null },
+    confirmedClickupUserId: string | null,
+    config: PushConfigView,
+  ): Record<string, { shown: string; accepted: boolean }> | null {
+    if (!snap || predicted == null) return null;
+    const nudges = this.learning.applyNudges(snap, predicted as Parameters<LearningService["applyNudges"]>[1]);
+    const out: Record<string, { shown: string; accepted: boolean }> = {};
+    if (nudges.client) {
+      const confirmedName = config.clientOptions.find((o) => o.optionId === task.clientOptionId)?.name ?? null;
+      out.client = { shown: nudges.client.to, accepted: confirmedName === nudges.client.to };
+    }
+    if (nudges.assignee) {
+      const confirmedName = config.assignableMembers.find((m) => m.clickupUserId === confirmedClickupUserId)?.name ?? null;
+      out.assignee = { shown: nudges.assignee.to, accepted: confirmedName === nudges.assignee.to };
+    }
+    return out;
   }
 }

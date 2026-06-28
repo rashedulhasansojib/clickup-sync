@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { WorkspaceResolver } from "../analysis/workspace.resolver";
+import { KbModule } from "../kb/kb.module";
 import { ClickUpTokenService } from "./clickup-token.service";
 import { ClickUpClient } from "./clickup.client";
 import { AssigneeResolverService } from "./assignee-resolver.service";
@@ -17,6 +18,9 @@ import { WorkspacesController } from "./workspaces.controller";
  * resolution, and the idempotent push flow. PrismaModule/ConfigModule are global.
  */
 @Module({
+  // Phase 3.2 — PushService uses LearningService (clickup → kb, one-way) to record
+  // the shown nudge + acceptance on each FieldOverride.
+  imports: [KbModule],
   controllers: [PushConfigController, ClickUpController, PushController, WorkspacesController],
   providers: [
     ClickUpTokenService,

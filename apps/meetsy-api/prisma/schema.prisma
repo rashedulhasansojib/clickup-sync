@@ -197,6 +197,12 @@ model FieldOverride {
   workspaceId  String
   predicted    Json?
   confirmed    Json
+  // Phase 3.2 — what the LEARNING LOOP showed at push time, per field, e.g.
+  // { client: { shown: "AIT", accepted: true } }. Absent field ⇒ no nudge shown.
+  // This is what makes the metric honest (nudge-acceptance ≠ raw-model override
+  // rate) AND lets the gate count only ORGANIC corrections (no nudge shown), so
+  // the loop can't silently reinforce itself.
+  adjustments  Json?
   createdAt    DateTime @default(now())
 
   @@index([workspaceId])
