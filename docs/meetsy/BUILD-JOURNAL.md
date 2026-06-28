@@ -364,3 +364,22 @@ Built (meetsy-api only; Clicksy untouched). **128 meetsy-api tests** (20 new) + 
 **Test artifacts:** all test docs + the test `Meeting` deleted; ws_nifty restored to 1198 task chunks / 0 docs / 0 meetings. Local stack (pgvector 55432 / Redis 56379) left running.
 
 ## ✅ PHASE 2b COMPLETE & LIVE-VERIFIED ON REAL NIFTY DATA (incl. the positive answerability-lift path). Next: **Phase 2c** — pipeline integration (KB context injection into analyze/critic/enrich, field prediction [weak prior + range + evidence, abstain when thin], dedup, HITL sprint/client/points; surface docs in retrieval).
+
+---
+
+## Phase 2c — Pipeline integration (sliced 2c.1 → 2c.2 → 2c.3)
+
+Spec: `docs/superpowers/specs/2026-06-28-meetsy-phase2c-pipeline-integration-design.md` (APPROVED — slice it; predict client/sprint/due/estimate, assignee soft-hint only; live-verify pushes to throwaway list on test team `90181854711`; abstain if top-1 share <0.5 or support <3; sprint = pick target list).
+
+### 2026-06-28 — Phase 2c.1 — Context injection — DONE / GREEN + LIVE-VERIFIED — commit `3802f6a`
+Ground transcript→task analysis in the client's KB history (tasks + 2b docs). **137 meetsy-api tests** (9 new) + build green.
+- **`KbSearchService`** broadened to a `sourceTypes` filter + **`retrieveContext()`** returning ranked snippets **with provenance** (tasks + documents). `search()` unchanged (tasks-only) → the `/kb/search` endpoint is byte-identical.
+- **analyze→critic→enrich:** `criticPass` + `enrichTasks` take an **optional `context` arg** (default undefined ⇒ **byte-identical** prompt, locked by `context-injection.spec.ts`). Context keyed on the analysis **summary/topics/titles** (concise/embeddable), NOT the raw transcript; injected **reference-only** ("don't treat as facts from this meeting"). **analyze-injection deferred to a fast-follow** (avoids the chicken-and-egg of a pre-summary retrieval — documented).
+- **Processor:** retrieves context after analyze, injects into critic+enrich, and attaches the retrieved provenance to `result.kbContext` so the injected context is **inspectable, not just plumbed**. Best-effort (KB miss ⇒ exact pre-2c behaviour). Fire-and-forget incremental remap for already-onboarded workspaces (collision-safe via the Fix-2 enqueue-supersede; current run uses the already-embedded KB, next is fresher).
+- **Module wiring:** KbModule exports `KbSearchService`/`KbQueue`; AnalysisModule imports it. One-way dep analysis→kb (`workspace.resolver` is Prisma-only ⇒ acyclic).
+
+**LIVE-VERIFIED on ws_nifty (1198 real chunks):** ran a real energy-reporting transcript end-to-end (`POST /meetings` → roster → run). `result.kbContext` held the **8 right "[Energy Reporting]" tasks** (Energy Audit Web Portal, Section editor + AEA-faithful PDF gen, ECM data mapping…) — proving the retrieval is **relevant + inspectable**, not just wired. The run produced 3 enriched tasks with absolute due dates (next-Friday → 2026-07-03), estimates, ACs, and **domain-consistent tags** (energy-reporting/web-portal/aea-layout/ecm). Fire-and-forget remap fired; KB stayed healthy (1198, ready). Test meeting/run cleaned up.
+
+**Fast-follow (documented):** inject context into `analyzeMeeting` too (needs a cheap pre-analyze key: roster+title+bounded head) — deferred from 2c.1 to keep the primary retrieval summary-keyed.
+
+## ▶ 2c.1 DONE. Next: **2c.2** — field prediction (kNN prior + LLM clamped to neighbour range + abstain-first; client/sprint/due/estimate; assignee soft-hint) + duplicate detection (flag ≥0.90 / suggest 0.82–0.90 / never auto-merge). Then 2c.3 (HITL sprint/client/points push + `FieldOverride` log).

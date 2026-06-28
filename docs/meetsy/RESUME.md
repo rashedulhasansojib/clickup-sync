@@ -2,7 +2,7 @@
 
 > Single entry point to continue the Clicksy+Meetsy build in a fresh chat. Read this first,
 > then the three docs it points to. Everything is committed on branch **`feat/meetsy-phase0`**
-> (pushed to origin). Last code commit: **`ffcc295`** (Phase 2b — doc upload + improvement metric, live-verified).
+> (pushed to origin). Last code commit: **`3802f6a`** (Phase 2c.1 — KB context injection, live-verified).
 
 ## Read these (in order), then start
 1. **`docs/meetsy/BUILD-JOURNAL.md`** — the full, dated build history + every live-verification + findings. **The source of truth for "what's done."**
@@ -22,10 +22,14 @@
 
 - **Phase 2b** — doc upload + honest improvement metric (commit `ffcc295`) — **DONE + LIVE-VERIFIED on real Nifty data.** SOP/PDF upload → `meetsy-kb-docs` worker (parse via `pdf-parse`/text → `chunkText` → embed into `KbChunk` sourceType=document) → metric → doc↔task links; `POST/GET/DELETE /workspaces/:id/kb/documents`. Metric = **novelty** (pgvector-only headline; today read `medianNovelty` — `pctNovel` cutoff wants tuning on multi-chunk docs) + **answerability-lift** (held-out transcript questions when present, else task-derived+provisional; blind identical gpt-5.4-mini judge before/after). *Live: PDF+md upload, novelty discriminates (0.243 vs 0.399), doc linked to the real "Energy Audit Web Portal" task, and the **positive answerability path proven** — a vendor-payment transcript + the vendor-policy PDF gave `provisional=false, newlyAnswerable=2 (N→Y)`.* 128 tests. Docs are intentionally NOT in `/kb/search` yet (2c surfaces them).
 
-## ▶ DO NEXT: Phase 2c — pipeline integration (spec WRITTEN + APPROVED; build slice-by-slice)
-Spec: `docs/superpowers/specs/2026-06-28-meetsy-phase2c-pipeline-integration-design.md` (**APPROVED** — locked: slice 2c.1→2c.2→2c.3; predict client/sprint/due/estimate, assignee soft-hint only [confident assign = Phase 3]; all live-verify pushes to a **throwaway list on test team `90181854711`**, Nifty prod `3450636` READ-ONLY; abstain if top-1 share <0.5 or support <3; sprint = pick the target list).
-- **Build 2c.1 first** — broaden `KbSearchService.search` to a `sourceTypes` filter (surface 2b docs in retrieval, today it's `clickup_task`-only) + a `retrieveContext()` helper; inject context into the EXISTING `analyzeMeeting`/`criticPass`/`enrichTasks` (optional `context` arg, signatures stay); trigger the 2a incremental remap before analysis. Lowest risk, no production push. Then 2c.2 (field prediction + dedup), then 2c.3 (HITL sprint/client/points push + `FieldOverride` log).
-- Grounding already mapped: pipeline stages in `src/analysis/pipeline/` (`stage12-analyze`, `stage5-critic`, `stage4-enrich`); push in `src/clickup/` (`WorkspacePushConfig`, `TaskMapperService.map`, `PushService`); cycle-time p50 in `summary-facts.service.ts`; kNN metadata already on `KbChunk` (client/component/assignee/status).
+- **Phase 2c.1** — KB context injection (commit `3802f6a`) — **DONE + LIVE-VERIFIED on real Nifty data.** `KbSearchService` gained a `sourceTypes` filter + `retrieveContext()` (provenance); `criticPass`/`enrichTasks` take an optional `context` arg (default byte-identical, test-locked); the processor injects summary-keyed context into critic+enrich and surfaces provenance on `result.kbContext`; fire-and-forget incremental remap. *Live: an energy-reporting transcript run retrieved the 8 right "[Energy Reporting]" tasks, visible in `result.kbContext`.* **Fast-follow:** inject context into `analyzeMeeting` too (deferred).
+
+## ▶ DO NEXT: Phase 2c.2 — field prediction + duplicate detection (build, then 2c.3)
+Spec (APPROVED): `docs/superpowers/specs/2026-06-28-meetsy-phase2c-pipeline-integration-design.md` §2–3. Build:
+- **Field prediction** (weak, abstain-first): for each extracted task, kNN over `KbChunk` task neighbours (metadata already carries client/component/assignee/status) → prior; **LLM clamped to the neighbours' observed values**; due = **p50/p80 cycle-time** (reuse `summary-facts.service.ts` `percentile_cont`); **ABSTAIN** if top-1 neighbour share <0.5 OR support <3. Predict **client/sprint·component/due/estimate**; assignee = **soft hint only** (confident assign = Phase 3). Surface as suggestion + evidence + confidence on the run.
+- **Duplicate detection:** hybrid-search existing tasks per extracted task → **flag ≥0.90 / suggest 0.82–0.90 / <0.82 ignore; never auto-merge.** Show on the run with the existing task link.
+- Then **2c.3** — HITL push extension (`WorkspacePushConfig` + client dropdown options/sprint lists/points; `TaskMapperService.map` adds `custom_fields` by option UUID + `points` + sprint-list routing; review UI; `FieldOverride` log). **Live-verify pushes go ONLY to a throwaway list on test team `90181854711`** — Nifty prod `3450636` stays read-only.
+- Grounding mapped: push in `src/clickup/` (`WorkspacePushConfig`, `TaskMapperService.map`, `PushService`); cycle-time p50 in `summary-facts.service.ts`; kNN metadata on `KbChunk`.
 
 ## Tokens/creds the new session needs (the scratchpad does NOT carry over)
 Ask the user to re-provide (or read from `../meeting-analyzer/.env` for Azure):
