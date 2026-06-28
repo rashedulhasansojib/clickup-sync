@@ -39,7 +39,10 @@ export interface FieldPrediction {
   value: string | null;
   abstain: boolean;
   support: number;
+  /** The picked value's true similarity-weighted share (NOT zeroed for minority picks). */
   share: number;
+  /** Whether the picked value is the statistical mode (false ⇒ the LLM clamp chose a minority). */
+  isModal: boolean;
   confidence: "high" | "low";
   candidates: PriorCandidate[];
   reason?: string;
@@ -169,7 +172,12 @@ export class FieldPredictionService {
     const clientPrior = aggregatePrior(quali, (n) => n.client);
     const sprintPrior = aggregatePrior(quali, (n) => n.sprint);
     const assigneePrior = aggregatePrior(quali, (n) => n.assignee);
-    const estimatePrior = aggregatePrior(quali, (n) => n.estimation);
+    // Many tasks carry estimation 0 — a "0" estimate suggestion is meaningless,
+    // so drop zero/blank before the modal (abstains when no real estimate exists).
+    const estimatePrior = aggregatePrior(quali, (n) => {
+      const v = n.estimation;
+      return v && Number(v) > 0 ? v : null;
+    });
 
     // LLM clamp (echo-breaker) for client/sprint/assignee — picks among the
     // observed candidates using the task text, or abstains. Skipped when thin.
@@ -207,14 +215,14 @@ export class FieldPredictionService {
     clamp: { value: string | null; reason: string } | undefined,
   ): FieldPrediction {
     if (thin || !prior) {
-      return { value: null, abstain: true, support: 0, share: 0, confidence: "low", candidates: prior?.candidates ?? [] };
+      return { value: null, abstain: true, support: 0, share: 0, isModal: false, confidence: "low", candidates: prior?.candidates ?? [] };
     }
     // LLM provided (client/sprint/assignee): honour its pick/abstain when valid.
     let value = prior.top;
     let reason: string | undefined;
     if (clamp !== undefined) {
       if (clamp.value === null) {
-        return { value: null, abstain: true, support: 0, share: 0, confidence: "low", candidates: prior.candidates, reason: clamp.reason };
+        return { value: null, abstain: true, support: 0, share: 0, isModal: false, confidence: "low", candidates: prior.candidates, reason: clamp.reason };
       }
       const match = prior.candidates.find((c) => c.value === clamp.value);
       if (match) {
@@ -222,10 +230,14 @@ export class FieldPredictionService {
         reason = clamp.reason;
       }
     }
-    const support = prior.candidates.find((c) => c.value === value)?.support ?? prior.support;
-    const share = value === prior.top ? prior.share : 0; // non-modal pick ⇒ minority signal
-    const confidence: "high" | "low" = value === prior.top && prior.share >= 0.5 && prior.support >= MIN_QUALIFYING ? "high" : "low";
-    return { value, abstain: false, support, share, confidence, candidates: prior.candidates, reason };
+    // support + share come from the PICKED value's true distribution (a minority
+    // pick keeps its real share — never zeroed; 2c.3 FieldOverride logs this).
+    const picked = prior.candidates.find((c) => c.value === value);
+    const support = picked?.support ?? prior.support;
+    const share = picked?.share ?? prior.share;
+    const isModal = value === prior.top;
+    const confidence: "high" | "low" = isModal && share >= 0.5 && support >= MIN_QUALIFYING ? "high" : "low";
+    return { value, abstain: false, support, share, isModal, confidence, candidates: prior.candidates, reason };
   }
 
   private async clamp(

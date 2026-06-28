@@ -34,6 +34,11 @@ describe("prediction-prior (echo-trap guards)", () => {
       expect(p.support).toBe(2);
       expect(p.share).toBeGreaterThan(0.5);
       expect(p.candidates.map((c) => c.value).sort()).toEqual(["AIT", "Energy Reporting"]);
+      // Each candidate carries its OWN weighted share (a minority pick is never zeroed).
+      const ait = p.candidates.find((c) => c.value === "AIT")!;
+      expect(ait.support).toBe(1);
+      expect(ait.share).toBeGreaterThan(0);
+      expect(ait.share).toBeLessThan(0.5);
     });
     it("returns null when no qualifying neighbour has a value", () => {
       expect(aggregatePrior([nb({ client: null }), nb({ client: "" })], (n) => n.client)).toBeNull();

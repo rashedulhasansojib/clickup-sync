@@ -25,6 +25,8 @@ export interface Neighbour {
 export interface PriorCandidate {
   value: string;
   support: number;
+  /** Similarity-weighted share of this value over all qualifying neighbours, 0..1. */
+  share: number;
 }
 
 export interface PriorResult {
@@ -66,7 +68,7 @@ export function aggregatePrior(quali: Neighbour[], pick: (n: Neighbour) => strin
   }
   if (totalWeight === 0) return null;
   const candidates = [...countByValue.entries()]
-    .map(([value, support]) => ({ value, support }))
+    .map(([value, support]) => ({ value, support, share: round3((weightByValue.get(value) ?? 0) / totalWeight) }))
     .sort((a, b) => b.support - a.support);
   let top = "";
   let topWeight = -1;

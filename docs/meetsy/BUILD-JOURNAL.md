@@ -396,4 +396,9 @@ Attach weak, history-grounded predictions + dupe flags to the run result (`resul
 
 All test meetings/runs deleted; ws_nifty restored (1198 chunks, 0 docs, 0 meetings).
 
+**Advisor follow-ups (both-directions checks) — applied:**
+- **Dedup true-NEGATIVE verified** (not just the true-positive): measured the top dup cosine for two genuinely-NEW (non-duplicate) tasks — "Fix the audit objectives default…" → **0.648**, "Debug Zoho sync for AIT" → **0.655**. Both land in **SUGGEST (0.64–0.72), NOT FLAG** — so the flag band ("very likely already exists") does **not** over-fire on new-but-related work, while the true near-dup (0.764) still flags. Discriminates in both directions; no margin rule needed.
+- **`share` no longer zeroed for minority picks:** `PriorCandidate` now carries its own weighted `share`, and `field()` reports the PICKED value's true support/share + an `isModal` flag (the AIT pick is now `supp=5/15 share≈0.33 isModal=false`, not the contradictory `share=0`). Matters because 2c.3's `FieldOverride` logs this as the Phase-3 learning signal — no corrupted training data.
+- **`estimate` filters zero/blank** before the modal (many tasks have estimation 0 → a "0" suggestion is meaningless; abstains when no real estimate exists).
+
 ## ▶ 2c.2 DONE. Next: **2c.3** — HITL push extension (`WorkspacePushConfig` + client dropdown options/sprint lists/points; `TaskMapperService.map` adds `custom_fields` by option UUID + `points` + sprint-list routing; review UI surfaces the 2c.2 predictions/dupes; `FieldOverride` log). **Live-verify pushes go ONLY to a throwaway list on test team `90181854711`** — Nifty prod `3450636` stays read-only.
