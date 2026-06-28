@@ -54,9 +54,11 @@ function resolveInitial(): string | null {
   const launch = params.get("workspaceId");
   if (launch) {
     // Launch param ALWAYS wins (explicit deep-link intent) — persist it to BOTH
-    // localStorage and the shared cookie (so a later hop back to Clicksy agrees),
-    // then strip it from the URL so the address bar / shares don't carry a sticky
-    // workspace override.
+    // localStorage and the shared cookie (so a later hop back to Clicksy agrees).
+    // The URL is stripped of `workspaceId` in an effect AFTER mount (see
+    // WorkspaceProvider) — NOT here: this runs during render (lazy useState
+    // initializer), and Next patches history.replaceState to sync the Router, so
+    // calling it here throws "Cannot update Router while rendering".
     resolved = launch;
     try {
       localStorage.setItem(STORAGE_KEY, launch);
@@ -64,13 +66,6 @@ function resolveInitial(): string | null {
       // localStorage may be unavailable (private mode); ignore.
     }
     writeWorkspaceCookie(launch);
-    params.delete("workspaceId");
-    const query = params.toString();
-    const newUrl =
-      window.location.pathname +
-      (query ? `?${query}` : "") +
-      window.location.hash;
-    window.history.replaceState(null, "", newUrl);
   } else {
     // No launch param — prefer the shared cross-app cookie (a switch made in
     // Clicksy), then fall back to this app's own localStorage.
@@ -139,6 +134,22 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       document.removeEventListener("visibilitychange", onVisibility);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Strip the one-time `?workspaceId=` launch param from the URL AFTER mount.
+  // resolveInitial already consumed + persisted it; this just cleans the address
+  // bar. It MUST live in an effect (not resolveInitial) because Next patches
+  // history.replaceState to sync the Router — calling it during render throws
+  // "Cannot update a component (Router) while rendering a different component".
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("workspaceId")) return;
+    params.delete("workspaceId");
+    const query = params.toString();
+    const newUrl =
+      window.location.pathname + (query ? `?${query}` : "") + window.location.hash;
+    window.history.replaceState(null, "", newUrl);
   }, []);
 
   useEffect(() => {
