@@ -53,6 +53,17 @@ export interface AssignableMember {
   email?: string;
 }
 
+/** A client dropdown option (Phase 2c.3). */
+export interface ClientOption {
+  optionId: string;
+  name: string;
+}
+/** A selectable sprint target list (Phase 2c.3). */
+export interface SprintListOption {
+  listId: string;
+  name: string;
+}
+
 /** Stored per-workspace push config — GET/PUT /workspaces/:id/push-config. */
 export interface PushConfigView {
   workspaceId: string;
@@ -60,6 +71,12 @@ export interface PushConfigView {
   targetListName: string | null;
   assignableMembers: AssignableMember[];
   defaultStatus: string | null;
+  // Phase 2c.3 HITL fields (populated by refresh-fields).
+  clientFieldId?: string | null;
+  clientFieldName?: string | null;
+  clientOptions?: ClientOption[];
+  sprintLists?: SprintListOption[];
+  pointsEnabled?: boolean;
   updatedAt: string;
   updatedBy: string | null;
 }
@@ -136,6 +153,32 @@ export interface PushTaskInput {
   tags?: string[];
   subtasks?: string[];
   dependencies?: string[];
+  /** Phase 2c.3 — confirmed client dropdown option UUID. */
+  clientOptionId?: string | null;
+  /** Phase 2c.3 — confirmed sprint points. */
+  points?: number | null;
+}
+
+/** GET /workspaces/:id/learning — the learning loop's "what we've learned". */
+export interface LearningCorrection {
+  predicted: string;
+  confirmed: string;
+  count: number;
+  agreement: number;
+  gatePassed: boolean;
+}
+export interface LearningFieldSummary {
+  field: "client" | "assignee";
+  corrections: LearningCorrection[];
+  rawOverrideRate: number | null;
+  rawSample: number;
+  nudgeAcceptanceRate: number | null;
+  nudgeSample: number;
+  unresolved: number;
+}
+export interface LearningSummary {
+  totalOverrides: number;
+  fields: LearningFieldSummary[];
 }
 
 /** Per-task outcome from POST /runs/:id/push. */
@@ -352,6 +395,21 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ tasks }),
       },
+    );
+  },
+
+  /** POST /workspaces/:id/push-config/refresh-fields — fetch client dropdown + sprint lists from ClickUp (Owner/Admin). */
+  refreshPushFields(workspaceId: string): Promise<PushConfigView> {
+    return request<PushConfigView>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/push-config/refresh-fields?workspaceId=${encodeURIComponent(workspaceId)}`,
+      { method: "POST" },
+    );
+  },
+
+  /** GET /workspaces/:id/learning — the learning loop's corrections + honest metrics. */
+  getLearning(workspaceId: string): Promise<LearningSummary> {
+    return request<LearningSummary>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/learning?workspaceId=${encodeURIComponent(workspaceId)}`,
     );
   },
 };

@@ -30,6 +30,13 @@ import {
   type RunPushStatus,
 } from "@/lib/api";
 import { Button, Card, ErrorBanner, PriorityBadge, Spinner, Tag } from "@/app/ui";
+import {
+  type ReviewResult,
+  type TaskSignalData,
+  signalsForTask,
+  TaskSignals,
+  KbContextBanner,
+} from "./signals";
 
 // ── Live pipeline stepper ─────────────────────────────────────────────
 // Canonical ordered list of the full Phase-2 pipeline. Stages that never
@@ -270,6 +277,8 @@ export function ResultsSection({
 
 // ── Result rendering ──────────────────────────────────────────────────
 export function ResultView({ result }: { result: AnalysisResult }) {
+  // The stored result carries Phase-2c/3 signal maps not in the @ma/shared type.
+  const rr = result as ReviewResult;
   return (
     <div className="space-y-8">
       <section>
@@ -281,6 +290,9 @@ export function ResultView({ result }: { result: AnalysisResult }) {
             {result.overview}
           </p>
         </Card>
+        <div className="mt-3">
+          <KbContextBanner hits={rr.kbContext} />
+        </div>
       </section>
 
       <section className="space-y-4">
@@ -291,7 +303,7 @@ export function ResultView({ result }: { result: AnalysisResult }) {
           <p className="text-sm text-zinc-400">No assigned tasks.</p>
         )}
         {result.people.map((pt) => (
-          <PersonSection key={pt.participant.id} personTasks={pt} />
+          <PersonSection key={pt.participant.id} personTasks={pt} result={rr} />
         ))}
       </section>
 
@@ -305,7 +317,7 @@ export function ResultView({ result }: { result: AnalysisResult }) {
           </p>
           <div className="space-y-3">
             {result.unassignedTasks.map((t) => (
-              <TaskCard key={t.id} task={t} />
+              <TaskCard key={t.id} task={t} signals={signalsForTask(rr, t.id)} />
             ))}
           </div>
         </section>
@@ -314,7 +326,7 @@ export function ResultView({ result }: { result: AnalysisResult }) {
   );
 }
 
-function PersonSection({ personTasks }: { personTasks: PersonTasks }) {
+function PersonSection({ personTasks, result }: { personTasks: PersonTasks; result: ReviewResult }) {
   const { participant, tasks } = personTasks;
   return (
     <div className="space-y-3">
@@ -333,20 +345,22 @@ function PersonSection({ personTasks }: { personTasks: PersonTasks }) {
         {tasks.length === 0 ? (
           <p className="text-sm text-zinc-400">No tasks.</p>
         ) : (
-          tasks.map((t) => <TaskCard key={t.id} task={t} />)
+          tasks.map((t) => <TaskCard key={t.id} task={t} signals={signalsForTask(result, t.id)} />)
         )}
       </div>
     </div>
   );
 }
 
-function TaskCard({ task }: { task: Task }) {
+function TaskCard({ task, signals }: { task: Task; signals?: TaskSignalData }) {
   return (
     <Card className="p-4">
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-medium text-zinc-900">{task.title}</h3>
         <PriorityBadge priority={task.priority} />
       </div>
+
+      {signals && <TaskSignals signals={signals} />}
 
       {task.description && (
         <p className="mt-1.5 text-sm leading-relaxed text-zinc-600">
@@ -667,6 +681,10 @@ interface PushEdit {
   dueDate: string;
   /** Optional per-task target list override (list id); "" = use workspace default. */
   listOverride: string;
+  /** Phase 2c.3 — confirmed client dropdown option UUID; "" = none. */
+  clientOptionId: string;
+  /** Phase 2c.3 — confirmed sprint points; "" = none. */
+  points: string;
   /** Whether this row is included in the next bulk push. */
   include: boolean;
 }
@@ -698,10 +716,14 @@ export function PushSection({
   const [edits, setEdits] = useState<Record<string, PushEdit>>({});
   const [pushing, setPushing] = useState(false);
   const [pushError, setPushError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   /** Per-task result of the most recent push (taskId → outcome). */
   const [results, setResults] = useState<Record<string, PushResult>>({});
 
   const tasks = flattenTasks(result);
+  // The result also carries the Phase-3.1 assignment recs (for pre-fill) +
+  // Phase-2c.2 client predictions (to pre-select a matching client option).
+  const rr = result as ReviewResult;
 
   // Build the initial editable state from the loaded status + each task's
   // pipeline defaults. Already-`pushed` tasks are excluded from the push by
@@ -732,12 +754,24 @@ export function PushSection({
             };
             continue;
           }
-          const suggested = suggestionBy.get(t.id) ?? null;
+          // Pre-fill the assignee: the Phase-3.1 ownership recommendation (when
+          // in-pool) takes priority, else the Phase-1 name-resolved suggestion.
+          const rec = rr.assignment?.[t.id]?.recommended;
+          const recId = rec?.inPool ? rec.clickupUserId : null;
+          const suggested = recId ?? suggestionBy.get(t.id) ?? null;
+          // Pre-select the client option matching the 2c.2 predicted client name.
+          const predClient = rr.fieldPredictions?.[t.id]?.client;
+          const clientOpt =
+            predClient && !predClient.abstain && predClient.value
+              ? (s.config?.clientOptions ?? []).find((o) => o.name === predClient.value)?.optionId ?? ""
+              : "";
           next[t.id] = {
             clickupUserId: suggested && allowed.has(suggested) ? suggested : null,
             priority: t.priority,
             dueDate: toDateInputValue(t.dueDate),
             listOverride: "",
+            clientOptionId: clientOpt,
+            points: "",
             include: !pushedIds.has(t.id),
           };
         }
@@ -838,6 +872,7 @@ export function PushSection({
       const payload: PushTaskInput[] = eligible.map((t) => {
         const e = edits[t.id];
         const listOverride = e.listOverride.trim();
+        const pts = e.points.trim();
         return {
           meetsyTaskId: t.id,
           ...(listOverride ? { listId: listOverride } : {}),
@@ -851,6 +886,8 @@ export function PushSection({
           tags: t.tags,
           subtasks: t.subtasks,
           dependencies: t.dependencies,
+          ...(e.clientOptionId ? { clientOptionId: e.clientOptionId } : {}),
+          ...(pts !== "" && Number.isFinite(Number(pts)) ? { points: Number(pts) } : {}),
         };
       });
 
@@ -871,6 +908,21 @@ export function PushSection({
     }
   };
 
+  // Phase 2c.3 — pull the live client dropdown options + sprint lists from ClickUp.
+  const handleRefreshFields = async () => {
+    if (!config) return;
+    setRefreshing(true);
+    setPushError(null);
+    try {
+      await api.refreshPushFields(config.workspaceId);
+      await load();
+    } catch (err) {
+      setPushError(err instanceof ApiError ? err.message : "Could not refresh fields.");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
     <Card className="space-y-4 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -885,13 +937,18 @@ export function PushSection({
             </span>
           </p>
         </div>
-        <Button onClick={handlePush} disabled={pushing || eligible.length === 0}>
-          {pushing ? (
-            <Spinner label="Pushing…" />
-          ) : (
-            `Push to ClickUp${eligible.length ? ` (${eligible.length})` : ""}`
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={handleRefreshFields} disabled={refreshing || pushing}>
+            {refreshing ? <Spinner label="Refreshing…" /> : "Refresh ClickUp fields"}
+          </Button>
+          <Button onClick={handlePush} disabled={pushing || eligible.length === 0}>
+            {pushing ? (
+              <Spinner label="Pushing…" />
+            ) : (
+              `Push to ClickUp${eligible.length ? ` (${eligible.length})` : ""}`
+            )}
+          </Button>
+        </div>
       </div>
 
       {pushError && <ErrorBanner message={pushError} />}
@@ -903,6 +960,7 @@ export function PushSection({
             task={t}
             edit={edits[t.id]}
             members={config.assignableMembers}
+            config={config}
             pushed={pushedBy.get(t.id) ?? null}
             result={results[t.id] ?? null}
             disabled={pushing}
@@ -910,7 +968,65 @@ export function PushSection({
           />
         ))}
       </div>
+
+      <LearningPanel workspaceId={config.workspaceId} />
     </Card>
+  );
+}
+
+/**
+ * Phase 3.2 "what we've learned": the gated corrections + the two HONEST metrics,
+ * kept distinct — raw-model override rate (a KB-quality proxy) vs nudge-acceptance
+ * (the loop's actual lift). Collapsed by default; silent when there's no history.
+ */
+function LearningPanel({ workspaceId }: { workspaceId: string }) {
+  const [data, setData] = useState<import("@/lib/api").LearningSummary | null>(null);
+  useEffect(() => {
+    let live = true;
+    api
+      .getLearning(workspaceId)
+      .then((d) => live && setData(d))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [workspaceId]);
+
+  if (!data || data.totalOverrides === 0) return null;
+  const pct = (n: number | null) => (n == null ? "—" : `${Math.round(n * 100)}%`);
+
+  return (
+    <details className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 text-sm">
+      <summary className="cursor-pointer font-medium text-zinc-700">
+        What we&apos;ve learned
+        <span className="ml-1 font-normal text-zinc-400">({data.totalOverrides} past push{data.totalOverrides === 1 ? "" : "es"})</span>
+      </summary>
+      <div className="mt-3 space-y-3">
+        {data.fields.map((f) => (
+          <div key={f.field}>
+            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">{f.field}</p>
+            <p className="mt-0.5 text-xs text-zinc-500">
+              Raw model accuracy proxy: {pct(f.rawOverrideRate)} changed (n={f.rawSample}) · Nudge acceptance: {pct(f.nudgeAcceptanceRate)} (n={f.nudgeSample})
+              {f.unresolved > 0 && <span className="text-amber-600"> · {f.unresolved} unresolved</span>}
+            </p>
+            {f.corrections.filter((c) => c.gatePassed).length > 0 ? (
+              <ul className="mt-1 space-y-0.5">
+                {f.corrections
+                  .filter((c) => c.gatePassed)
+                  .map((c, i) => (
+                    <li key={i} className="text-xs text-zinc-600">
+                      <span className="text-zinc-400">{c.predicted}</span> → <span className="font-medium">{c.confirmed}</span>
+                      <span className="text-zinc-400"> ({c.count}×, {Math.round(c.agreement * 100)}% agree)</span>
+                    </li>
+                  ))}
+              </ul>
+            ) : (
+              <p className="mt-1 text-xs text-zinc-400">Not enough consistent corrections to adjust yet.</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -918,6 +1034,7 @@ function TaskPushRow({
   task,
   edit,
   members,
+  config,
   pushed,
   result,
   disabled,
@@ -926,6 +1043,7 @@ function TaskPushRow({
   task: Task;
   edit: PushEdit | undefined;
   members: AssignableMember[];
+  config: import("@/lib/api").PushConfigView;
   pushed: PushAuditRow | null;
   result: PushResult | null;
   disabled: boolean;
@@ -1025,18 +1143,67 @@ function TaskPushRow({
               />
             </label>
 
-            {/* Optional per-task list override (list id). */}
+            {/* Sprint = the target list. A select when refresh-fields has run; a
+                free-text list-id override otherwise. (Phase 2c.3) */}
             <label className="flex flex-col text-[11px] text-zinc-400">
-              List override (optional)
-              <input
-                type="text"
-                value={edit.listOverride}
-                disabled={disabled}
-                placeholder="default list"
-                onChange={(e) => onChange({ listOverride: e.target.value })}
-                className="mt-0.5 w-32 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 placeholder:text-zinc-300 focus:border-zinc-400 focus:outline-none"
-              />
+              Sprint / list
+              {config.sprintLists && config.sprintLists.length > 0 ? (
+                <select
+                  value={edit.listOverride}
+                  disabled={disabled}
+                  onChange={(e) => onChange({ listOverride: e.target.value })}
+                  className="mt-0.5 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 focus:border-zinc-400 focus:outline-none"
+                >
+                  <option value="">Default ({config.targetListName ?? config.targetListId})</option>
+                  {config.sprintLists.map((l) => (
+                    <option key={l.listId} value={l.listId}>{l.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={edit.listOverride}
+                  disabled={disabled}
+                  placeholder="default list"
+                  onChange={(e) => onChange({ listOverride: e.target.value })}
+                  className="mt-0.5 w-32 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 placeholder:text-zinc-300 focus:border-zinc-400 focus:outline-none"
+                />
+              )}
             </label>
+
+            {/* Client dropdown (Phase 2c.3) — only when a client field is configured. */}
+            {config.clientFieldId && (config.clientOptions?.length ?? 0) > 0 && (
+              <label className="flex flex-col text-[11px] text-zinc-400">
+                {config.clientFieldName ?? "Client"}
+                <select
+                  value={edit.clientOptionId}
+                  disabled={disabled}
+                  onChange={(e) => onChange({ clientOptionId: e.target.value })}
+                  className="mt-0.5 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 focus:border-zinc-400 focus:outline-none"
+                >
+                  <option value="">—</option>
+                  {config.clientOptions!.map((o) => (
+                    <option key={o.optionId} value={o.optionId}>{o.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            {/* Points (Phase 2c.3) — only when enabled. */}
+            {config.pointsEnabled && (
+              <label className="flex flex-col text-[11px] text-zinc-400">
+                Points
+                <input
+                  type="number"
+                  min={0}
+                  value={edit.points}
+                  disabled={disabled}
+                  placeholder="—"
+                  onChange={(e) => onChange({ points: e.target.value })}
+                  className="mt-0.5 w-20 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 placeholder:text-zinc-300 focus:border-zinc-400 focus:outline-none"
+                />
+              </label>
+            )}
           </div>
 
           {/* Last push outcome for this row (failed/skipped surface here). */}
