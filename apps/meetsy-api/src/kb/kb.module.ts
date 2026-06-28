@@ -18,6 +18,8 @@ import { NoveltyService } from "./novelty.service";
 import { DocTaskLinkService } from "./doc-task-link.service";
 import { AnswerabilityService } from "./answerability.service";
 import { FieldPredictionService } from "./field-prediction.service";
+import { AssignmentService } from "./assignment.service";
+import { AssigneeResolverService } from "../clickup/assignee-resolver.service";
 
 /**
  * Phase 2a knowledge-base slice: per-workspace onboarding (coverage check →
@@ -45,10 +47,12 @@ import { FieldPredictionService } from "./field-prediction.service";
     DocTaskLinkService,
     AnswerabilityService,
     FieldPredictionService,
+    AssignmentService,
+    AssigneeResolverService,
     WorkspaceResolver,
   ],
-  // Phase 2c — the analysis pipeline grounds itself via these (one-way dep
+  // Phase 2c/3 — the analysis pipeline grounds itself via these (one-way dep
   // analysis → kb; KbModule imports nothing from the analysis pipeline).
-  exports: [KbSearchService, KbQueue, FieldPredictionService],
+  exports: [KbSearchService, KbQueue, FieldPredictionService, AssignmentService],
 })
 export class KbModule {}

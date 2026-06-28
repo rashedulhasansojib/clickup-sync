@@ -13,6 +13,8 @@ import { ANALYSIS_QUEUE_NAME } from "./redis";
 import { KbSearchService, type KbContextHit } from "../../kb/kb-search.service";
 import { KbQueue } from "../../kb/kb.queue";
 import { FieldPredictionService, type TaskAnalysis } from "../../kb/field-prediction.service";
+import { AssignmentService, type TaskAssignment } from "../../kb/assignment.service";
+import type { AssignableMember } from "../../clickup/clickup.types";
 import { buildContextQuery, formatContextForPrompt } from "../pipeline-context";
 
 /**
@@ -38,6 +40,7 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly kbSearch: KbSearchService,
     private readonly kbQueue: KbQueue,
     private readonly fieldPrediction: FieldPredictionService,
+    private readonly assignment: AssignmentService,
   ) {}
 
   onModuleInit(): void {
@@ -90,6 +93,20 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * The workspace's assignable-member pool (from WorkspacePushConfig) — the
+   * candidate set for Phase-3.1 assignment. Empty when push isn't configured (then
+   * assignment is skipped). Read directly via Prisma to keep analysis → clickup
+   * decoupled.
+   */
+  private async assignableMembers(workspaceId: string): Promise<AssignableMember[]> {
+    const cfg = await this.prisma.workspacePushConfig.findUnique({
+      where: { workspaceId },
+      select: { assignableMembers: true },
+    });
+    return (cfg?.assignableMembers as unknown as AssignableMember[]) ?? [];
+  }
+
+  /**
    * Fire-and-forget incremental KB refresh for an ALREADY-onboarded workspace.
    * Never first-onboards from the analysis path; never blocks the pipeline.
    */
@@ -130,7 +147,9 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
     // Captured for the run result so the injected KB context is INSPECTABLE.
     let kbContext: KbContextHit[] = [];
     // Phase 2c.2 — weak field predictions + duplicate flags, attached per task id.
-    let taskAnalysis: TaskAnalysis = { predictions: {}, duplicates: {} };
+    let taskAnalysis: TaskAnalysis = { predictions: {}, duplicates: {}, neighboursByTask: {} };
+    // Phase 3.1 — ranked, abstain-first owner recommendations per task id.
+    let assignment: Record<string, TaskAssignment> = {};
 
     try {
       await this.prisma.analysisRun.update({
@@ -186,8 +205,17 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
         // Best-effort: a KB miss / embeddings-unconfigured leaves predictions empty.
         try {
           taskAnalysis = await this.fieldPrediction.analyze(workspaceId, tasks, meetingDateISO);
+          // ── Phase 3.1: rank owner recommendations (reuses the kNN neighbours;
+          // conditioned on the predicted client to beat the base-rate echo). ──
+          const members = await this.assignableMembers(workspaceId);
+          assignment = await this.assignment.rank(
+            workspaceId,
+            taskAnalysis.neighboursByTask,
+            taskAnalysis.predictions,
+            members,
+          );
         } catch (err) {
-          this.logger.warn(`Field prediction skipped: ${(err as Error).message}`);
+          this.logger.warn(`Field prediction / assignment skipped: ${(err as Error).message}`);
         }
 
         // ── Stage 6: assemble (pure) ──────────────────────────────────────
@@ -208,6 +236,7 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
             kbContext,
             fieldPredictions: taskAnalysis.predictions,
             duplicates: taskAnalysis.duplicates,
+            assignment,
           } as unknown as Prisma.InputJsonValue,
           error: null,
           promptTokens: usage.promptTokens,

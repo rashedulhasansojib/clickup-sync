@@ -67,6 +67,9 @@ export interface TaskPrediction {
 export interface TaskAnalysis {
   predictions: Record<string, TaskPrediction>;
   duplicates: Record<string, DuplicateHit[]>;
+  /** Phase 3.1 — the per-task kNN neighbours (internal; reused by AssignmentService
+   * to rank owners WITHOUT re-embedding). Not attached to the run result. */
+  neighboursByTask: Record<string, Neighbour[]>;
 }
 
 const K = 15;
@@ -93,16 +96,18 @@ export class FieldPredictionService {
   async analyze(workspaceId: string, tasks: Task[], meetingDateISO: string): Promise<TaskAnalysis> {
     const predictions: Record<string, TaskPrediction> = {};
     const duplicates: Record<string, DuplicateHit[]> = {};
+    const neighboursByTask: Record<string, Neighbour[]> = {};
     for (const task of tasks) {
       try {
         const { neighbours, raw } = await this.neighbours(workspaceId, task);
+        neighboursByTask[task.id] = neighbours;
         duplicates[task.id] = classifyDuplicates(raw);
         predictions[task.id] = await this.predictForTask(task, neighbours, meetingDateISO);
       } catch (err) {
         this.logger.warn(`Prediction skipped for task ${task.id}: ${(err as Error).message}`);
       }
     }
-    return { predictions, duplicates };
+    return { predictions, duplicates, neighboursByTask };
   }
 
   /** Card-shaped kNN: returns neighbours enriched with task fields + the raw sims. */
