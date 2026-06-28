@@ -435,4 +435,17 @@ Per extracted task, rank the assignable-member pool by **ownership precedent** �
 - **OOD "holiday party" → ABSTAIN** ("No clear owner from history").
 - Every recommended name resolved from history into the pool. Test meetings/runs/config cleaned up; ws_nifty restored (1198 chunks).
 
-## ▶ 3.1 DONE. Next: **3.2 — learning loop** (aggregate `FieldOverride` → support-gated nudge [≥3 + ≥60%] + honest per-field override-rate-trend metric + "what we've learned" view; verify the gate does NOT fire on sparse/conflicting corrections).
+### 2026-06-28 — Phase 3.2 — Learning loop — DONE / GREEN + LIVE-VERIFIED — commit `f1c6a33`
+Consume the `FieldOverride` log (written by 2c.3) to nudge future predictions when users CONSISTENTLY override the model the same way — deterministic, support-gated, honestly measured. A preference memory, **NOT a trained model**. **184 meetsy-api tests** (14 new) + build green.
+- **`learning-aggregate` (pure):** per (field, predicted P) → confirmed C counts; **gate = ≥3 corrections AND C ≥60% of P's corrections.** Two advisor-driven anti-traps baked in: **(1) ORGANIC-only** — a correction with a nudge shown does NOT teach the gate, so an accepted nudge can't reinforce the gate that produced it; **(2) the raw override rate is a KB-quality proxy, reported SEPARATELY from nudge-acceptance** (the loop's actual lift — the raw rate can't measure the loop because `predicted` is always the raw 2c.2 value). Unresolved confirmed values counted so a **resolution miss ≠ "not enough data."**
+- **`LearningService`:** snapshot (resolve confirmed `clientOptionId`/`clickupUserId` → names via `WorkspacePushConfig`), `applyNudges` (gated nudge per field), `summary`. `adjustForTasks` attaches `result.adjustments` (the raw prediction stays visible).
+- **Push records `{shown, accepted}`** per field on each `FieldOverride` (recompute the pre-push nudge) — the piece that makes loop-effectiveness measurable + enables the organic filter. `FieldOverride += adjustments` (migration `20260628160000`). `clickup → kb` one-way dep.
+- **`GET /workspaces/:id/learning`** — corrections + the two metrics ("what we've learned").
+
+**LIVE-VERIFIED on ws_nifty with real-shaped seeded corrections (advisor's "done" gate, both directions):**
+- Gate **FIRES** at 3× "Nifty AI"→"Energy Reporting" (agreement 1.0) and the nudge **surfaced on a live Nifty-AI run** ("adjusted from 3 past corrections"); the raw prediction stayed visible.
+- Gate does **NOT** fire at **2 corrections** (sparse) nor a **3–3 split** (50% < 60%) — conflicting corrections stay silent.
+- An **unresolved** option (`opt-DOESNOTEXIST`) → `unresolved=1`, with **no spurious correction** (resolution miss ≠ sparse).
+- The two metrics are separate (`rawOverrideRate` vs `nudgeAcceptance=null` until nudges are shown). Nudge-acceptance metric LOGGING is unit-tested; its live end-to-end needs a dropdown field (same constraint as 2c.3). Seeds cleaned up; ws_nifty restored (1198 chunks, 0 overrides).
+
+## ✅ PHASE 3 COMPLETE (3.1 smart assignment + 3.2 learning loop) & LIVE-VERIFIED. **The full planned roadmap (Phase 0 → 3) is DONE.** Meetsy now: shared-auth/org foundation → ClickUp write-back → RAG KB + summary + honest doc-improvement metric → pipeline grounding (context, abstain-first field prediction, dedup, HITL push) → smart assignment + a support-gated learning loop. **Open fast-follows (not yet built):** inject context into `analyzeMeeting` (2c.1 deferred); tune novelty `pctNovel` cutoff (2b) + dedup bands (2c.2) on more data; the **meetsy-web review UI** surfacing 2c.2 predictions/dupes + 2c.3 sprint/client/points + 3.1 assignment + 3.2 nudges + the `/learning` panel (all backends ready); a `CorrectionStat` cache if `/learning` read cost grows.

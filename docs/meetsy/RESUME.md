@@ -2,7 +2,7 @@
 
 > Single entry point to continue the Clicksy+Meetsy build in a fresh chat. Read this first,
 > then the three docs it points to. Everything is committed on branch **`feat/meetsy-phase0`**
-> (pushed to origin). Last code commit: **`05cf8b2`** (Phase 3.1 — smart assignment, live-verified).
+> (pushed to origin). Last code commit: **`f1c6a33`** (Phase 3.2 — learning loop; **Phase 0→3 roadmap COMPLETE**, all live-verified).
 
 ## Read these (in order), then start
 1. **`docs/meetsy/BUILD-JOURNAL.md`** — the full, dated build history + every live-verification + findings. **The source of truth for "what's done."**
@@ -32,16 +32,17 @@
 
 - **Phase 3.1** — smart assignment (commit `05cf8b2`) — **DONE + LIVE-VERIFIED.** `rankOwners` (pure) aggregates owners over the task's qualifying kNN neighbours (reused from 2c.2), closed weighted 2×, **conditioned on the 2c.2 predicted client** (the echo-breaker); `AssignmentService` maps names→pool via `AssigneeResolverService`, workload (open + 30d hours) as a featherweight tie-break, abstain below the floor, names out-of-pool owners. Attached to `result.assignment[taskId]`; recommendation-only. *Live: energy→Rashedul; AIT (minority)→Ahmad NOT the prolific Rashedul (echo broken via client-conditioning); OOD→abstain.*
 
-## ▶ DO NEXT: Phase 3.2 — learning loop (build, the last planned slice)
-Spec (APPROVED) §2. Build:
-- **Aggregate** a workspace's `meetsy.FieldOverride` rows (written by 2c.3) per field into `predicted P → confirmed C` counts (a "correction" = P≠C).
-- **Nudge** at the approved gate — **≥3 corrections AND C ≥60% of P's corrections** — surface C as an *adjusted suggestion* labelled "adjusted from N past corrections", with the **raw 2c.2 prediction + distribution still shown**; below the gate, "not enough to learn yet" (the loop abstains). Attach to `result.adjustments[taskId]` parallel to `fieldPredictions`.
-- **Honest "is it helping?" metric:** per-field **override-rate trend** over the last K pushes (never blended, sample size shown; a flat/rising rate is reported truthfully). `GET /workspaces/:id/learning` (correction stats + the trend = "what we've learned").
-- **CRITICAL verify (discrimination):** the gate **does NOT fire** on sparse (<3) or conflicting (<60%) corrections — prove the gate, not just the nudge. It's a deterministic correction memory, NOT a trained model; sparse-data honesty is the spine.
-- Grounding: `FieldOverride` model (predicted bundle + confirmed); `FieldPredictionService` output shape (`src/kb/field-prediction.service.ts`); the processor attaches per-task result like 2c.2/3.1.
+- **Phase 3.2** — learning loop (commit `f1c6a33`) — **DONE + LIVE-VERIFIED.** `learning-aggregate` (pure) counts per-field `predicted P → confirmed C`, gate **≥3 + ≥60%**, **ORGANIC-only** (no-nudge corrections only, so the loop can't reinforce itself), raw-override-rate reported SEPARATELY from nudge-acceptance (the loop's real lift), unresolved counted. `LearningService` resolves confirmed ids→names via `WorkspacePushConfig`; `adjustForTasks` → `result.adjustments`; push records `{shown,accepted}` on each `FieldOverride`. `GET /workspaces/:id/learning`. *Live: gate fires at 3×"Nifty AI"→"Energy Reporting" (nudge surfaced on a run); does NOT fire at 2 / 50-50; unresolved counted.*
 
-## (After 3.2) Open fast-follows — not yet built
-Inject context into `analyzeMeeting` (2c.1 deferred); tune novelty `pctNovel` cutoff (2b) + dedup bands (2c.2) on more data; the **review-UI** in meetsy-web for the 2c.2 predictions/dupes + 2c.3 sprint/client/points controls + 3.1 assignment recs (all backends ready).
+## ✅ PHASE 0 → 3 ROADMAP COMPLETE. All live-verified on real Nifty data. The end-to-end product works: shared auth/org → ClickUp write-back → RAG KB + summary + honest doc-improvement metric → pipeline grounding (context + abstain-first prediction + dedup + HITL push) → smart assignment + support-gated learning loop.
+
+## ▶ DO NEXT: no planned phase remains — pick a fast-follow (none built yet)
+1. **meetsy-web review UI** (highest user value; all backends ready): surface on the run/review screen the 2c.1 `kbContext`, 2c.2 `fieldPredictions`/`duplicates` (abstain-aware), 2c.3 sprint/client/points controls + `refresh-fields`, 3.1 `assignment` recs (rationale + abstain), 3.2 `adjustments` ("adjusted from N") + a `/learning` "what we've learned" panel.
+2. **analyze-injection** (2c.1 deferred): inject KB context into `analyzeMeeting` too (needs a cheap pre-summary key: roster+title+bounded head).
+3. **Tuning on more data:** the novelty `pctNovel` cutoff (2b) + dedup bands (2c.2) were calibrated on single-chunk/one-workspace data; revisit with multi-chunk docs / a second workspace.
+4. **`CorrectionStat` cache** if `/learning` read cost grows (currently computed on demand, small N).
+5. **Production rollout** items: per-ORG data isolation is still pending for Clicksy (Spec 2, see CLAUDE.md) — Meetsy is workspace-scoped but rides Clicksy's single seed org today.
+Write a spec for whichever is chosen (spec → approve → build, per discipline).
 **Open fast-follows (smaller, can fold into Phase 3 or do standalone):** inject KB context into `analyzeMeeting` (2c.1 deferred); tune the novelty `pctNovel` cutoff (2b) + dedup bands (2c.2) on multi-chunk/cross-workspace data; build the **review-UI** surface for the 2c.2 predictions/dupes + 2c.3 sprint/client/points controls (backend is ready; meetsy-web add).
 
 ## Tokens/creds the new session needs (the scratchpad does NOT carry over)
