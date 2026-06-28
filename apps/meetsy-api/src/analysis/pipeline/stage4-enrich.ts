@@ -18,6 +18,8 @@ const EnrichLLMSchema = z.object({
   tasks: z.array(
     z.object({
       id: z.string(),
+      /** Expanded, self-contained work item (3-6 sentences). */
+      description: z.string(),
       acceptanceCriteria: z.array(z.string()),
       /** Human-readable titles of other tasks this one depends on. */
       dependencies: z.array(z.string()),
@@ -25,6 +27,8 @@ const EnrichLLMSchema = z.object({
       tags: z.array(z.string()),
       /** Effort estimate like "4h" / "2d", or null if not inferable. */
       estimate: z.string().nullable(),
+      /** Numeric effort estimate in hours; null only if too vague to size. */
+      estimateHours: z.number().nullable(),
       /** Absolute due date as YYYY-MM-DD, or null if none was discussed. */
       dueDate: z.string().nullable(),
     }),
@@ -36,12 +40,13 @@ function systemPrompt(meetingDateISO: string): string {
 ClickUp-ready work items. The meeting took place on ${meetingDateISO}.
 
 For each task, given its title/description and the spoken due-date phrase:
+- description: expand the seed into a detailed, self-contained work item (3-6 sentences): the goal, the concrete scope/context actually discussed, and what 'done' looks like. MATCH the level of detail and structure of the historical example tasks in the provided context. Ground every statement in the meeting transcript/summary or that history — NEVER invent facts, numbers, names, or requirements not present; omit a detail rather than fabricate it.
 - acceptanceCriteria: 2-4 concrete, verifiable completion conditions.
 - subtasks: a short actionable breakdown (only if the work clearly decomposes).
 - dependencies: titles of OTHER tasks in the list this one depends on (only real
   dependencies; otherwise empty).
 - tags: a few relevant labels (component/area), lowercase.
-- estimate: a rough effort like "4h" or "2d" only if reasonably inferable, else null.
+- estimateHours: your best engineering estimate of effort in HOURS, grounded in the task's scope/acceptance criteria. ALWAYS provide a number (use 0.5-1 for trivial tasks); only null if too vague to size. Calibrate against the historical example tasks above.
 - dueDate: resolve the spoken phrase to an absolute calendar date in YYYY-MM-DD
   relative to the meeting date (e.g. "by Wednesday" → the next Wednesday on/after
   the meeting date). If no due date was discussed, return null. NEVER invent a date.
@@ -83,8 +88,9 @@ export async function enrichTasks(
     userParts.push(
       ``,
       `Related existing work from this client's history (REFERENCE ONLY — align ` +
-        `estimates/tags/components with how similar work is usually scoped here; do ` +
-        `NOT invent facts not in the meeting):\n${context.trim()}`,
+        `estimates/tags/components with how similar work is usually scoped here, and ` +
+        `MATCH the detail/structure of the example tasks above when writing each ` +
+        `description; do NOT invent facts not in the meeting):\n${context.trim()}`,
     );
   }
 
@@ -93,7 +99,8 @@ export async function enrichTasks(
     user: userParts.join("\n"),
     schema: EnrichLLMSchema,
     schemaName: "enriched_tasks",
-    reasoningEffort: "low",
+    // medium (was low) so the longer description generation has reasoning budget.
+    reasoningEffort: "medium",
   });
 
   const byId = new Map(out.tasks.map((e) => [e.id, e]));
@@ -106,11 +113,17 @@ export async function enrichTasks(
     if (!e) return t; // model dropped it — keep the original
     const merged: Task = {
       ...t,
+      // Expanded prose; fall back to the extracted seed if the model returned empty.
+      description: e.description?.trim() ? e.description : t.description,
       acceptanceCriteria: e.acceptanceCriteria.length ? e.acceptanceCriteria : t.acceptanceCriteria,
       dependencies: e.dependencies.map((d) => titleById.get(d) ?? d),
       subtasks: e.subtasks,
       tags: e.tags,
       estimate: e.estimate,
+      // TaskSchema requires estimateHours > 0 — coerce a 0/negative back to null
+      // (the model can disobey the "0.5-1 for trivial" prompt) rather than throw.
+      estimateHours:
+        e.estimateHours && e.estimateHours > 0 ? e.estimateHours : (t.estimateHours ?? null),
       dueDate: e.dueDate,
     };
     return TaskSchema.parse(merged);

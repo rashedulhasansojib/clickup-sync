@@ -31,5 +31,8 @@ import { WorkspacesController } from "./workspaces.controller";
     PushService,
     WorkspaceResolver,
   ],
+  // Exported so AnalysisModule can suggest a ClickUp member per roster participant
+  // at meeting creation (analysis → clickup, one-way; no cycle).
+  exports: [ClickUpClient, AssigneeResolverService],
 })
 export class ClickUpModule {}

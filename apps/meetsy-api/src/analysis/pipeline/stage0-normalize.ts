@@ -77,5 +77,9 @@ function toParticipants(
     id: `p${i + 1}`,
     displayName: p.displayName,
     aliases: p.aliases ?? [],
+    // Suggested at meeting creation (AnalysisService.suggestClickupMembers),
+    // confirmed by the user at the roster step.
+    clickupUserId: null,
+    clickupName: null,
   }));
 }

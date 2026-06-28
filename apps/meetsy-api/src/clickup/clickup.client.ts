@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ClickUpTokenService } from "./clickup-token.service";
 import {
+  AssignableMember,
   ClickUpFolderNode,
   ClickUpListNode,
   ClickUpMember,
@@ -100,6 +101,20 @@ export class ClickUpClient {
       `/team/${teamId}`,
     );
     return res.team?.members ?? [];
+  }
+
+  /**
+   * The workspace's team members in picker-ready shape (clickupUserId/name/email).
+   * Shared by the members picker (controller) and the create-meeting roster
+   * suggestion (analysis service) so the raw→AssignableMember mapping lives once.
+   */
+  async getAssignableMembers(workspaceId: string): Promise<AssignableMember[]> {
+    const raw = await this.getTeamMembers(workspaceId);
+    return raw.map((m) => ({
+      clickupUserId: String(m.user.id),
+      name: m.user.username ?? m.user.email ?? String(m.user.id),
+      email: m.user.email,
+    }));
   }
 
   /**

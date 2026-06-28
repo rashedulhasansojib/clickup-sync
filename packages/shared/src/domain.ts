@@ -14,6 +14,14 @@ export const ParticipantSchema = z.object({
   displayName: z.string(),
   /** Raw labels seen in the transcript that map to this person, e.g. ["Speaker 2", "Sarah"]. */
   aliases: z.array(z.string()).default([]),
+  /**
+   * ClickUp member this participant maps to. The backend suggests a match
+   * (transcript name → workspace member) at meeting creation; the user
+   * confirms/overrides it at the roster step. null = no/unconfirmed match.
+   */
+  clickupUserId: z.string().nullable().default(null),
+  /** Matched ClickUp member display name (for the verification UI). */
+  clickupName: z.string().nullable().default(null),
 });
 export type Participant = z.infer<typeof ParticipantSchema>;
 
@@ -44,6 +52,12 @@ export const TaskSchema = z.object({
   /** ISO date string or natural-language due ("end of sprint"); null if none discussed. */
   dueDate: z.string().nullable().default(null),
   estimate: z.string().nullable().default(null),
+  /**
+   * Effort estimate in HOURS — produced by the LLM in the enrich stage (grounded
+   * in the task scope, not the sparse historical estimates). This is what the
+   * ClickUp push sets as `time_estimate` (hours × 3.6e6 ms). null = not sized.
+   */
+  estimateHours: z.number().positive().nullable().default(null),
   dependencies: z.array(z.string()).default([]),
   tags: z.array(z.string()).default([]),
   subtasks: z.array(z.string()).default([]),

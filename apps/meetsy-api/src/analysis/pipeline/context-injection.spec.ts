@@ -13,11 +13,14 @@ function azureCapture(result: unknown) {
   return { azure: { structured } as unknown as AzureOpenAIService, calls };
 }
 
-const roster: Participant[] = [{ id: "p1", displayName: "Sarah", aliases: [] }];
+const roster: Participant[] = [
+  { id: "p1", displayName: "Sarah", aliases: [], clickupUserId: null, clickupName: null },
+];
 const tasks: Task[] = [
   {
     id: "t1", title: "Build portal", description: "d", acceptanceCriteria: [],
     assigneeId: "p1", assigneeName: "Sarah", priority: "high", dueDate: null, estimate: null,
+    estimateHours: null,
     dependencies: [], tags: [], subtasks: [], evidence: [{ quote: "build it", speaker: null, timestamp: null }],
     explicit: true, confidence: 0.9,
   },
@@ -29,7 +32,7 @@ describe("Phase 2c context injection — default is inert", () => {
     changes: [],
   };
   const enrichResult = {
-    tasks: [{ id: "t1", acceptanceCriteria: ["x"], dependencies: [], subtasks: [], tags: ["web"], estimate: "2d", dueDate: null }],
+    tasks: [{ id: "t1", description: "expanded", acceptanceCriteria: ["x"], dependencies: [], subtasks: [], tags: ["web"], estimate: "2d", estimateHours: 16, dueDate: null }],
   };
 
   it("criticPass without context injects NO context block", async () => {

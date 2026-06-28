@@ -30,6 +30,8 @@ import {
 import { AnalysisQueue } from "./queue/analysis.queue";
 import { createRedis, runChannel } from "./queue/redis";
 import { WorkspaceResolver } from "./workspace.resolver";
+import { ClickUpClient } from "../clickup/clickup.client";
+import { AssigneeResolverService } from "../clickup/assignee-resolver.service";
 
 /**
  * Orchestrates the HTTP-facing flow:
@@ -51,6 +53,8 @@ export class AnalysisService {
     private readonly config: ConfigService,
     private readonly queue: AnalysisQueue,
     private readonly workspaces: WorkspaceResolver,
+    private readonly clickup: ClickUpClient,
+    private readonly assigneeResolver: AssigneeResolverService,
   ) {}
 
   /**
@@ -70,6 +74,12 @@ export class AnalysisService {
     // Stage 0: deterministic VTT normalization + roster extraction.
     const normalized = normalizeTranscript(body.transcript);
     const roster = await buildRoster(this.azure, normalized);
+
+    // Best-effort: suggest a ClickUp member per roster participant so the user
+    // confirms (not types) the assignee mapping at the roster step. A missing
+    // token / no ClickUp connection leaves clickupUserId null and the meeting
+    // still creates (mirrors how the processor treats assignableMembers as optional).
+    await this.suggestClickupMembers(workspaceId, roster);
 
     // Anchor for relative due-date resolution; default to upload date.
     const parsed = body.meetingDate ? new Date(body.meetingDate) : new Date();
@@ -98,6 +108,39 @@ export class AnalysisService {
     });
 
     return { meetingId: meeting.id, runId: run.id, roster };
+  }
+
+  /**
+   * Best-effort: annotate each roster participant IN PLACE with a suggested
+   * ClickUp member (clickupUserId + clickupName). Resolves the workspace's
+   * members once, then for each participant tries the displayName and any aliases
+   * (first hit wins). Wrapped so a missing token / no ClickUp connection leaves
+   * every participant at clickupUserId:null and never blocks meeting creation.
+   */
+  private async suggestClickupMembers(
+    workspaceId: string,
+    roster: Participant[],
+  ): Promise<void> {
+    if (roster.length === 0) return;
+    try {
+      const members = await this.clickup.getAssignableMembers(workspaceId);
+      if (members.length === 0) return;
+      const nameById = new Map(members.map((m) => [m.clickupUserId, m.name]));
+      for (const p of roster) {
+        for (const name of [p.displayName, ...p.aliases]) {
+          const matchedId = this.assigneeResolver.resolve(name, members);
+          if (matchedId) {
+            p.clickupUserId = matchedId;
+            p.clickupName = nameById.get(matchedId) ?? null;
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `ClickUp member suggestion skipped for workspace ${workspaceId}: ${(err as Error).message}`,
+      );
+    }
   }
 
   /**

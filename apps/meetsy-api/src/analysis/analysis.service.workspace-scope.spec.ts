@@ -30,13 +30,16 @@ describe("AnalysisService — workspace scoping", () => {
     const resolve = jest.fn().mockResolvedValue(opts.resolvedWorkspaceId);
     const workspaces = { resolve };
 
-    // azure / config / queue are unused on the read paths under test — minimal stubs.
+    // azure / config / queue / clickup / resolver are unused on the read paths
+    // under test — minimal stubs.
     const service = new AnalysisService(
       prisma as never,
       {} as never,
       {} as never,
       {} as never,
       workspaces as never,
+      {} as never,
+      {} as never,
     );
     return { service, findFirst, resolve, chatFindMany };
   }

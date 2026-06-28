@@ -157,6 +157,49 @@ describe("PushService.pushTasks", () => {
     expect((client.createTask as jest.Mock).mock.calls[0][2].assignees).toEqual([1]);
   });
 
+  it("plumbs estimateHours from the stored run result into the ClickUp time_estimate", async () => {
+    // Bug E: the LLM estimate must reach ClickUp. The web never sends it — the
+    // push reads it from the server-authoritative stored run result by task id.
+    const { svc, client } = setup({
+      run: {
+        id: "run1",
+        orgId: "org1",
+        workspaceId: "ws1",
+        result: {
+          overview: "o",
+          people: [],
+          unassignedTasks: [{ id: "t1", title: "Task t1", description: "d", estimateHours: 4 }],
+        },
+      },
+    });
+    (client.createTask as jest.Mock).mockResolvedValue({ id: "cu1", url: "http://cu/1" });
+
+    await svc.pushTasks("org1", "run1", { tasks: [task("t1")] }, "user1");
+
+    const payload = (client.createTask as jest.Mock).mock.calls[0][2];
+    expect(payload.time_estimate).toBe(4 * 3_600_000);
+  });
+
+  it("omits time_estimate when the stored task has no estimateHours", async () => {
+    const { svc, client } = setup({
+      run: {
+        id: "run1",
+        orgId: "org1",
+        workspaceId: "ws1",
+        result: {
+          overview: "o",
+          people: [],
+          unassignedTasks: [{ id: "t1", title: "Task t1", description: "d" }],
+        },
+      },
+    });
+    (client.createTask as jest.Mock).mockResolvedValue({ id: "cu1", url: "http://cu/1" });
+
+    await svc.pushTasks("org1", "run1", { tasks: [task("t1")] }, "user1");
+
+    expect((client.createTask as jest.Mock).mock.calls[0][2].time_estimate).toBeUndefined();
+  });
+
   it("throws BadRequest when push is unconfigured", async () => {
     const { svc } = setup({ config: null });
     await expect(

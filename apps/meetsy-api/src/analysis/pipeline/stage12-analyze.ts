@@ -61,7 +61,9 @@ provided roster: set assigneeId to the owner's participant id when ownership is
 clear, else null. Never invent an id not in the roster. Capture due dates as the
 exact phrase spoken (e.g. "by Wednesday") — do NOT convert to a calendar date.
 Record dependencies and acceptance criteria only when actually discussed. Prefer
-fewer, well-grounded tasks over speculative ones.`;
+fewer, well-grounded tasks over speculative ones. Write each description as a few
+full sentences capturing the goal and the scope actually discussed, not a single
+phrase.`;
 
 export async function analyzeMeeting(
   azure: AzureOpenAIService,

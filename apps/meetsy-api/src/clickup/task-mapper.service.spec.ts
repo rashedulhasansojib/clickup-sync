@@ -66,6 +66,18 @@ describe("TaskMapperService", () => {
     expect(svc.map(base, { defaultStatus: "to do" }).status).toBe("to do");
   });
 
+  it("sets time_estimate = round(hours × 3.6e6) when estimateHours > 0", () => {
+    expect(svc.map({ ...base, estimateHours: 4 }).time_estimate).toBe(4 * 3_600_000);
+    // Fractional hours round to the nearest ms.
+    expect(svc.map({ ...base, estimateHours: 0.5 }).time_estimate).toBe(1_800_000);
+  });
+
+  it("omits time_estimate when estimateHours is absent, null, or non-positive", () => {
+    expect(svc.map(base).time_estimate).toBeUndefined();
+    expect(svc.map({ ...base, estimateHours: null }).time_estimate).toBeUndefined();
+    expect(svc.map({ ...base, estimateHours: 0 }).time_estimate).toBeUndefined();
+  });
+
   it("composes markdown with description, criteria, evidence, subtasks, deps", () => {
     const md = svc.map(base).markdown_description ?? "";
     expect(md).toContain("Build the styled Excel export.");

@@ -368,12 +368,18 @@ function TaskCard({ task, signals }: { task: Task; signals?: TaskSignalData }) {
         </p>
       )}
 
-      {(task.dueDate || task.estimate) && (
+      {(task.dueDate || task.estimate || task.estimateHours !== null) && (
         <div className="mt-3 flex flex-wrap gap-4 text-xs text-zinc-500">
           {task.dueDate && (
             <span>
               <span className="font-medium text-zinc-400">Due: </span>
               {task.dueDate}
+            </span>
+          )}
+          {task.estimateHours !== null && (
+            <span>
+              <span className="font-medium text-zinc-400">Est: </span>
+              {task.estimateHours}h
             </span>
           )}
           {task.estimate && (

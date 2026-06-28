@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AzureModule } from "../azure/azure.module";
 import { KbModule } from "../kb/kb.module";
+import { ClickUpModule } from "../clickup/clickup.module";
 import { AnalysisController } from "./analysis.controller";
 import { AnalysisService } from "./analysis.service";
 import { AnalysisQueue } from "./queue/analysis.queue";
@@ -15,7 +16,7 @@ import { WorkspaceResolver } from "./workspace.resolver";
  * (one-way dep analysis → kb).
  */
 @Module({
-  imports: [AzureModule, KbModule],
+  imports: [AzureModule, KbModule, ClickUpModule],
   controllers: [AnalysisController],
   providers: [AnalysisService, AnalysisQueue, AnalysisProcessor, WorkspaceResolver],
 })

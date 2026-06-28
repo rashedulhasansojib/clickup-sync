@@ -12,6 +12,8 @@ export interface MappableTask {
   priority: "urgent" | "high" | "normal" | "low";
   /** ISO date (YYYY-MM-DD or full ISO) or null. */
   dueDate?: string | null;
+  /** LLM effort estimate in HOURS; pushed as ClickUp `time_estimate` (ms). */
+  estimateHours?: number | null;
   tags?: string[];
   /** Phase 2c.3 — confirmed client dropdown option UUID (paired with config.clientFieldId). */
   clientOptionId?: string | null;
@@ -66,6 +68,11 @@ export class TaskMapperService {
         payload.due_date = ms;
         payload.due_date_time = false;
       }
+    }
+
+    // Time estimate — HOURS → epoch ms. Omitted unless a positive estimate is set.
+    if (typeof task.estimateHours === "number" && task.estimateHours > 0) {
+      payload.time_estimate = Math.round(task.estimateHours * 3_600_000);
     }
 
     if (task.tags && task.tags.length > 0) payload.tags = task.tags;

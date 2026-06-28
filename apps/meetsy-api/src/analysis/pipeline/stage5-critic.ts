@@ -133,6 +133,7 @@ export async function criticPass(
       priority: t.priority as TaskPriority,
       dueDate: t.dueDate,
       estimate: null,
+      estimateHours: null,
       dependencies: [],
       tags: [],
       subtasks: [],

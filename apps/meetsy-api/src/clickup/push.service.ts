@@ -139,6 +139,20 @@ export class PushService {
     const existing = await this.prisma.taskPush.findMany({ where: { runId } });
     const byTask = new Map(existing.map((p) => [p.meetsyTaskId, p]));
 
+    // The LLM effort estimate (hours) is server-authoritative — read it from the
+    // STORED run result by meetsyTaskId (the web never sends it), same pattern as
+    // the FieldOverride `predicted` lookup. The mapper pushes it as time_estimate.
+    const estimateByTask = new Map<string, number>();
+    const parsedResult = AnalysisResultSchema.safeParse(run.result);
+    if (parsedResult.success) {
+      for (const t of [
+        ...parsedResult.data.people.flatMap((p) => p.tasks),
+        ...parsedResult.data.unassignedTasks,
+      ]) {
+        if (typeof t.estimateHours === "number") estimateByTask.set(t.id, t.estimateHours);
+      }
+    }
+
     // Phase 2c.3 — the run's stored weak predictions, keyed by the SAME task id
     // (`t1..tM`) the push request carries as meetsyTaskId (assemble preserves it).
     const predictions =
@@ -178,7 +192,11 @@ export class PushService {
       const effectiveClientOptionId =
         task.clientOptionId !== undefined ? task.clientOptionId : (meeting?.clientOptionId ?? null);
       const payload = this.mapper.map(
-        { ...task, clientOptionId: effectiveClientOptionId },
+        {
+          ...task,
+          clientOptionId: effectiveClientOptionId,
+          estimateHours: estimateByTask.get(task.meetsyTaskId) ?? null,
+        },
         {
           clickupUserId,
           defaultStatus: config.defaultStatus,

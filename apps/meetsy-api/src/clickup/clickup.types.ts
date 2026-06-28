@@ -27,6 +27,8 @@ export interface CreateTaskPayload {
   /** Epoch milliseconds. */
   due_date?: number;
   due_date_time?: boolean;
+  /** Time estimate in epoch ms (hours × 3.6e6). */
+  time_estimate?: number;
   tags?: string[];
   status?: string;
   /** Phase 2c.3 — dropdown custom field set by option UUID (e.g. client). */

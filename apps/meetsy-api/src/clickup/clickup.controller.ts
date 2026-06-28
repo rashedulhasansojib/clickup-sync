@@ -35,12 +35,7 @@ export class ClickUpController {
     @Query("workspaceId") workspaceId?: string,
   ): Promise<{ members: AssignableMember[] }> {
     const ws = await this.workspaces.resolve(user.orgId, workspaceId);
-    const raw = await this.client.getTeamMembers(ws);
-    const members: AssignableMember[] = raw.map((m) => ({
-      clickupUserId: String(m.user.id),
-      name: m.user.username ?? m.user.email ?? String(m.user.id),
-      email: m.user.email,
-    }));
+    const members = await this.client.getAssignableMembers(ws);
     return { members };
   }
 }

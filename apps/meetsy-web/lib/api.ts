@@ -242,19 +242,93 @@ export interface KbProgressEvent {
 }
 
 /**
- * The distilled facts the KB learned. Deliberately loose — the backend treats
- * `facts` as an open bag (roster/components/throughput/categories/workload/
- * blockers/coverage). Render every field defensively; assume nothing exists.
+ * The distilled facts the KB learned. STRICT mirror of meetsy-api's
+ * `src/kb/summary.types.ts` — JSON-native by construction (string | number |
+ * boolean | null or plain arrays/objects of those). The backend produces this
+ * from SQL (no LLM), so the shape is exact; render it as typed sections.
  */
 export interface KbFacts {
-  roster?: unknown;
-  components?: unknown;
-  throughput?: unknown;
-  categories?: unknown;
-  workload?: unknown;
-  blockers?: unknown;
-  coverage?: unknown;
-  [key: string]: unknown;
+  roster: RosterEntry[];
+  components: ComponentEntry[];
+  throughput: Throughput;
+  categories: Categories;
+  workload: WorkloadEntry[];
+  blockers: Blockers;
+  coverage: Coverage;
+}
+
+/** One distinct assignee + what they historically own. */
+export interface RosterEntry {
+  name: string;
+  email: string | null;
+  taskCount: number;
+  openCount: number;
+  closedCount: number;
+  /** Top 3 components (list/folder/tag) this person appears on, by task volume. */
+  topComponents: ComponentEntry[];
+}
+
+export interface ComponentEntry {
+  component: string;
+  taskCount: number;
+}
+
+/** Created vs closed per ISO week + open/closed totals + median cycle time. */
+export interface Throughput {
+  /** Last N ISO weeks, oldest→newest. `week` is the week-start `YYYY-MM-DD`. */
+  weeks: ThroughputWeek[];
+  openTotal: number;
+  closedTotal: number;
+  /** median(closed_date − created_date) in days over closed tasks; null if none. */
+  medianCycleTimeDays: number | null;
+}
+
+export interface ThroughputWeek {
+  week: string;
+  created: number;
+  closed: number;
+}
+
+export interface Categories {
+  statusDistribution: CategoryBucket[];
+  topTags: CategoryBucket[];
+  clients: CategoryBucket[];
+  departments: CategoryBucket[];
+  sprints: CategoryBucket[];
+}
+
+export interface CategoryBucket {
+  label: string;
+  count: number;
+}
+
+export interface WorkloadEntry {
+  user: string;
+  hours: number;
+}
+
+export interface Blockers {
+  overdueOpen: BlockerGroup;
+  stale: BlockerGroup;
+  reopened: BlockerGroup;
+}
+
+export interface BlockerGroup {
+  count: number;
+  samples: BlockerSample[];
+}
+
+export interface BlockerSample {
+  taskId: string;
+  taskName: string;
+}
+
+export interface Coverage {
+  totalTasks: number;
+  embeddedCount: number;
+  dateRange: { earliest: string | null; latest: string | null };
+  /** % of tasks whose comment sync completed (commentsSyncedAt set), 0–100. */
+  commentCoveragePct: number;
 }
 
 /** GET /workspaces/:id/kb/summary — facts + an optional narrative paragraph. */
