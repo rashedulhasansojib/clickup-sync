@@ -4,7 +4,6 @@ import { AssigneeResolverService } from "../clickup/assignee-resolver.service";
 import type { AssignableMember } from "../clickup/clickup.types";
 import { rankOwners } from "./assignment-rank";
 import type { Neighbour } from "./prediction-prior";
-import type { TaskPrediction } from "./field-prediction.service";
 
 /**
  * Phase 3.1 — smart assignment. For each extracted task, rank the assignable
@@ -45,14 +44,15 @@ export class AssignmentService {
   ) {}
 
   /**
-   * Rank owners per task from the (already-computed) neighbours + the 2c.2
-   * predictions (for client conditioning). Best-effort: any failure leaves a task
-   * without an assignment recommendation.
+   * Rank owners per task from the (already-computed) neighbours, conditioning on
+   * the MEETING-LEVEL client (set at upload — no longer per-task predicted) to
+   * beat the base-rate echo. Best-effort: any failure leaves a task without an
+   * assignment recommendation.
    */
   async rank(
     workspaceId: string,
     neighboursByTask: Record<string, Neighbour[]>,
-    predictionsByTask: Record<string, TaskPrediction>,
+    meetingClientName: string | null,
     members: AssignableMember[],
   ): Promise<Record<string, TaskAssignment>> {
     const out: Record<string, TaskAssignment> = {};
@@ -62,9 +62,7 @@ export class AssignmentService {
 
     for (const [taskId, neighbours] of Object.entries(neighboursByTask)) {
       try {
-        const clientPred = predictionsByTask[taskId]?.client;
-        const predictedClient = clientPred && !clientPred.abstain ? clientPred.value : null;
-        out[taskId] = this.rankOne(neighbours, predictedClient, members, workload);
+        out[taskId] = this.rankOne(neighbours, meetingClientName, members, workload);
       } catch (err) {
         this.logger.warn(`Assignment skipped for task ${taskId}: ${(err as Error).message}`);
       }

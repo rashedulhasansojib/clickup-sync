@@ -15,6 +15,16 @@ export const CreateMeetingRequestSchema = z.object({
    * Optional — defaults to the upload date if omitted.
    */
   meetingDate: z.string().optional(),
+  /**
+   * Meeting-level client, chosen by the user at upload from the workspace's
+   * push-config.clientOptions. Applies to every task as the push default (still
+   * per-task editable). Meetsy NEVER predicts the client. `clientOptionId` is the
+   * ClickUp dropdown option UUID (what push sets); `clientName` is its display
+   * name (used to condition assignment ranking + shown in the UI). Absent ⇒ no
+   * meeting client.
+   */
+  clientOptionId: z.string().optional(),
+  clientName: z.string().optional(),
 });
 export type CreateMeetingRequest = z.infer<typeof CreateMeetingRequestSchema>;
 

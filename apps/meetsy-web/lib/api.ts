@@ -30,6 +30,17 @@ export const API_URL =
 /** Verbs that require the CSRF double-submit header (mirrors the backend). */
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/**
+ * The active workspace id (mirrors Clicksy's apps/web/src/api/client.ts pattern).
+ * When set, `withActiveWorkspace()` auto-appends `?workspaceId=` to workspace-scoped
+ * calls so non-default-workspace runs resolve instead of 404ing. The WorkspaceProvider
+ * primes this synchronously (lazy state initializer) before gated children fetch.
+ */
+let activeWorkspaceId: string | null = null;
+export function setActiveWorkspaceId(id: string | null) {
+  activeWorkspaceId = id;
+}
+
 /** Response from POST /meetings/:id/roster — confirms roster, returns the run to watch. */
 export interface ConfirmRosterResponse {
   runId: string;
@@ -131,6 +142,15 @@ export interface RunPushStatus {
   config: PushConfigView | null;
   pushes: PushAuditRow[];
   suggestions: AssigneeSuggestion[];
+  /**
+   * The meeting's client, chosen on the upload screen (client-at-upload). The
+   * push screen pre-fills each task's client from this. Null when the workspace
+   * has no client field or none was chosen.
+   */
+  meetingClient: {
+    clientOptionId: string | null;
+    clientName: string | null;
+  } | null;
 }
 
 /** One (edited, human-confirmed) task to push — body of POST /runs/:id/push. */
@@ -168,7 +188,7 @@ export interface LearningCorrection {
   gatePassed: boolean;
 }
 export interface LearningFieldSummary {
-  field: "client" | "assignee";
+  field: "assignee";
   corrections: LearningCorrection[];
   rawOverrideRate: number | null;
   rawSample: number;
@@ -190,6 +210,104 @@ export interface PushResult {
   error: string | null;
 }
 
+// ── Knowledge-base onboarding (Meetsy KB) ──────────────────────────────
+// Path-scoped under `/workspaces/:id/kb/*` (the `:id` is the workspaceId).
+// Because the workspace is in the PATH, `withActiveWorkspace()` skips these
+// (it bails on `/workspaces/` paths), so no duplicate `?workspaceId=` is added.
+
+/** How far back the KB embeds mirrored tasks. */
+export type KbRange = "3m" | "6m" | "12m" | "24m" | "36m" | "all";
+
+/** GET /workspaces/:id/kb/status — current onboarding/embedding state. */
+export interface KbStatusView {
+  status: "idle" | "onboarding" | "ready" | "error";
+  embeddedCount: number;
+  /** Whole-workspace task total — stays fixed, so embeddedCount < total after a narrow. */
+  total: number;
+  lastRunAt: string | null;
+  /** The scope the current KB was embedded with (null = whole workspace in range). */
+  scope: KbScope | null;
+  /** The range the current KB was embedded with. Typed loosely; narrow to KbRange defensively. */
+  range: string | null;
+}
+
+/** One SSE frame from the status stream. Terminal when status is ready|error. */
+export interface KbProgressEvent {
+  workspaceId: string;
+  status: KbStatusView["status"];
+  embedded: number;
+  total: number;
+  message: string;
+  at: number;
+}
+
+/**
+ * The distilled facts the KB learned. Deliberately loose — the backend treats
+ * `facts` as an open bag (roster/components/throughput/categories/workload/
+ * blockers/coverage). Render every field defensively; assume nothing exists.
+ */
+export interface KbFacts {
+  roster?: unknown;
+  components?: unknown;
+  throughput?: unknown;
+  categories?: unknown;
+  workload?: unknown;
+  blockers?: unknown;
+  coverage?: unknown;
+  [key: string]: unknown;
+}
+
+/** GET /workspaces/:id/kb/summary — facts + an optional narrative paragraph. */
+export interface KbSummaryView {
+  facts: KbFacts;
+  narrative: string | null;
+  generatedAt: string;
+}
+
+/** One Clicksy-synced space available to scope the KB onboarding. */
+export interface KbSpace {
+  spaceId: string;
+  name: string;
+  enabled: boolean;
+  taskCount: number;
+}
+
+/** GET /workspaces/:id/kb/spaces. */
+export interface KbSpacesView {
+  spaces: KbSpace[];
+}
+
+/** GET /workspaces/:id/kb/scope-options — distinct sub-scope values. */
+export interface KbScopeOptions {
+  folders: string[];
+  lists: Array<{ listId: string; listName: string }>;
+  clients: string[];
+}
+
+/** Optional narrowing for onboarding (omit empty arrays; omit the object if all empty). */
+export interface KbScope {
+  spaceIds?: string[];
+  folderNames?: string[];
+  listIds?: string[];
+  clients?: string[];
+}
+
+/** Body for POST /workspaces/:id/kb/onboard. */
+export interface KbOnboardBody {
+  range: KbRange;
+  scope?: KbScope;
+}
+
+/** One uploaded SOP/reference document row — GET /workspaces/:id/kb/documents. */
+export interface KbDocumentRow {
+  id: string;
+  status?: string;
+  filename?: string;
+  name?: string;
+  createdAt?: string;
+  [key: string]: unknown;
+}
+
 class ApiError extends Error {
   constructor(
     message: string,
@@ -207,6 +325,20 @@ class ApiError extends Error {
  *  - On 401 (no/stale session), redirects to Clicksy's login and throws — this
  *    is the single, centralized place that handles an unauthenticated response.
  */
+/**
+ * Auto-appends the active `workspaceId` to a workspace-scoped path, unless:
+ *  - there's no active workspace yet,
+ *  - the path already names a workspace explicitly (`workspaceId=`), or
+ *  - it's a `/workspaces/:id/...` route where the id is in the path itself.
+ */
+function withActiveWorkspace(path: string): string {
+  if (!activeWorkspaceId) return path;
+  if (path.includes("workspaceId=")) return path; // already explicit
+  if (path.startsWith("/workspaces/")) return path; // chosen-ws path route
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}workspaceId=${encodeURIComponent(activeWorkspaceId)}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? "GET").toUpperCase();
 
@@ -221,7 +353,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   let res: Response;
   try {
-    res = await fetch(`${API_URL}${path}`, {
+    res = await fetch(`${API_URL}${withActiveWorkspace(path)}`, {
       ...init,
       credentials: "include",
       headers,
@@ -254,7 +386,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
 
-  return (await res.json()) as T;
+  // Some endpoints legitimately return an empty body with 200/204 — e.g.
+  // push-config when a workspace has no saved config (Nest serializes a `null`
+  // return as an EMPTY response, not the string "null"). Calling res.json() on
+  // an empty body throws "Unexpected end of JSON input", which the caller would
+  // surface as a spurious load error. Treat an empty body as null.
+  if (res.status === 204) return null as T;
+  const text = await res.text();
+  if (!text) return null as T;
+  return JSON.parse(text) as T;
 }
 
 export const api = {
@@ -296,7 +436,10 @@ export const api = {
    * `{ withCredentials: true }` so the cookie is sent (see `useRunStream`).
    */
   runStreamUrl(runId: string): string {
-    return `${API_URL}/runs/${encodeURIComponent(runId)}/stream`;
+    const base = `${API_URL}/runs/${encodeURIComponent(runId)}/stream`;
+    return activeWorkspaceId
+      ? `${base}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`
+      : base;
   },
 
   /** POST /runs/:id/feedback — submit per-task 👍/👎 (+ optional comments). */
@@ -411,6 +554,128 @@ export const api = {
     return request<LearningSummary>(
       `/workspaces/${encodeURIComponent(workspaceId)}/learning?workspaceId=${encodeURIComponent(workspaceId)}`,
     );
+  },
+
+  // ── Knowledge-base onboarding (Meetsy KB) ─────────────────────────────
+  // All path-scoped (`/workspaces/:id/kb/*`); the workspace lives in the path.
+
+  /** GET /workspaces/:id/kb/status — onboarding/embedding state (any authed). */
+  kbStatus(ws: string): Promise<KbStatusView> {
+    return request<KbStatusView>(
+      `/workspaces/${encodeURIComponent(ws)}/kb/status`,
+    );
+  },
+
+  /** POST /workspaces/:id/kb/onboard — start embedding (Owner/Admin). */
+  kbOnboard(ws: string, body: KbOnboardBody): Promise<KbStatusView> {
+    return request<KbStatusView>(
+      `/workspaces/${encodeURIComponent(ws)}/kb/onboard`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  /**
+   * Absolute URL for the KB status SSE stream (consumed by EventSource with
+   * `{ withCredentials: true }`). Path-scoped — NO `?workspaceId=` query.
+   */
+  kbStatusStreamUrl(ws: string): string {
+    return `${API_URL}/workspaces/${encodeURIComponent(ws)}/kb/status/stream`;
+  },
+
+  /** GET /workspaces/:id/kb/summary — distilled facts + narrative (any authed). */
+  kbSummary(ws: string, refresh = false): Promise<KbSummaryView> {
+    return request<KbSummaryView>(
+      `/workspaces/${encodeURIComponent(ws)}/kb/summary${refresh ? "?refresh=1" : ""}`,
+    );
+  },
+
+  /** GET /workspaces/:id/kb/spaces — Clicksy-synced spaces (any authed). */
+  kbSpaces(ws: string): Promise<KbSpacesView> {
+    return request<KbSpacesView>(
+      `/workspaces/${encodeURIComponent(ws)}/kb/spaces`,
+    );
+  },
+
+  /** GET /workspaces/:id/kb/scope-options — distinct sub-scope values (any authed). */
+  kbScopeOptions(ws: string, spaceIds?: string[]): Promise<KbScopeOptions> {
+    const csv = (spaceIds ?? []).map(encodeURIComponent).join(",");
+    return request<KbScopeOptions>(
+      `/workspaces/${encodeURIComponent(ws)}/kb/scope-options${csv ? `?spaceIds=${csv}` : ""}`,
+    );
+  },
+
+  /** GET /workspaces/:id/kb/documents — uploaded SOP/reference docs. */
+  kbListDocuments(ws: string): Promise<KbDocumentRow[]> {
+    return request<KbDocumentRow[]>(
+      `/workspaces/${encodeURIComponent(ws)}/kb/documents`,
+    );
+  },
+
+  /** DELETE /workspaces/:id/kb/documents/:docId (Owner/Admin). */
+  kbDeleteDocument(ws: string, docId: string): Promise<{ deleted: boolean }> {
+    return request<{ deleted: boolean }>(
+      `/workspaces/${encodeURIComponent(ws)}/kb/documents/${encodeURIComponent(docId)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  /**
+   * POST /workspaces/:id/kb/documents — multipart upload (Owner/Admin).
+   *
+   * Dedicated helper, NOT through `request()`: that wrapper hardcodes
+   * `Content-Type: application/json`, which would corrupt the multipart body.
+   * Here the browser sets `multipart/form-data` + boundary itself (we MUST NOT
+   * set Content-Type). We still send the cookie (`credentials: include`) and the
+   * CSRF double-submit header, and centralize the 401 → Clicksy-login handoff.
+   */
+  async kbUploadDocument(
+    ws: string,
+    file: File,
+  ): Promise<{ id: string; status: string; deduped: boolean }> {
+    const form = new FormData();
+    form.append("file", file);
+
+    const headers: Record<string, string> = {};
+    const csrf = getCsrfToken();
+    if (csrf) headers["x-csrf-token"] = csrf;
+
+    let res: Response;
+    try {
+      res = await fetch(
+        `${API_URL}/workspaces/${encodeURIComponent(ws)}/kb/documents`,
+        { method: "POST", body: form, credentials: "include", headers },
+      );
+    } catch {
+      throw new ApiError(
+        `Cannot reach the API at ${API_URL}. Is it running?`,
+        0,
+      );
+    }
+
+    if (res.status === 401) {
+      redirectToClicksyLogin();
+      throw new ApiError("Not authenticated — redirecting to sign in…", 401);
+    }
+    if (!res.ok) {
+      let detail = "";
+      try {
+        const body = (await res.json()) as { message?: string | string[] };
+        detail = Array.isArray(body.message)
+          ? body.message.join(", ")
+          : (body.message ?? "");
+      } catch {
+        // body wasn't JSON
+      }
+      throw new ApiError(
+        detail || `Upload failed (${res.status} ${res.statusText})`,
+        res.status,
+      );
+    }
+    return (await res.json()) as {
+      id: string;
+      status: string;
+      deduped: boolean;
+    };
   },
 };
 

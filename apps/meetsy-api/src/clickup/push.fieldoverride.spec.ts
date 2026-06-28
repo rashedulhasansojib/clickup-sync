@@ -10,7 +10,10 @@ function makeService(fieldPredictions: Record<string, unknown>) {
   const created: Array<{ predicted: unknown; confirmed: unknown; meetsyTaskId: string }> = [];
   const prisma = {
     analysisRun: {
-      findUnique: jest.fn().mockResolvedValue({ id: "run1", orgId: "org1", workspaceId: "ws1", result: { fieldPredictions } }),
+      findUnique: jest.fn().mockResolvedValue({ id: "run1", orgId: "org1", workspaceId: "ws1", meetingId: "m1", result: { fieldPredictions } }),
+    },
+    meeting: {
+      findUnique: jest.fn().mockResolvedValue({ clientOptionId: null }),
     },
     taskPush: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -30,7 +33,7 @@ function makeService(fieldPredictions: Record<string, unknown>) {
   } as unknown as PushConfigService;
   // Learning stub: empty snapshot, no nudges → adjustments stay null (existing assertions hold).
   const learning = {
-    snapshot: jest.fn().mockResolvedValue({ client: {}, assignee: {} }),
+    snapshot: jest.fn().mockResolvedValue({ assignee: {} }),
     applyNudges: jest.fn().mockReturnValue({}),
   } as unknown as LearningService;
   const svc = new PushService(prisma, client, new TaskMapperService(), pushConfig, {} as AssigneeResolverService, learning);
@@ -44,7 +47,7 @@ const task = (id: string, over: Record<string, unknown> = {}) => ({
 
 describe("PushService — FieldOverride logging", () => {
   it("writes predicted (from the run result) + confirmed for a pushed task", async () => {
-    const predicted = { client: { value: "AIT", abstain: false, support: 5, share: 0.33, isModal: false } };
+    const predicted = { assigneeHint: { value: "Ahmad", abstain: false, support: 5, share: 0.33, isModal: false } };
     const { svc, created } = makeService({ t1: predicted });
     await svc.pushTasks("org1", "run1", { tasks: [task("t1", { clientOptionId: "opt-er", points: 8 })] }, "user1");
 
@@ -54,15 +57,15 @@ describe("PushService — FieldOverride logging", () => {
   });
 
   it("SKIPS the override (no null-poison) when the task id has no prediction", async () => {
-    const { svc, created } = makeService({ t1: { client: { value: "AIT" } } });
+    const { svc, created } = makeService({ t1: { assigneeHint: { value: "Ahmad" } } });
     await svc.pushTasks("org1", "run1", { tasks: [task("t-unknown", { clientOptionId: "opt-er" })] }, "user1");
     expect(created).toHaveLength(0);
   });
 
   it("still logs when the prediction ABSTAINED (an abstain is real content, not a miss)", async () => {
-    const { svc, created } = makeService({ t1: { client: { value: null, abstain: true } } });
+    const { svc, created } = makeService({ t1: { assigneeHint: { value: null, abstain: true } } });
     await svc.pushTasks("org1", "run1", { tasks: [task("t1", { clientOptionId: "opt-er" })] }, "user1");
     expect(created).toHaveLength(1);
-    expect(created[0].predicted).toEqual({ client: { value: null, abstain: true } });
+    expect(created[0].predicted).toEqual({ assigneeHint: { value: null, abstain: true } });
   });
 });

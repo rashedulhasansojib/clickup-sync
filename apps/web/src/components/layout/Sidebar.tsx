@@ -19,9 +19,12 @@ import {
   type LucideIcon,
   UsersRound,
   Wallet,
+  Sparkles,
+  ArrowUpRight,
 } from "lucide-react";
 import { useStats } from "../../hooks/useReports";
 import { useAuth } from "../../hooks/useAuth";
+import { useActiveWorkspace } from "../../hooks/useActiveWorkspace";
 
 interface NavItem {
   to: string;
@@ -47,6 +50,24 @@ export function Sidebar({
   const { data: stats } = useStats();
   const { hasRole, user, org } = useAuth();
   const isAdmin = hasRole("ADMIN");
+  const { activeId } = useActiveWorkspace();
+
+  // Sibling-app entry point. Meetsy is a separately-deployed app on its own
+  // origin (dev: localhost:3001, prod: meetsy.<domain>); the shared
+  // `clickup_sync_sid` cookie carries the session across, so this is a plain
+  // external link, not an in-app route. Rendered only when configured at build
+  // time — an unset value hides the link rather than dangling a dead one.
+  const meetsyOrigin = import.meta.env.VITE_MEETSY_WEB_ORIGIN as
+    | string
+    | undefined;
+
+  // Carry Clicksy's currently-selected workspace across to Meetsy so it opens
+  // scoped to the same workspace (Meetsy persists it and lets the user switch
+  // from there). The launch param always wins over Meetsy's remembered choice.
+  const meetsyHref =
+    meetsyOrigin && activeId
+      ? `${meetsyOrigin}${meetsyOrigin.includes("?") ? "&" : "?"}workspaceId=${encodeURIComponent(activeId)}`
+      : meetsyOrigin;
 
   // On mobile the sidebar is a full-width off-canvas drawer — never the narrow
   // icon-rail. The desktop collapse preference is kept separately so the two
@@ -272,6 +293,56 @@ export function Sidebar({
             </NavLink>
           );
         })}
+
+        {meetsyOrigin && (
+          <>
+            {!collapsed && (
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "var(--text-faint)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  padding: "14px 10px 4px",
+                }}
+              >
+                Apps
+              </div>
+            )}
+            <a
+              href={meetsyHref}
+              className="nav-3d"
+              title="Meetsy — meeting intelligence"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: collapsed ? "8px 10px" : "7px 10px",
+                fontSize: 13,
+                fontWeight: 500,
+                color: "var(--text-muted)",
+                background: "transparent",
+                borderRadius: 7,
+                textDecoration: "none",
+                justifyContent: collapsed ? "center" : "flex-start",
+                transition: "all 100ms",
+              }}
+            >
+              <Sparkles size={16} strokeWidth={1.75} style={{ flexShrink: 0 }} />
+              {!collapsed && (
+                <span style={{ flex: 1, textAlign: "left" }}>Meetsy</span>
+              )}
+              {!collapsed && (
+                <ArrowUpRight
+                  size={13}
+                  strokeWidth={1.75}
+                  style={{ flexShrink: 0, color: "var(--text-faint)" }}
+                />
+              )}
+            </a>
+          </>
+        )}
       </nav>
 
       {/* Footer */}

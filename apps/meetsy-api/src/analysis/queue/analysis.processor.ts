@@ -210,12 +210,13 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
         try {
           taskAnalysis = await this.fieldPrediction.analyze(workspaceId, tasks, meetingDateISO);
           // ── Phase 3.1: rank owner recommendations (reuses the kNN neighbours;
-          // conditioned on the predicted client to beat the base-rate echo). ──
+          // conditioned on the MEETING-LEVEL client set at upload to beat the
+          // base-rate echo). ──
           const members = await this.assignableMembers(workspaceId);
           assignment = await this.assignment.rank(
             workspaceId,
             taskAnalysis.neighboursByTask,
-            taskAnalysis.predictions,
+            meeting.clientName,
             members,
           );
           // ── Phase 3.2: support-gated learning nudges from past corrections. ──

@@ -86,6 +86,10 @@ export class AnalysisService {
         // Persist the extracted roster as a sensible default; the user may
         // overwrite it via POST /meetings/:id/roster before analysis runs.
         roster: roster as unknown as Prisma.InputJsonValue,
+        // Meeting-level client chosen at upload (trusted client-supplied; no DB
+        // validation of the option UUID). Defaults each task's push client.
+        clientOptionId: body.clientOptionId ?? null,
+        clientName: body.clientName ?? null,
       },
     });
 
@@ -104,9 +108,13 @@ export class AnalysisService {
     orgId: string,
     meetingId: string,
     body: ConfirmRosterRequest,
+    workspaceIdParam?: string,
   ): Promise<{ runId: string }> {
-    const meeting = await this.prisma.meeting.findUnique({ where: { id: meetingId } });
-    if (!meeting || meeting.orgId !== orgId) {
+    const workspaceId = await this.workspaces.resolve(orgId, workspaceIdParam);
+    const meeting = await this.prisma.meeting.findFirst({
+      where: { id: meetingId, orgId, workspaceId },
+    });
+    if (!meeting) {
       throw new NotFoundException(`Meeting ${meetingId} not found`);
     }
 
@@ -117,7 +125,7 @@ export class AnalysisService {
 
     // Find the queued run for this meeting (created at upload time).
     const run = await this.prisma.analysisRun.findFirst({
-      where: { meetingId, status: "queued" },
+      where: { meetingId, workspaceId, status: "queued" },
       orderBy: { createdAt: "desc" },
     });
     if (!run) {
@@ -129,9 +137,12 @@ export class AnalysisService {
   }
 
   /** GET /runs/:id — current status + result. */
-  async getRun(orgId: string, runId: string): Promise<RunResponse> {
-    const run = await this.prisma.analysisRun.findUnique({ where: { id: runId } });
-    if (!run || run.orgId !== orgId) {
+  async getRun(orgId: string, runId: string, workspaceIdParam?: string): Promise<RunResponse> {
+    const workspaceId = await this.workspaces.resolve(orgId, workspaceIdParam);
+    const run = await this.prisma.analysisRun.findFirst({
+      where: { id: runId, orgId, workspaceId },
+    });
+    if (!run) {
       throw new NotFoundException(`Run ${runId} not found`);
     }
     return {
@@ -151,8 +162,8 @@ export class AnalysisService {
 
   // ── Phase 3: feedback + chat ─────────────────────────────────────────────
 
-  /** Load a completed run's full context for feedback/chat operations (org-scoped). */
-  private async loadRunContext(orgId: string, runId: string): Promise<{
+  /** Load a completed run's full context for feedback/chat operations (workspace-scoped). */
+  private async loadRunContext(orgId: string, runId: string, workspaceId: string): Promise<{
     orgId: string;
     result: AnalysisResult;
     roster: Participant[];
@@ -160,10 +171,14 @@ export class AnalysisService {
     meetingDateISO: string;
     tasks: Task[];
   }> {
-    const run = await this.prisma.analysisRun.findUnique({ where: { id: runId } });
-    if (!run || run.orgId !== orgId) throw new NotFoundException(`Run ${runId} not found`);
+    const run = await this.prisma.analysisRun.findFirst({
+      where: { id: runId, orgId, workspaceId },
+    });
+    if (!run) throw new NotFoundException(`Run ${runId} not found`);
     if (!run.result) throw new BadRequestException(`Run ${runId} has no result yet`);
-    const meeting = await this.prisma.meeting.findUnique({ where: { id: run.meetingId } });
+    const meeting = await this.prisma.meeting.findFirst({
+      where: { id: run.meetingId, workspaceId },
+    });
     if (!meeting) throw new NotFoundException(`Meeting ${run.meetingId} not found`);
 
     const result = AnalysisResultSchema.parse(run.result);
@@ -185,8 +200,10 @@ export class AnalysisService {
     orgId: string,
     runId: string,
     body: SubmitFeedbackRequest,
+    workspaceIdParam?: string,
   ): Promise<SubmitFeedbackResponse> {
-    const ctx = await this.loadRunContext(orgId, runId);
+    const workspaceId = await this.workspaces.resolve(orgId, workspaceIdParam);
+    const ctx = await this.loadRunContext(orgId, runId, workspaceId);
 
     await this.prisma.feedback.createMany({
       data: body.items.map((it) => ({
@@ -239,10 +256,13 @@ export class AnalysisService {
     return { accepted, changed, result };
   }
 
-  /** GET /runs/:id/chat — conversation history (org-scoped). */
-  async getChat(orgId: string, runId: string): Promise<ChatHistoryResponse> {
-    const run = await this.prisma.analysisRun.findUnique({ where: { id: runId } });
-    if (!run || run.orgId !== orgId) throw new NotFoundException(`Run ${runId} not found`);
+  /** GET /runs/:id/chat — conversation history (workspace-scoped). */
+  async getChat(orgId: string, runId: string, workspaceIdParam?: string): Promise<ChatHistoryResponse> {
+    const workspaceId = await this.workspaces.resolve(orgId, workspaceIdParam);
+    const run = await this.prisma.analysisRun.findFirst({
+      where: { id: runId, orgId, workspaceId },
+    });
+    if (!run) throw new NotFoundException(`Run ${runId} not found`);
     const msgs = await this.prisma.chatMessage.findMany({
       where: { runId },
       orderBy: { createdAt: "asc" },
@@ -261,8 +281,14 @@ export class AnalysisService {
    * POST /runs/:id/chat — one chat turn. The assistant can recover a missed task
    * from the transcript and append it to the result.
    */
-  async sendChat(orgId: string, runId: string, message: string): Promise<SendChatResponse> {
-    const ctx = await this.loadRunContext(orgId, runId);
+  async sendChat(
+    orgId: string,
+    runId: string,
+    message: string,
+    workspaceIdParam?: string,
+  ): Promise<SendChatResponse> {
+    const workspaceId = await this.workspaces.resolve(orgId, workspaceIdParam);
+    const ctx = await this.loadRunContext(orgId, runId, workspaceId);
 
     const history = await this.prisma.chatMessage.findMany({
       where: { runId },
@@ -322,7 +348,7 @@ export class AnalysisService {
    * late-subscriber race: if the run already finished, emit a terminal event and
    * complete immediately instead of subscribing to a channel no one will publish.
    */
-  streamRun(runId: string): Observable<{ data: ProgressEvent }> {
+  streamRun(orgId: string, runId: string, workspaceIdParam?: string): Observable<{ data: ProgressEvent }> {
     return new Observable<{ data: ProgressEvent }>((subscriber) => {
       const { host, port } = this.config.redis;
       const redis = createRedis(host, port);
@@ -342,6 +368,18 @@ export class AnalysisService {
       };
 
       const start = async (): Promise<void> => {
+        // Authorize BEFORE subscribing: resolve the workspace and confirm the run
+        // exists within (orgId, workspaceId). A miss yields 404 (never 403) so we
+        // don't leak run existence across workspaces/orgs.
+        const workspaceId = await this.workspaces.resolve(orgId, workspaceIdParam);
+        const authorized = await this.prisma.analysisRun.findFirst({
+          where: { id: runId, orgId, workspaceId },
+        });
+        if (!authorized) {
+          subscriber.error(new NotFoundException(`Run ${runId} not found`));
+          return;
+        }
+
         // SUBSCRIBE FIRST, then read DB status. This closes the race where the
         // worker finishes between a status read and the subscribe call (which
         // would otherwise leave the client hanging on a channel no one publishes
@@ -364,7 +402,11 @@ export class AnalysisService {
 
         // Late-subscriber catch-up: if the run is already terminal (or finished
         // during/just before subscribing), emit a terminal event + complete now.
-        const run = await this.prisma.analysisRun.findUnique({ where: { id: runId } });
+        // Re-read AFTER subscribe (preserving the subscribe-first ordering above)
+        // for a fresh status, still scoped to (orgId, workspaceId).
+        const run = await this.prisma.analysisRun.findFirst({
+          where: { id: runId, orgId, workspaceId },
+        });
         if (!run) {
           subscriber.error(new NotFoundException(`Run ${runId} not found`));
           return;

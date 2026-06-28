@@ -51,14 +51,26 @@ export class PushService {
     private readonly learning: LearningService,
   ) {}
 
-  /** GET /runs/:id/push — config + per-task audit + assignee suggestions. */
+  /** GET /runs/:id/push — config + per-task audit + assignee suggestions + the
+   * meeting-level client (so the UI can pre-fill the per-task client default). */
   async getStatus(orgId: string, runId: string): Promise<{
     config: Awaited<ReturnType<PushConfigService["get"]>>;
     pushes: PushAuditRow[];
     suggestions: AssigneeSuggestion[];
+    meetingClient: { clientOptionId: string | null; clientName: string | null } | null;
   }> {
     const run = await this.loadRun(orgId, runId);
     const config = await this.pushConfig.get(run.workspaceId);
+
+    // Echo the meeting-level client (chosen at upload) so the review UI pre-fills
+    // each task's client default. null when the meeting has no client.
+    const meeting = await this.prisma.meeting.findUnique({
+      where: { id: run.meetingId },
+      select: { clientOptionId: true, clientName: true },
+    });
+    const meetingClient = meeting?.clientOptionId
+      ? { clientOptionId: meeting.clientOptionId, clientName: meeting.clientName ?? null }
+      : null;
 
     const pushes = await this.prisma.taskPush.findMany({
       where: { runId },
@@ -97,6 +109,7 @@ export class PushService {
         createdAt: p.createdAt.toISOString(),
       })),
       suggestions,
+      meetingClient,
     };
   }
 
@@ -114,6 +127,13 @@ export class PushService {
         "Push is not configured for this workspace. Set a target list first.",
       );
     }
+
+    // Meeting-level client (set at upload) defaults each task's push client. A task
+    // may override it (incl. an explicit clear); absence falls back to this.
+    const meeting = await this.prisma.meeting.findUnique({
+      where: { id: run.meetingId },
+      select: { clientOptionId: true },
+    });
 
     // Load existing pushes ONCE; a `pushed` row is the idempotency key.
     const existing = await this.prisma.taskPush.findMany({ where: { runId } });
@@ -153,11 +173,18 @@ export class PushService {
       const listId = task.listId ?? config.targetListId;
       const clickupUserId =
         task.clickupUserId && allowed.has(task.clickupUserId) ? task.clickupUserId : null;
-      const payload = this.mapper.map(task, {
-        clickupUserId,
-        defaultStatus: config.defaultStatus,
-        clientFieldId: config.clientFieldId,
-      });
+      // Per-task client override wins; an EXPLICIT clear (null) is honored (`!==
+      // undefined`, not `??`); absence falls back to the meeting client.
+      const effectiveClientOptionId =
+        task.clientOptionId !== undefined ? task.clientOptionId : (meeting?.clientOptionId ?? null);
+      const payload = this.mapper.map(
+        { ...task, clientOptionId: effectiveClientOptionId },
+        {
+          clickupUserId,
+          defaultStatus: config.defaultStatus,
+          clientFieldId: config.clientFieldId,
+        },
+      );
 
       try {
         const created = await this.client.createTask(run.workspaceId, listId, payload);
@@ -177,8 +204,8 @@ export class PushService {
           task,
           run.workspaceId,
           predicted,
-          { listId, clientOptionId: task.clientOptionId ?? null, points: task.points ?? null, clickupUserId },
-          this.computeAdjustments(learningSnap, predicted, task, clickupUserId, config),
+          { listId, clientOptionId: effectiveClientOptionId, points: task.points ?? null, clickupUserId },
+          this.computeAdjustments(learningSnap, predicted, clickupUserId, config),
         );
         results.push({
           meetsyTaskId: task.meetsyTaskId,
@@ -290,17 +317,12 @@ export class PushService {
   private computeAdjustments(
     snap: LearningSnapshot | null,
     predicted: unknown,
-    task: { clientOptionId?: string | null },
     confirmedClickupUserId: string | null,
     config: PushConfigView,
   ): Record<string, { shown: string; accepted: boolean }> | null {
     if (!snap || predicted == null) return null;
     const nudges = this.learning.applyNudges(snap, predicted as Parameters<LearningService["applyNudges"]>[1]);
     const out: Record<string, { shown: string; accepted: boolean }> = {};
-    if (nudges.client) {
-      const confirmedName = config.clientOptions.find((o) => o.optionId === task.clientOptionId)?.name ?? null;
-      out.client = { shown: nudges.client.to, accepted: confirmedName === nudges.client.to };
-    }
     if (nudges.assignee) {
       const confirmedName = config.assignableMembers.find((m) => m.clickupUserId === confirmedClickupUserId)?.name ?? null;
       out.assignee = { shown: nudges.assignee.to, accepted: confirmedName === nudges.assignee.to };

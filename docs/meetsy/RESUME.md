@@ -4,6 +4,22 @@
 > then the three docs it points to. Everything is committed on branch **`feat/meetsy-phase0`**
 > (pushed to origin). Last code commit: **`cb855ef`** (getRun passthrough fix; review UI **in-browser smoke-tested**; **Phase 0→3 roadmap COMPLETE**).
 
+## Run the whole platform locally (one command)
+`npm run dev:platform` — brings up Docker pg(pgvector)/redis on **55432/56379**, then runs all four apps via `concurrently`:
+Clicksy API **:3000**, Clicksy web (Vite) **:5173**, Meetsy API **:4000**, Meetsy web (Next) **:3001**.
+- Open **http://localhost:5173** (Clicksy). The sidebar now has a **"Meetsy"** link (→ `http://localhost:3001`) — driven by `apps/web/.env.development`'s `VITE_MEETSY_WEB_ORIGIN`. The shared `clickup_sync_sid` cookie carries the session across both apps (verified: same OWNER principal on both `/auth/me`).
+- Env: one gitignored **root `.env`** feeds both backends. `CLICKUP_API_TOKEN` there is the **non-admin TEST token** so neither app can write Nifty prod (3450636).
+- Dev sign-in cookie (30-day, OWNER `owner@localtest.me`): `clickup_sync_sid=meetsy_dev_9261add9c17375d78ad973ad81a7ce73ffca71b6` (DB session id `sess_dev`). Set it via DevTools on a localhost page if not already signed in.
+- Prod: Caddy serves Meetsy at `meetsy.{$DOMAIN}`; the SPA bakes the link origin via the `VITE_MEETSY_WEB_ORIGIN` Docker build-arg (Dockerfile + docker-compose.prod.yml `api.build.args`).
+
+## Run the whole platform locally (one command)
+`npm run dev:platform` — brings up Docker pg(pgvector)/redis on **55432/56379**, then runs all four apps via `concurrently`:
+Clicksy API **:3002** (dev-only port — the committed `apps/web/vite.config.ts` proxies `/api`→`127.0.0.1:3002`; prod is 3000), Clicksy web (Vite) **:5173**, Meetsy API **:4000**, Meetsy web (Next) **:3001**.
+- Open **http://localhost:5173** (Clicksy) and **log in**: `owner@localtest.me` / `MeetsyDev2026!` (the seed OWNER of `org_seed`; password set directly in dev). Self-serve signup is CLOSED because the seed org already has an Owner (`countOwners(SEED_ORG_ID) > 0`) — add more users via invite.
+- The sidebar has a **"Meetsy"** link (→ `http://localhost:3001`) — driven by `apps/web/.env.development`'s `VITE_MEETSY_WEB_ORIGIN`. The shared `clickup_sync_sid` cookie carries the session across both apps (verified: same OWNER principal on both `/auth/me`).
+- Env: one gitignored **root `.env`** feeds both backends; `PORT=3002` there (must match the Vite proxy). `CLICKUP_API_TOKEN` is the **non-admin TEST token** so neither app can write Nifty prod (3450636).
+- Prod: Caddy serves Meetsy at `meetsy.{$DOMAIN}`; the SPA bakes the link origin via the `VITE_MEETSY_WEB_ORIGIN` Docker build-arg (Dockerfile + docker-compose.prod.yml `api.build.args`).
+
 ## Read these (in order), then start
 1. **`docs/meetsy/BUILD-JOURNAL.md`** — the full, dated build history + every live-verification + findings. **The source of truth for "what's done."**
 2. **`docs/superpowers/plans/2026-06-27-meetsy-integration-plan.md`** — the umbrella vision + the Phase 2 breakdown (2.0 → 2a → 2a.1 → 2b → 2c).

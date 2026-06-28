@@ -1,16 +1,17 @@
 services:
   postgres:
-    # NOTE (Meetsy Phase 2): swap this image to `pgvector/pgvector:pg18` when RAG
-    # lands — pgvector ships the `vector` extension. Phase 0 does NOT need it, so
-    # keep the stock image for now.
-    image: postgres:18-alpine
+    # pgvector image (RAG has landed — Meetsy's `meetsy` schema uses `vector(1024)`
+    # columns, so the `vector` extension lib must be present in the image).
+    image: pgvector/pgvector:pg18
     environment:
       POSTGRES_DB: clickup_sync
       POSTGRES_USER: clickup
       POSTGRES_PASSWORD: clickup
       POSTGRES_HOST_AUTH_METHOD: trust
+    # Host port matches the apps' DATABASE_URL/MEETSY_DATABASE_URL (localhost:55432)
+    # and stays clear of other local projects on 5433.
     ports:
-      - "5433:5432"
+      - "55432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     healthcheck:
@@ -21,8 +22,10 @@ services:
 
   redis:
     image: redis:8-alpine
+    # Host port matches the apps' REDIS_URL/REDIS_PORT (localhost:56379) and
+    # stays clear of other local Redis instances on 6379.
     ports:
-      - "6379:6379"
+      - "56379:6379"
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data

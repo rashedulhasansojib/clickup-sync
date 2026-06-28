@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CreateMeetingRequest } from "@ma/shared";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, type ClientOption } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace-context";
 import { saveMeeting } from "@/lib/store";
 import { Button, Card, ErrorBanner, Spinner } from "@/app/ui";
 
@@ -22,13 +23,40 @@ function parseDateFromFileName(name: string): string | null {
 
 export default function UploadPage() {
   const router = useRouter();
+  const { activeWorkspaceId } = useWorkspace();
   const [title, setTitle] = useState("");
   const [transcript, setTranscript] = useState("");
   const [meetingDate, setMeetingDate] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The workspace's client dropdown options (the source of truth for the
+  // meeting's client). Empty when the workspace has no client field configured.
+  const [clientOptions, setClientOptions] = useState<ClientOption[]>([]);
+  const [clientOptionId, setClientOptionId] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load the client options for the active workspace. Fail-open: any null/throw
+  // leaves `clientOptions` empty, so upload still proceeds without a client.
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    let active = true;
+    // Reset any prior selection when the workspace changes — its options differ,
+    // so a stale id would silently submit with no client (and fail the required
+    // check on the wrong set).
+    setClientOptionId("");
+    void (async () => {
+      try {
+        const cfg = await api.getPushConfig(activeWorkspaceId);
+        if (active) setClientOptions(cfg?.clientOptions ?? []);
+      } catch {
+        if (active) setClientOptions([]);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [activeWorkspaceId]);
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -67,6 +95,19 @@ export default function UploadPage() {
     if (!body.transcript) {
       setError("Paste a transcript or upload a .txt / .vtt file.");
       return;
+    }
+    // When the workspace has a client field, a client is required for the whole
+    // meeting (still editable per-task at push).
+    if (clientOptions.length > 0) {
+      if (!clientOptionId) {
+        setError("Please choose a client for this meeting.");
+        return;
+      }
+      const chosen = clientOptions.find((o) => o.optionId === clientOptionId);
+      if (chosen) {
+        body.clientOptionId = chosen.optionId;
+        body.clientName = chosen.name;
+      }
     }
 
     setSubmitting(true);
@@ -141,6 +182,40 @@ export default function UploadPage() {
               Auto-filled from Zoom filenames when possible.
             </p>
           </div>
+
+          {clientOptions.length > 0 ? (
+            <div className="space-y-1.5">
+              <label
+                htmlFor="client"
+                className="block text-sm font-medium text-zinc-700"
+              >
+                Client
+              </label>
+              <select
+                id="client"
+                value={clientOptionId}
+                onChange={(e) => setClientOptionId(e.target.value)}
+                disabled={submitting}
+                required
+                className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              >
+                <option value="">Select a client…</option>
+                {clientOptions.map((o) => (
+                  <option key={o.optionId} value={o.optionId}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-zinc-400">
+                Applies to the whole meeting. You can still change it per task
+                when pushing to ClickUp.
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-zinc-400">
+              No client field configured for this workspace.
+            </p>
+          )}
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">

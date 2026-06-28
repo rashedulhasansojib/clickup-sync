@@ -13,7 +13,12 @@ import type { AuthPrincipal } from "@clicksy/shared";
 import { CurrentUser, Roles } from "../auth/decorators";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { WorkspaceResolver } from "../analysis/workspace.resolver";
-import { KbOnboardingService, KbStatusView } from "./kb-onboarding.service";
+import {
+  KbOnboardingService,
+  KbScopeOptionsView,
+  KbSpaceView,
+  KbStatusView,
+} from "./kb-onboarding.service";
 import { KbSearchService, KbSearchHit } from "./kb-search.service";
 import { SummaryService } from "./summary.service";
 import { KbSummaryView } from "./summary.types";
@@ -42,7 +47,38 @@ export class KbController {
     @Body(new ZodValidationPipe(OnboardSchema)) body: OnboardDto,
   ): Promise<KbStatusView> {
     const workspaceId = await this.workspaces.resolve(user.orgId, id);
-    return this.onboarding.onboard(workspaceId, body.range);
+    return this.onboarding.onboard(workspaceId, body.range, body.scope);
+  }
+
+  /**
+   * The spaces Clicksy syncs for this workspace + how many tasks are mirrored.
+   * Any authenticated user.
+   */
+  @Get("spaces")
+  async spaces(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id") id: string,
+  ): Promise<{ spaces: KbSpaceView[] }> {
+    const workspaceId = await this.workspaces.resolve(user.orgId, id);
+    return this.onboarding.listSpaces(workspaceId);
+  }
+
+  /**
+   * Distinct sub-filter options (folders/lists/clients) for the chosen spaces.
+   * `?spaceIds=a,b` (comma-separated; empty entries ignored). Any authed user.
+   */
+  @Get("scope-options")
+  async scopeOptions(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id") id: string,
+    @Query("spaceIds") spaceIds?: string,
+  ): Promise<KbScopeOptionsView> {
+    const workspaceId = await this.workspaces.resolve(user.orgId, id);
+    const ids = (spaceIds ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    return this.onboarding.scopeOptions(workspaceId, ids.length ? ids : undefined);
   }
 
   /** Onboarding status + counts. Any authenticated user. */

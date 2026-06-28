@@ -39,6 +39,7 @@ function setup(opts: {
   const run = "run" in opts ? opts.run : { id: "run1", orgId: "org1", workspaceId: "ws1" };
   const prisma = {
     analysisRun: { findUnique: jest.fn().mockResolvedValue(run) },
+    meeting: { findUnique: jest.fn().mockResolvedValue(null) },
     taskPush: {
       findMany: jest.fn().mockResolvedValue(opts.existing ?? []),
       upsert: jest.fn().mockResolvedValue({}),

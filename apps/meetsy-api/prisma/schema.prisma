@@ -85,6 +85,12 @@ model Meeting {
   // Confirmed participant roster (Participant[] from @ma/shared). Null until the
   // user confirms the Stage-0 extracted roster via POST /meetings/:id/roster.
   roster      Json?
+  // Meeting-level client, chosen by the user AT UPLOAD (Meetsy never predicts it).
+  // `clientOptionId` is the ClickUp dropdown option UUID (the push default for every
+  // task); `clientName` is its display name (conditions assignment ranking + UI).
+  // Both null ⇒ no meeting client (push omits client unless a per-task override).
+  clientOptionId String? @map("client_option_id")
+  clientName     String? @map("client_name")
   createdAt   DateTime @default(now())
 
   runs AnalysisRun[]
@@ -302,6 +308,12 @@ model KbSyncState {
   // idle | onboarding | ready | error
   status         String    @default("idle")
   lastRunAt      DateTime?
+  // The last requested onboarding range (3m|6m|12m|24m|36m|all). Nullable: rows
+  // predating this column read back null. A change vs the incoming run resets the
+  // scan cursor so a newly-widened window/scope isn't skipped by keyset paging.
+  range          String?
+  // The last requested scope filter (KbScope JSON; null/absent = no sub-filter).
+  scope          Json?
 
   @@schema("meetsy")
 }

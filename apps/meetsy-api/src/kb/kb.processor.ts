@@ -8,7 +8,7 @@ import { AzureEmbeddingService } from "../azure/azure-embedding.service";
 import { buildTaskCard, type CommentCardInput, type TaskCard, type TaskCardInput } from "./card-builder";
 import { KbOnboardingService } from "./kb-onboarding.service";
 import { KB_QUEUE_NAME, KbJobData, KbQueue } from "./kb.queue";
-import { windowStart } from "./kb.dto";
+import { windowStart, type KbScope } from "./kb.dto";
 
 const EMBED_DIMS = 1024;
 const EMBED_VERSION = 1;
@@ -16,6 +16,22 @@ const EMBED_VERSION = 1;
 const SCAN_PAGE = 100;
 /** Max inputs per embedding API call (Azure batch budget). */
 const EMBED_BATCH = 256;
+
+/**
+ * Build a Prisma `ClickupTask` WHERE fragment from the run's scope filter. Each
+ * axis contributes an `{ in: [...] }` ONLY when its array is non-empty; present
+ * axes AND together. An absent/empty scope yields `{}` (no sub-filter) so it's
+ * spread-safe into the existing query. Spread into BOTH the progress denominator
+ * count and the page scan so SSE `total`/progress reflect the scoped run.
+ */
+export function buildScopeWhere(scope?: KbScope): Prisma.ClickupTaskWhereInput {
+  const where: Prisma.ClickupTaskWhereInput = {};
+  if (scope?.spaceIds?.length) where.spaceId = { in: scope.spaceIds };
+  if (scope?.folderNames?.length) where.folderName = { in: scope.folderNames };
+  if (scope?.listIds?.length) where.listId = { in: scope.listIds };
+  if (scope?.clients?.length) where.client = { in: scope.clients };
+  return where;
+}
 
 /** A pgvector literal: `[0.1,0.2,...]` (bound as text, cast to ::vector in SQL). */
 export function toVectorLiteral(vec: number[]): string {
@@ -105,12 +121,12 @@ export class KbProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   private async process(job: Job<KbJobData>): Promise<void> {
-    const { workspaceId, range } = job.data;
+    const { workspaceId, range, scope } = job.data;
     try {
       // 1) Make sure the requested window is mirrored (degrades if Clicksy down).
-      await this.onboarding.ensureCoverage(workspaceId, range);
+      await this.onboarding.ensureCoverage(workspaceId, range, scope);
       // 2) Incrementally embed.
-      const embedded = await this.embedWorkspace(workspaceId, range);
+      const embedded = await this.embedWorkspace(workspaceId, range, scope);
       // 3) Mark ready with the true chunk count.
       const total = await this.prisma.kbChunk.count({
         where: { workspaceId, sourceType: "clickup_task" },
@@ -135,13 +151,21 @@ export class KbProcessor implements OnModuleInit, OnModuleDestroy {
    * Scan tasks past the cursor in pages, embed changed/new cards, upsert, and
    * advance the cursor transactionally. Returns the number of chunks (re)embedded.
    */
-  private async embedWorkspace(workspaceId: string, range: KbJobData["range"]): Promise<number> {
+  private async embedWorkspace(
+    workspaceId: string,
+    range: KbJobData["range"],
+    scope?: KbScope,
+  ): Promise<number> {
     const state = await this.prisma.kbSyncState.findUnique({ where: { workspaceId } });
     // First run: scan the whole requested window; otherwise continue past cursor.
     let cursor = state?.lastTaskCursor ?? windowStart(range);
 
+    // Scope sub-filter ANDed into BOTH the denominator count and the page scan, so
+    // SSE total/progress reflect only the scoped run.
+    const scopeWhere = buildScopeWhere(scope);
+
     const total = await this.prisma.clickupTask.count({
-      where: { workspaceId, isDeleted: false, updatedDate: { gt: cursor } },
+      where: { workspaceId, isDeleted: false, updatedDate: { gt: cursor }, ...scopeWhere },
     });
     const model = this.config.get("AZURE_EMBED_DEPLOYMENT");
 
@@ -152,7 +176,7 @@ export class KbProcessor implements OnModuleInit, OnModuleDestroy {
     // next query naturally continues from where the last committed.
     for (;;) {
       const tasks = await this.prisma.clickupTask.findMany({
-        where: { workspaceId, isDeleted: false, updatedDate: { gt: cursor } },
+        where: { workspaceId, isDeleted: false, updatedDate: { gt: cursor }, ...scopeWhere },
         orderBy: { updatedDate: "asc" },
         take: SCAN_PAGE,
       });
@@ -226,6 +250,31 @@ export class KbProcessor implements OnModuleInit, OnModuleDestroy {
       );
 
       if (tasks.length < SCAN_PAGE) break;
+    }
+
+    // Purge-on-narrow: after a SCOPED embed, delete clickup_task chunks whose task no
+    // longer matches the declared scope, so re-onboarding to a narrower scope shrinks
+    // the KB instead of leaving stale out-of-scope chunks searchable.
+    if (Object.keys(scopeWhere).length > 0) {
+      const inScope = await this.prisma.clickupTask.findMany({
+        where: { workspaceId, isDeleted: false, ...scopeWhere },
+        select: { taskId: true },
+      });
+      const ids = inScope.map((t) => t.taskId);
+      if (ids.length === 0) {
+        // ensureCoverage no-ops when Clicksy is unreachable, and folder/list/client
+        // filters never trigger backfill, so 0 matches is a realistic TRANSIENT gap.
+        // Deleting with notIn:[] would wipe ALL task chunks (Prisma = match-all), so SKIP.
+        this.logger.warn(
+          `KB purge skipped for ${workspaceId}: scope matched 0 mirrored tasks (kept existing chunks)`,
+        );
+      } else {
+        const purged = await this.prisma.kbChunk.deleteMany({
+          where: { workspaceId, sourceType: "clickup_task", sourceId: { notIn: ids } },
+        });
+        if (purged.count > 0)
+          this.logger.log(`KB purge removed ${purged.count} out-of-scope chunk(s) for ${workspaceId}`);
+      }
     }
 
     return embeddedTotal;

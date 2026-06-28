@@ -28,6 +28,7 @@
     "build:web": "pnpm --filter web build",
     "dev:all": "concurrently \"npm run start:dev\" \"npm run dev:web\"",
     "dev:meetsy": "concurrently \"pnpm --filter @ma/api dev\" \"pnpm --filter @ma/web dev\"",
+    "dev:platform": "npm run dev:deps && concurrently -k -n clicksy-api,clicksy-web,meetsy-api,meetsy-web -c blue,cyan,magenta,green \"npm run start:dev\" \"pnpm --filter web dev\" \"pnpm --filter @ma/api dev\" \"pnpm --filter @ma/web dev\"",
     "turbo:build": "turbo run build",
     "turbo:typecheck": "turbo run typecheck",
     "turbo:lint": "turbo run lint"

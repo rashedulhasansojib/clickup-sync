@@ -21,6 +21,12 @@ COPY . .
 # never connects, but the var must resolve. The real URL is injected at runtime
 # via env_file and does not leak from this stage into the runner.
 ENV DATABASE_URL="postgresql://build:build@localhost:5432/build?schema=public"
+# Meetsy entry-point origin, baked into the SPA at build time (Vite reads
+# VITE_* from the env during `build:web`). Drives the sidebar "Meetsy" link and
+# the /login round-trip allowlist. Unset ⇒ the link is hidden. Prod value e.g.
+# https://meetsy.<your-domain> — supplied as a build-arg by docker-compose.prod.
+ARG VITE_MEETSY_WEB_ORIGIN=""
+ENV VITE_MEETSY_WEB_ORIGIN=$VITE_MEETSY_WEB_ORIGIN
 RUN npm run prisma:generate \
  && npm run build \
  && npm run build:web

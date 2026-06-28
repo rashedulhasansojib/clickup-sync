@@ -4,12 +4,12 @@ import { PrismaService } from "../prisma/prisma.service";
 /**
  * Resolves the workspace a request operates on, mirroring Clicksy's `?workspaceId=`
  * convention with a default-workspace fallback. Reads the `public.workspaces`
- * read-model (read-only). Phase 0 only needs this to satisfy the new non-null
- * `workspaceId` columns; the full per-endpoint wiring lands in a later sub-step.
+ * read-model (read-only).
  *
- * TODO(phase1): thread `?workspaceId=` through every analysis endpoint and scope
- * all reads/writes by it (+ orgId) for defense-in-depth, instead of only at
- * meeting creation.
+ * Phase 1: `?workspaceId=` is now threaded through every analysis endpoint and all
+ * run/meeting reads are scoped by the resolved workspaceId (+ orgId) for
+ * defense-in-depth — see AnalysisService. The param stays OPTIONAL everywhere and
+ * falls back to the org's default workspace, so the change is backward compatible.
  */
 @Injectable()
 export class WorkspaceResolver {

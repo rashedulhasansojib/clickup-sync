@@ -49,7 +49,14 @@ services:
     # (IMAGE_TAG), falling back to :latest for a manual `docker compose up`.
     # `build: .` is kept so you can still build locally with `up -d --build`.
     image: ghcr.io/rashedulhasansojib/clickup-sync:${IMAGE_TAG:-latest}
-    build: .
+    # Bake the Meetsy entry-point origin into the SPA at build time so the
+    # sidebar "Meetsy" link + /login round-trip allowlist resolve to the
+    # sibling subdomain Caddy serves (meetsy.${DOMAIN}). A prebuilt GHCR image
+    # must be built with this arg set for the link to appear.
+    build:
+      context: .
+      args:
+        VITE_MEETSY_WEB_ORIGIN: https://meetsy.${DOMAIN:?set DOMAIN in .env}
     restart: unless-stopped
     env_file: .env
     expose:

@@ -26,11 +26,12 @@ import { classifyDuplicates, type DuplicateHit } from "./duplicate-bands";
  * Per task: build a CARD-SHAPED query (so cosines are comparable to the stored
  * card embeddings), kNN over `clickup_task` chunks, keep only neighbours above a
  * cosine FLOOR, and:
- *  - predict client / sprint / assignee via a similarity-weighted modal prior
- *    that the LLM may CLAMP to (pick among the observed candidates, or abstain).
- *    The LLM is the echo-breaker — it lets the task text pull a MINORITY client
- *    instead of arg-maxing the corpus base rate — but confidence (support/share)
- *    always rides on the DISTRIBUTION, never the model's self-assertion.
+ *  - predict sprint / assignee via a similarity-weighted modal prior that the LLM
+ *    may CLAMP to (pick among the observed candidates, or abstain). The LLM is the
+ *    echo-breaker — it lets the task text pull a MINORITY value instead of
+ *    arg-maxing the corpus base rate — but confidence (support/share) always rides
+ *    on the DISTRIBUTION, never the model's self-assertion. (Client is NOT
+ *    predicted — it's a meeting-level value the user sets at upload.)
  *  - predict due from p80 cycle-time of closed neighbours (p50 ≈ "due today" here).
  *  - flag likely duplicates (cosine ≥ 0.90) / suggest related (≥ 0.82).
  * Abstains on thin history (fewer than MIN_QUALIFYING neighbours clear the floor).
@@ -56,7 +57,6 @@ export interface DuePrediction {
 }
 
 export interface TaskPrediction {
-  client: FieldPrediction;
   sprint: FieldPrediction;
   assigneeHint: FieldPrediction; // soft hint only; confident assignment is Phase 3
   estimate: FieldPrediction;
@@ -76,7 +76,6 @@ const K = 15;
 const CLAMP_DEPLOYMENT = "gpt-5.4-mini";
 
 const ClampSchema = z.object({
-  client: z.object({ value: z.string().nullable(), reason: z.string() }),
   sprint: z.object({ value: z.string().nullable(), reason: z.string() }),
   assignee: z.object({ value: z.string().nullable(), reason: z.string() }),
 });
@@ -174,7 +173,6 @@ export class FieldPredictionService {
     const quali = qualifying(neighbours);
     const thin = quali.length < MIN_QUALIFYING;
 
-    const clientPrior = aggregatePrior(quali, (n) => n.client);
     const sprintPrior = aggregatePrior(quali, (n) => n.sprint);
     const assigneePrior = aggregatePrior(quali, (n) => n.assignee);
     // Many tasks carry estimation 0 — a "0" estimate suggestion is meaningless,
@@ -184,11 +182,12 @@ export class FieldPredictionService {
       return v && Number(v) > 0 ? v : null;
     });
 
-    // LLM clamp (echo-breaker) for client/sprint/assignee — picks among the
-    // observed candidates using the task text, or abstains. Skipped when thin.
+    // LLM clamp (echo-breaker) for sprint/assignee — picks among the observed
+    // candidates using the task text, or abstains. Skipped when thin. (Client is
+    // no longer predicted — it's a meeting-level value set at upload.)
     let clamp: z.infer<typeof ClampSchema> | null = null;
-    if (!thin && (clientPrior || sprintPrior || assigneePrior)) {
-      clamp = await this.clamp(task, clientPrior?.candidates ?? [], sprintPrior?.candidates ?? [], assigneePrior?.candidates ?? []);
+    if (!thin && (sprintPrior || assigneePrior)) {
+      clamp = await this.clamp(task, sprintPrior?.candidates ?? [], assigneePrior?.candidates ?? []);
     }
 
     const dueDays = thin ? null : cycleDaysPercentile(quali, 0.8);
@@ -200,7 +199,6 @@ export class FieldPredictionService {
     };
 
     return {
-      client: this.field(thin, clientPrior, clamp?.client),
       sprint: this.field(thin, sprintPrior, clamp?.sprint),
       assigneeHint: this.field(thin, assigneePrior, clamp?.assignee),
       estimate: this.field(thin, estimatePrior, undefined), // statistical only (no LLM)
@@ -247,7 +245,6 @@ export class FieldPredictionService {
 
   private async clamp(
     task: Task,
-    clientCands: PriorCandidate[],
     sprintCands: PriorCandidate[],
     assigneeCands: PriorCandidate[],
   ): Promise<z.infer<typeof ClampSchema> | null> {
@@ -263,7 +260,6 @@ export class FieldPredictionService {
           `Task title: ${task.title}`,
           `Task description: ${task.description ?? ""}`,
           ``,
-          `client candidates: ${list(clientCands)}`,
           `sprint candidates: ${list(sprintCands)}`,
           `assignee candidates: ${list(assigneeCands)}`,
         ].join("\n"),

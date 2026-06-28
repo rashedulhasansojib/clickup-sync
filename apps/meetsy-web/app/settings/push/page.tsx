@@ -7,9 +7,9 @@ import {
   type AssignableMember,
   type ClickUpSpaceNode,
   type PushConfigView,
-  type WorkspaceListItem,
 } from "@/lib/api";
 import { useCurrentUser } from "@/lib/user-context";
+import { useWorkspace } from "@/lib/workspace-context";
 import { Button, Card, ErrorBanner, Spinner } from "@/app/ui";
 
 /**
@@ -62,69 +62,12 @@ function PageHeader() {
 }
 
 function PushSettingsEditor() {
-  const [workspaces, setWorkspaces] = useState<WorkspaceListItem[] | null>(null);
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  // Load the workspace list once; default-first selection.
-  useEffect(() => {
-    let active = true;
-    void api
-      .listWorkspaces()
-      .then((rows) => {
-        if (!active) return;
-        setWorkspaces(rows);
-        setWorkspaceId((prev) => prev ?? rows[0]?.id ?? null);
-      })
-      .catch((err) => {
-        if (!active) return;
-        setLoadError(
-          err instanceof ApiError ? err.message : "Could not load workspaces.",
-        );
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  if (loadError) return <ErrorBanner message={loadError} />;
-  if (!workspaces) return <Spinner label="Loading workspaces…" />;
-  if (workspaces.length === 0) {
-    return (
-      <Card className="p-6">
-        <p className="text-sm text-zinc-600">No workspaces found for your org.</p>
-      </Card>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      {workspaces.length > 1 && (
-        <Card className="p-5">
-          <label className="block text-sm font-medium text-zinc-700">
-            Workspace
-            <select
-              value={workspaceId ?? ""}
-              onChange={(e) => setWorkspaceId(e.target.value)}
-              className="mt-1.5 block w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-800 focus:border-zinc-400 focus:outline-none"
-            >
-              {workspaces.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                  {w.isDefault ? " (default)" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-        </Card>
-      )}
-
-      {/* Remount the form per workspace so its loaded config/lists/members reset. */}
-      {workspaceId && (
-        <WorkspacePushForm key={workspaceId} workspaceId={workspaceId} />
-      )}
-    </div>
-  );
+  // The active workspace now comes from the global header switcher
+  // (WorkspaceProvider), not a page-local picker.
+  const { activeWorkspaceId } = useWorkspace();
+  if (!activeWorkspaceId) return <Spinner label="Loading workspace…" />;
+  // Remount the form per workspace so its loaded config/lists/members reset.
+  return <WorkspacePushForm key={activeWorkspaceId} workspaceId={activeWorkspaceId} />;
 }
 
 function WorkspacePushForm({ workspaceId }: { workspaceId: string }) {

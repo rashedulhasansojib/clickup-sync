@@ -8,18 +8,17 @@ import {
   type CorrectionStat,
 } from "./learning-aggregate";
 
-/** The learnable fields (client + assignee resolve cleanly; sprint deferred). */
-type LearnField = "client" | "assignee";
-const FIELDS: LearnField[] = ["client", "assignee"];
+/** The learnable fields. Client left the learning loop (it's a meeting-level value
+ * the user sets at upload, never predicted); assignee resolves cleanly; sprint deferred. */
+type LearnField = "assignee";
+const FIELDS: LearnField[] = ["assignee"];
 
 export interface LearningSnapshot {
-  client: FieldAggregate;
   assignee: FieldAggregate;
 }
 
 /** A gated nudge to surface for a fresh prediction, per field. */
 export interface TaskAdjustments {
-  client?: { from: string; to: string; count: number; agreement: number };
   assignee?: { from: string; to: string; count: number; agreement: number };
 }
 
@@ -40,15 +39,12 @@ export interface LearningSummaryView {
 }
 
 interface PredictionBundle {
-  client?: { value: string | null; abstain: boolean } | null;
   assigneeHint?: { value: string | null; abstain: boolean } | null;
 }
 interface ConfirmedBundle {
-  clientOptionId?: string | null;
   clickupUserId?: string | null;
 }
 interface AdjustmentsBundle {
-  client?: { shown: string; accepted: boolean };
   assignee?: { shown: string; accepted: boolean };
 }
 
@@ -65,30 +61,19 @@ export class LearningService {
       }),
       this.prisma.workspacePushConfig.findUnique({
         where: { workspaceId },
-        select: { clientOptions: true, assignableMembers: true },
+        select: { assignableMembers: true },
       }),
     ]);
 
-    const clientName = new Map<string, string>(
-      ((config?.clientOptions as Array<{ optionId: string; name: string }> | null) ?? []).map((o) => [o.optionId, o.name]),
-    );
     const memberName = new Map<string, string>(
       ((config?.assignableMembers as Array<{ clickupUserId: string; name: string }> | null) ?? []).map((m) => [m.clickupUserId, m.name]),
     );
 
-    const records: Record<LearnField, FieldRecord[]> = { client: [], assignee: [] };
+    const records: Record<LearnField, FieldRecord[]> = { assignee: [] };
     for (const row of rows) {
       const predicted = (row.predicted as PredictionBundle | null) ?? {};
       const confirmed = (row.confirmed as ConfirmedBundle) ?? {};
       const adj = (row.adjustments as AdjustmentsBundle | null) ?? {};
-      records.client.push(
-        this.toRecord(
-          predFieldValue(predicted.client),
-          confirmed.clientOptionId ?? null,
-          clientName,
-          adj.client,
-        ),
-      );
       records.assignee.push(
         this.toRecord(
           predFieldValue(predicted.assigneeHint),
@@ -100,7 +85,6 @@ export class LearningService {
     }
 
     return {
-      client: aggregateField(records.client),
       assignee: aggregateField(records.assignee),
     };
   }
@@ -108,8 +92,6 @@ export class LearningService {
   /** Pure: apply the gated organic nudges of a snapshot to a fresh prediction bundle. */
   applyNudges(snap: LearningSnapshot, predicted: PredictionBundle): TaskAdjustments {
     const out: TaskAdjustments = {};
-    const c = nudgeFor(snap.client, predFieldValue(predicted.client));
-    if (c) out.client = { from: c.predicted, to: c.confirmed, count: c.count, agreement: c.agreement };
     const a = nudgeFor(snap.assignee, predFieldValue(predicted.assigneeHint));
     if (a) out.assignee = { from: a.predicted, to: a.confirmed, count: a.count, agreement: a.agreement };
     return out;
@@ -124,7 +106,7 @@ export class LearningService {
     const out: Record<string, TaskAdjustments> = {};
     for (const [taskId, pred] of Object.entries(predictionsByTask)) {
       const adj = this.applyNudges(snap, pred ?? {});
-      if (adj.client || adj.assignee) out[taskId] = adj;
+      if (adj.assignee) out[taskId] = adj;
     }
     return out;
   }

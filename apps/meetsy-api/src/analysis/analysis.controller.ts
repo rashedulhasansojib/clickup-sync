@@ -43,8 +43,9 @@ export class AnalysisController {
     @CurrentUser() user: AuthPrincipal,
     @Param("id") id: string,
     @Body(new ZodValidationPipe(ConfirmRosterRequestSchema)) body: ConfirmRosterRequest,
+    @Query("workspaceId") workspaceId?: string,
   ): Promise<{ runId: string }> {
-    return this.analysis.confirmRoster(user.orgId, id, body);
+    return this.analysis.confirmRoster(user.orgId, id, body, workspaceId);
   }
 
   /** Poll a run's status + result. */
@@ -52,8 +53,9 @@ export class AnalysisController {
   getRun(
     @CurrentUser() user: AuthPrincipal,
     @Param("id") id: string,
+    @Query("workspaceId") workspaceId?: string,
   ): Promise<RunResponse> {
-    return this.analysis.getRun(user.orgId, id);
+    return this.analysis.getRun(user.orgId, id, workspaceId);
   }
 
   /** Submit per-task feedback; triggers a targeted re-run. */
@@ -62,8 +64,9 @@ export class AnalysisController {
     @CurrentUser() user: AuthPrincipal,
     @Param("id") id: string,
     @Body(new ZodValidationPipe(SubmitFeedbackRequestSchema)) body: SubmitFeedbackRequest,
+    @Query("workspaceId") workspaceId?: string,
   ): Promise<SubmitFeedbackResponse> {
-    return this.analysis.submitFeedback(user.orgId, id, body);
+    return this.analysis.submitFeedback(user.orgId, id, body, workspaceId);
   }
 
   /** Chat history for a run. */
@@ -71,8 +74,9 @@ export class AnalysisController {
   getChat(
     @CurrentUser() user: AuthPrincipal,
     @Param("id") id: string,
+    @Query("workspaceId") workspaceId?: string,
   ): Promise<ChatHistoryResponse> {
-    return this.analysis.getChat(user.orgId, id);
+    return this.analysis.getChat(user.orgId, id, workspaceId);
   }
 
   /** One chat turn (can recover missed tasks into the result). */
@@ -81,8 +85,9 @@ export class AnalysisController {
     @CurrentUser() user: AuthPrincipal,
     @Param("id") id: string,
     @Body(new ZodValidationPipe(SendChatRequestSchema)) body: SendChatRequest,
+    @Query("workspaceId") workspaceId?: string,
   ): Promise<SendChatResponse> {
-    return this.analysis.sendChat(user.orgId, id, body.message);
+    return this.analysis.sendChat(user.orgId, id, body.message, workspaceId);
   }
 
   /**
@@ -95,7 +100,11 @@ export class AnalysisController {
    * the cookie to be sent.
    */
   @Sse("runs/:id/stream")
-  streamRun(@Param("id") id: string): Observable<{ data: ProgressEvent }> {
-    return this.analysis.streamRun(id);
+  streamRun(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id") id: string,
+    @Query("workspaceId") workspaceId?: string,
+  ): Observable<{ data: ProgressEvent }> {
+    return this.analysis.streamRun(user.orgId, id, workspaceId);
   }
 }

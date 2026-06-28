@@ -22,7 +22,6 @@ export interface DuePrediction {
   cycleDaysP80: number | null;
 }
 export interface TaskPrediction {
-  client: FieldPrediction;
   sprint: FieldPrediction;
   assigneeHint: FieldPrediction;
   estimate: FieldPrediction;
@@ -58,7 +57,6 @@ export interface FieldAdjustment {
   agreement: number;
 }
 export interface TaskAdjustments {
-  client?: FieldAdjustment;
   assignee?: FieldAdjustment;
 }
 export interface KbContextHit {
@@ -135,7 +133,7 @@ export function TaskSignals({ signals }: { signals: TaskSignalData }) {
   const hasDupes = duplicates && duplicates.length > 0;
   const hasPred = Boolean(prediction);
   const hasAssign = Boolean(assignment);
-  const hasAdj = adjustment && (adjustment.client || adjustment.assignee);
+  const hasAdj = adjustment && adjustment.assignee;
   if (!hasDupes && !hasPred && !hasAssign && !hasAdj) return null;
 
   return (
@@ -155,7 +153,6 @@ export function TaskSignals({ signals }: { signals: TaskSignalData }) {
       {hasPred && (
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">Suggested</span>
-          <PredChip label="Client" p={prediction!.client} />
           <PredChip label="Sprint" p={prediction!.sprint} />
           <Chip tone={prediction!.due.abstain ? "zinc" : "blue"} title={prediction!.due.abstain ? "no cycle-time precedent" : `p80 cycle ${prediction!.due.cycleDaysP80}d over ${prediction!.due.basedOnClosedTasks} closed similar`}>
             Due: <span className="font-medium">{prediction!.due.abstain ? "—" : prediction!.due.date}</span>
@@ -167,12 +164,6 @@ export function TaskSignals({ signals }: { signals: TaskSignalData }) {
       {/* Learning-loop nudge — only shown when ≥3 consistent past corrections. */}
       {hasAdj && (
         <div className="flex flex-wrap items-center gap-1.5">
-          {adjustment!.client && (
-            <Chip tone="violet" title={`agreement ${adjustment!.client.agreement}`}>
-              Adjusted client: {adjustment!.client.from} → <span className="font-medium">{adjustment!.client.to}</span>
-              <span className="opacity-60">· from {adjustment!.client.count} past corrections</span>
-            </Chip>
-          )}
           {adjustment!.assignee && (
             <Chip tone="violet" title={`agreement ${adjustment!.assignee.agreement}`}>
               Adjusted owner: {adjustment!.assignee.from} → <span className="font-medium">{adjustment!.assignee.to}</span>

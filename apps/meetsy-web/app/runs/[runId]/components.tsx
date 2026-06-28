@@ -721,8 +721,7 @@ export function PushSection({
   const [results, setResults] = useState<Record<string, PushResult>>({});
 
   const tasks = flattenTasks(result);
-  // The result also carries the Phase-3.1 assignment recs (for pre-fill) +
-  // Phase-2c.2 client predictions (to pre-select a matching client option).
+  // The result also carries the Phase-3.1 assignment recs (for assignee pre-fill).
   const rr = result as ReviewResult;
 
   // Build the initial editable state from the loaded status + each task's
@@ -759,11 +758,15 @@ export function PushSection({
           const rec = rr.assignment?.[t.id]?.recommended;
           const recId = rec?.inPool ? rec.clickupUserId : null;
           const suggested = recId ?? suggestionBy.get(t.id) ?? null;
-          // Pre-select the client option matching the 2c.2 predicted client name.
-          const predClient = rr.fieldPredictions?.[t.id]?.client;
+          // Pre-select the client from the MEETING's client (chosen at upload),
+          // but only if it's still a valid option in the current push config.
+          const meetingClientId = s.meetingClient?.clientOptionId ?? null;
           const clientOpt =
-            predClient && !predClient.abstain && predClient.value
-              ? (s.config?.clientOptions ?? []).find((o) => o.name === predClient.value)?.optionId ?? ""
+            meetingClientId &&
+            (s.config?.clientOptions ?? []).some(
+              (o) => o.optionId === meetingClientId,
+            )
+              ? meetingClientId
               : "";
           next[t.id] = {
             clickupUserId: suggested && allowed.has(suggested) ? suggested : null,

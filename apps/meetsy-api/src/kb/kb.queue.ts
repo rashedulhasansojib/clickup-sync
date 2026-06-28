@@ -3,7 +3,7 @@ import { Queue } from "bullmq";
 import type IORedis from "ioredis";
 import { ConfigService } from "../config/config.service";
 import { createRedis } from "../analysis/queue/redis";
-import type { KbRange } from "./kb.dto";
+import type { KbRange, KbScope } from "./kb.dto";
 
 export const KB_QUEUE_NAME = "meetsy-kb";
 
@@ -15,6 +15,8 @@ export interface KbJobData {
   workspaceId: string;
   /** The requested window — used on first run when no cursor exists yet. */
   range: KbRange;
+  /** Optional per-onboarding scope filter (absent = all synced spaces, no sub-filter). */
+  scope?: KbScope;
 }
 
 /** Live progress broadcast over Redis pub/sub (consumed by the status SSE). */
