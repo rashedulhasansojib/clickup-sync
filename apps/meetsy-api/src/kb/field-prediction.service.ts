@@ -73,7 +73,10 @@ export interface TaskAnalysis {
 }
 
 const K = 15;
-const CLAMP_DEPLOYMENT = "gpt-5.4-mini";
+// gpt-5.4 (was gpt-5.4-mini) for a sharper echo-breaker: pick a candidate value
+// from the task text or abstain. Confidence/support still ride on the kNN
+// distribution, never on the model's assertion.
+const CLAMP_DEPLOYMENT = "gpt-5.4";
 
 const ClampSchema = z.object({
   sprint: z.object({ value: z.string().nullable(), reason: z.string() }),

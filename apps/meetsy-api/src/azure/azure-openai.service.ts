@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { AzureOpenAI } from "openai";
+import { OpenAI } from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { ConfigService } from "../config/config.service";
@@ -33,9 +33,10 @@ export interface StructuredOpts<T> {
 /**
  * Provider-agnostic in shape, Azure-only in implementation.
  *
- * Wraps the openai SDK's AzureOpenAI client and exposes a single
- * `structured<T>()` helper that returns a Zod-validated object via OpenAI
- * structured outputs (`beta.chat.completions.parse` + `zodResponseFormat`).
+ * Wraps the openai SDK's plain `OpenAI` client (pointed at the Azure AI Foundry
+ * "v1" OpenAI-compatible surface) and exposes a single `structured<T>()` helper
+ * that returns a Zod-validated object via OpenAI structured outputs
+ * (`beta.chat.completions.parse` + `zodResponseFormat`).
  *
  * NOTE: GPT-5.5 is a reasoning model — we pass `reasoning_effort` and never
  * send `temperature`.
@@ -43,16 +44,21 @@ export interface StructuredOpts<T> {
 @Injectable()
 export class AzureOpenAIService {
   private readonly logger = new Logger(AzureOpenAIService.name);
-  private readonly client: AzureOpenAI;
+  private readonly client: OpenAI;
   private readonly deployment: string;
 
   constructor(private readonly config: ConfigService) {
     this.deployment = config.get("AZURE_OPENAI_DEPLOYMENT");
-    this.client = new AzureOpenAI({
-      endpoint: config.get("AZURE_OPENAI_ENDPOINT"),
-      apiKey: config.get("AZURE_OPENAI_API_KEY"),
-      apiVersion: config.get("AZURE_OPENAI_API_VERSION"),
-      deployment: this.deployment,
+    const apiKey = config.get("AZURE_OPENAI_API_KEY");
+    // The Azure AI Foundry "v1" surface is OpenAI-compatible: AZURE_OPENAI_ENDPOINT
+    // is the FULL base URL (…/openai/v1), the `model` field (the deployment name)
+    // routes the request, and there is no api-version. The deployment-style
+    // AzureOpenAI client 404s on this path, so we use the plain OpenAI client and
+    // authenticate with the `api-key` header (Bearer also works).
+    this.client = new OpenAI({
+      baseURL: config.get("AZURE_OPENAI_ENDPOINT"),
+      apiKey,
+      defaultHeaders: { "api-key": apiKey },
     });
   }
 
@@ -68,8 +74,8 @@ export class AzureOpenAIService {
     const maxTokens = this.config.get("AZURE_OPENAI_MAX_COMPLETION_TOKENS");
     try {
       const completion = await this.client.beta.chat.completions.parse({
-        // With AzureOpenAI the deployment is the routing target; `model` is the
-        // deployment name.
+        // On the v1 surface the `model` field IS the deployment name and routes
+        // the request (no separate Azure deployment path).
         model: deployment,
         messages: [
           { role: "system", content: system },

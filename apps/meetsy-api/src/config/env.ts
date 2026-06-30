@@ -14,11 +14,16 @@ export const EnvSchema = z.object({
   REDIS_HOST: z.string().min(1).default("localhost"),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
 
-  // Azure OpenAI (the only LLM provider)
+  // Azure OpenAI (the only LLM provider). ENDPOINT is the FULL base URL of the
+  // Azure AI Foundry "v1" OpenAI-compatible surface (e.g.
+  // https://<resource>.services.ai.azure.com/openai/v1). DEPLOYMENT is the model
+  // name sent in the `model` field (e.g. gpt-5.5).
   AZURE_OPENAI_ENDPOINT: z.string().url("AZURE_OPENAI_ENDPOINT must be a URL"),
   AZURE_OPENAI_API_KEY: z.string().min(1, "AZURE_OPENAI_API_KEY is required"),
   AZURE_OPENAI_DEPLOYMENT: z.string().min(1, "AZURE_OPENAI_DEPLOYMENT is required"),
-  AZURE_OPENAI_API_VERSION: z.string().min(1, "AZURE_OPENAI_API_VERSION is required"),
+  // Unused on the v1 surface (the v1 path has no api-version). Kept OPTIONAL for
+  // back-compat with older deployment-style configs.
+  AZURE_OPENAI_API_VERSION: z.string().optional(),
 
   // Model behavior knobs — all controllable from .env, no code change needed.
   // Set REASONING=true for reasoning models (gpt-5.5 / o-series): the call then
@@ -33,15 +38,16 @@ export const EnvSchema = z.object({
   // Optional hard cap on output tokens; leave unset for the deployment default.
   AZURE_OPENAI_MAX_COMPLETION_TOKENS: z.coerce.number().int().positive().optional(),
 
-  // Azure OpenAI — embeddings. NOTE: embeddings live on a *different* Azure
-  // resource than chat (verified: niftyocr.openai.azure.com / text-embedding-3-large,
-  // dimensions=1024 honored). All OPTIONAL so the app boots without them —
-  // embeddings are unused until Phase 2; AzureEmbeddingService constructs its
-  // client lazily and only errors if embed() is actually called unconfigured.
+  // Azure OpenAI — embeddings (text-embedding-3-large, dimensions=1024 honored).
+  // ENDPOINT is the full v1 base URL; may be the SAME resource as chat or a
+  // separate one (own client either way). All OPTIONAL so the app boots without
+  // them — AzureEmbeddingService constructs its client lazily and only errors if
+  // embed() is actually called unconfigured. API_VERSION is unused on v1 (kept
+  // optional for back-compat).
   AZURE_EMBED_ENDPOINT: z.string().url("AZURE_EMBED_ENDPOINT must be a URL").optional(),
   AZURE_EMBED_API_KEY: z.string().min(1).optional(),
   AZURE_EMBED_DEPLOYMENT: z.string().min(1).default("text-embedding-3-large"),
-  AZURE_EMBED_API_VERSION: z.string().min(1).default("2023-05-15"),
+  AZURE_EMBED_API_VERSION: z.string().optional(),
 
   // API
   API_PORT: z.coerce.number().int().positive().default(4000),

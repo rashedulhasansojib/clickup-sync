@@ -99,8 +99,9 @@ export async function enrichTasks(
     user: userParts.join("\n"),
     schema: EnrichLLMSchema,
     schemaName: "enriched_tasks",
-    // medium (was low) so the longer description generation has reasoning budget.
-    reasoningEffort: "medium",
+    // high (was medium): richer, more grounded descriptions + acceptance criteria
+    // and better-calibrated estimates have full reasoning budget.
+    reasoningEffort: "high",
   });
 
   const byId = new Map(out.tasks.map((e) => [e.id, e]));

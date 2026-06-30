@@ -3,8 +3,9 @@ import { z } from "zod";
 import { AzureOpenAIService } from "../azure/azure-openai.service";
 import type { KbFacts } from "./summary.types";
 
-/** Deployment for the single narrative pass (spec: gpt-5.4-mini, low effort). */
-const NARRATIVE_DEPLOYMENT = "gpt-5.4-mini";
+/** Deployment for the single narrative pass (gpt-5.4 for richer "what we learned"
+ * prose; low effort — it only summarizes pre-computed facts, never invents). */
+const NARRATIVE_DEPLOYMENT = "gpt-5.4";
 
 const NarrativeSchema = z.object({
   narrative: z.string(),

@@ -14,10 +14,15 @@
   grounded in Clicksy's mirrored ClickUp history (RAG) and pushed back into ClickUp.
 - **Build order (confirmed):** Phase 0 plumbing → Phase 1 ClickUp write-back → Phase 2 RAG/KB →
   Phase 3 smart-assign + learning loop.
-- **Key facts:** Azure chat = `niftyai.openai.azure.com` (gpt-5.4/-pro/-mini). Azure embeddings =
-  SEPARATE resource `niftyocr.openai.azure.com` (text-embedding-3-large, `dimensions=1024` honored —
-  verified 2026-06-27). pgvector needs the dev Postgres image swapped `postgres:18-alpine` →
-  `pgvector/pgvector:pg18` (Phase 2). gpt-5.4-pro is Responses-API-only.
+- **Key facts:** Azure AI = the unified **Azure AI Foundry "v1" OpenAI-compatible** endpoint
+  `niftyaibd-resource.services.ai.azure.com/openai/v1` (chat + embeddings on ONE resource/key as of
+  2026-06-29). Main pipeline runs **gpt-5.5**; aux calls narrative/clamp=gpt-5.4, answerability
+  judge=gpt-5.4-mini. Embeddings still text-embedding-3-large `dimensions=1024`. The v1 surface needs
+  the plain `OpenAI` SDK client (baseURL + `api-key` header), NOT `AzureOpenAI` (404s); `model` field
+  routes. (History: chat was `niftyai.openai.azure.com` gpt-5.4, embeddings a separate
+  `niftyocr.openai.azure.com` — migrated 2026-06-29; old/new text-embedding-3-large vectors verified
+  cosine-identical so no re-embed.) pgvector needs the dev Postgres image swapped `postgres:18-alpine`
+  → `pgvector/pgvector:pg18` (Phase 2). gpt-5.4-pro is Responses-API-only.
 
 ---
 
@@ -492,3 +497,21 @@ Three fixes to close gaps where pushed ClickUp tasks were thin. `apps/meetsy-api
 - **C — ClickUp member suggestion per roster participant at meeting creation.** `analysis.service.createMeeting` now annotates the roster in place (before persist, same array returned) via a new `suggestClickupMembers` helper: resolves workspace members once (`ClickUpClient.getAssignableMembers` — new shared method, controller refactored onto it), tries `[displayName, ...aliases]` through `AssigneeResolverService.resolve` (first hit wins), sets `clickupUserId`/`clickupName`. try/catch → missing token/connection leaves null and the meeting still creates. DI: `ClickUpModule` now `exports` `ClickUpClient` + `AssigneeResolverService`; `AnalysisModule` imports `ClickUpModule` (one-way, no cycle). `stage0-normalize.toParticipants` + `stage5-critic` candidate updated for the new required fields.
 - **Follow-up (deferred, noted):** `push.service.getStatus` assignee suggestion still re-resolves from `assigneeName` rather than preferring the roster participant's confirmed `clickupUserId` (threading task→assigneeId→participant was more churn than the task scope wanted).
 - **Tests:** new `stage4-enrich.spec.ts` (description+estimateHours merge, empty-description fallback, estimateHours=0→null) and `analysis.service.create-meeting.spec.ts` (member annotation, alias match, fetch-error degrades to null); extended `task-mapper.service.spec.ts` (time_estimate set/omitted); fixed literals in `context-injection.spec.ts` + arity in `analysis.service.workspace-scope.spec.ts`. `npx tsc -p apps/meetsy-api/tsconfig.json --noEmit` clean; `pnpm --filter @ma/api test` = 37 suites / 211 tests green. NOT nest-built (live dev server on :4000).
+
+### 2026-06-29 — AI/embeddings model migration: unified v1 endpoint + gpt-5.5 main pipeline — GREEN (tsc + 213 tests)
+
+Migrated chat + embeddings off the old two-resource setup (`niftyai`/`niftyocr`) onto the **single Azure AI Foundry "v1" OpenAI-compatible endpoint** the product owner provided (`niftyaibd-resource.services.ai.azure.com/openai/v1`), and upgraded the model placement. `apps/meetsy-api` only; Clicksy untouched. **Approved placement (quality-first; cost deferred).**
+
+**Pre-flight tests (live, before any code change — all GREEN):** all 6 chat models (gpt-5.5/5.4/5.4-mini/5.4-nano/DeepSeek-V4-Flash/Kimi-K2.6) reachable + honor strict JSON schema; embeddings honor `dimensions=1024`. **Old-vs-new `text-embedding-3-large` cosine = 1.000/0.9999 (= same-endpoint control) → drop-in compatible, NO re-embed, all calibrated thresholds (SIM_FLOOR 0.5, dedup 0.72/0.64, novelty) stay valid.** Param check: gpt-5.5 rejects `temperature` (needs `reasoning_effort`, as today); DeepSeek+Kimi accept `reasoning_effort` (global `REASONING=true` flag won't break them). **SDK path:** `AzureOpenAI({baseURL,apiVersion})` → 404; plain `new OpenAI({baseURL, apiKey, defaultHeaders:{"api-key":KEY}})` + `.parse`+`zodResponseFormat` → works. Head-to-head on the REAL stage12 prompt+schema: gpt-5.5 best coverage+priority calibration; DeepSeek strong but under-prioritized; Kimi fluent but over-confident (all conf=1.0).
+
+**Code changes:**
+- `azure/azure-openai.service.ts` + `azure/azure-embedding.service.ts`: swapped `AzureOpenAI` (deployment-style, 404s on v1) → plain **`OpenAI`** client (`baseURL`=ENDPOINT, `defaultHeaders:{"api-key"}`). `model`-field routing + the whole `structured()`/`embed()` bodies unchanged. Embeddings keep their own client instance (can still diverge from chat later).
+- `config/env.ts`: `AZURE_OPENAI_API_VERSION` + `AZURE_EMBED_API_VERSION` → **optional** (unused on v1; back-compat). ENDPOINT docs updated to "full base URL incl. /openai/v1".
+- **Model placement:** `.env` `AZURE_OPENAI_DEPLOYMENT` gpt-5.4 → **gpt-5.5** (lifts all 6 main stages: roster/analyze/critic/enrich/refine/chat). `stage12-analyze` + `stage4-enrich` `reasoningEffort` medium → **high**. Aux constants: `NARRATIVE_DEPLOYMENT` + `CLAMP_DEPLOYMENT` gpt-5.4-mini → **gpt-5.4** (`narrative.service.spec` assertion updated); `JUDGE_DEPLOYMENT` **kept gpt-5.4-mini** (answerability metric consistency).
+- `.env` + `.env.example`: one v1 endpoint+key for chat & embeddings; placeholder key (owner will rotate); removed the now-unused `*_API_VERSION` lines from live `.env`.
+
+**Live end-to-end confirm:** gpt-5.5 @ `reasoning_effort:high` on the analyze schema → `finish=stop` (no truncation; `.env` sets no `MAX_COMPLETION_TOKENS` cap), 4 well-prioritized tasks, 47–61-word descriptions, 4–5 ACs each. `.env` has `REASONING=true` so `temperature` is never sent (gpt-5.5 would 400 on it).
+
+**Verify:** `pnpm --filter @ma/api typecheck` clean; `pnpm --filter @ma/api test` = **37 suites / 213 tests** green (under Homebrew Node v25.9.0). NOT nest-built.
+
+**Deferred / noted:** (1) **cross-family critic A/B** (analyze=gpt-5.5, critic=DeepSeek/Kimi) — approved to *benchmark* only, NOT defaulted; the diverse second opinion may catch more, validate before switching. (2) gpt-image-2 + 5.4-nano available but unused. (3) The 3 aux model constants are still hardcoded (not env-driven) — fine for now; env-ify if tuning cadence grows. (4) Owner will rotate the placeholder API key.

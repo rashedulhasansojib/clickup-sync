@@ -28,8 +28,8 @@ describe("NarrativeService", () => {
     expect(opts.user).toContain("Fix Safari chart");
     // The "no new numbers" guard is in the system prompt.
     expect(opts.system.toLowerCase()).toContain("do not invent");
-    // Spec: gpt-5.4-mini, low effort.
-    expect(opts.deployment).toBe("gpt-5.4-mini");
+    // gpt-5.4 (richer prose), low effort.
+    expect(opts.deployment).toBe("gpt-5.4");
     expect(opts.reasoningEffort).toBe("low");
   });
 });

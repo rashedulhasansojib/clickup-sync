@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { AzureOpenAI } from "openai";
+import { OpenAI } from "openai";
 import { ConfigService } from "../config/config.service";
 import { recordUsage } from "../observability/usage.context";
 
@@ -12,21 +12,20 @@ export interface EmbedOpts {
 }
 
 /**
- * Embeddings client — DISTINCT Azure resource from chat.
+ * Embeddings client — its OWN client instance, separate from chat.
  *
- * Chat lives on niftyai.openai.azure.com; embeddings live on a *separate*
- * resource (niftyocr.openai.azure.com / text-embedding-3-large) with its own
- * endpoint + key + api-version. This service therefore holds its own
- * AzureOpenAI instance rather than reusing AzureOpenAIService's client.
+ * The chat and embedding endpoints are configured independently (AZURE_EMBED_*
+ * vs AZURE_OPENAI_*). They may point at the same Azure AI Foundry "v1" resource
+ * (current setup — text-embedding-3-large, dimensions=1024 honored) or at
+ * different ones; keeping a distinct client lets them diverge without a refactor.
  *
- * The client is built LAZILY: Phase 0 boots without AZURE_EMBED_* set (the
- * pipeline does not embed until Phase 2). embed() throws a clear error only if
- * it is actually called while unconfigured.
+ * The client is built LAZILY: the app boots without AZURE_EMBED_* set; embed()
+ * throws a clear error only if it is actually called while unconfigured.
  */
 @Injectable()
 export class AzureEmbeddingService {
   private readonly logger = new Logger(AzureEmbeddingService.name);
-  private client: AzureOpenAI | null = null;
+  private client: OpenAI | null = null;
   private readonly deployment: string;
 
   constructor(private readonly config: ConfigService) {
@@ -41,7 +40,7 @@ export class AzureEmbeddingService {
   }
 
   /** Build the embedding client on first use; cache it. Throws if unconfigured. */
-  private getClient(): AzureOpenAI {
+  private getClient(): OpenAI {
     if (this.client) return this.client;
     const endpoint = this.config.get("AZURE_EMBED_ENDPOINT");
     const apiKey = this.config.get("AZURE_EMBED_API_KEY");
@@ -50,11 +49,12 @@ export class AzureEmbeddingService {
         "Embeddings not configured: set AZURE_EMBED_ENDPOINT and AZURE_EMBED_API_KEY.",
       );
     }
-    this.client = new AzureOpenAI({
-      endpoint,
+    // v1 OpenAI-compatible surface: AZURE_EMBED_ENDPOINT is the full base URL
+    // (…/openai/v1); `model` (the deployment) routes; auth via the api-key header.
+    this.client = new OpenAI({
+      baseURL: endpoint,
       apiKey,
-      apiVersion: this.config.get("AZURE_EMBED_API_VERSION"),
-      deployment: this.deployment,
+      defaultHeaders: { "api-key": apiKey },
     });
     return this.client;
   }
@@ -69,8 +69,8 @@ export class AzureEmbeddingService {
     const inputs = Array.isArray(input) ? input : [input];
     try {
       const res = await client.embeddings.create({
-        // With AzureOpenAI the deployment is the routing target; `model` is the
-        // deployment name.
+        // On the v1 surface the `model` field IS the deployment name and routes
+        // the request.
         model: this.deployment,
         input: inputs,
         ...(opts.dimensions ? { dimensions: opts.dimensions } : {}),

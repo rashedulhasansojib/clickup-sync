@@ -85,7 +85,9 @@ export async function analyzeMeeting(
     ].join("\n"),
     schema: AnalyzeLLMSchema,
     schemaName: "analysis",
-    reasoningEffort: "medium",
+    // high (was medium): deeper reasoning on the core extraction = better task
+    // coverage, ownership resolution, and priority calibration.
+    reasoningEffort: "high",
   });
 
   const byId = new Map(roster.map((p) => [p.id, p]));
