@@ -60,7 +60,7 @@ export function signalsForTask(result: ReviewResult, taskId: string): TaskSignal
 // ── small chips ───────────────────────────────────────────────────────────────
 type Tone = "zinc" | "blue" | "amber" | "red" | "green" | "violet";
 const TONE: Record<Tone, string> = {
-  zinc: "bg-zinc-100 text-zinc-600 border-zinc-200",
+  zinc: "bg-muted text-muted-foreground border-border",
   blue: "bg-blue-50 text-blue-700 border-blue-200",
   amber: "bg-amber-50 text-amber-700 border-amber-200",
   red: "bg-red-50 text-red-700 border-red-200",
@@ -125,14 +125,14 @@ function CandidateStrip({
   if (!candidates || candidates.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1">
-      <span className="text-[10px] uppercase tracking-wide text-zinc-400">from</span>
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">from</span>
       {candidates.slice(0, 4).map((c) => (
         <span
           key={c.value}
           className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] ${
             c.value === picked
               ? "border-blue-200 bg-blue-50 text-blue-700"
-              : "border-zinc-200 bg-white text-zinc-500"
+              : "border-border bg-card text-muted-foreground"
           }`}
           title={`support ${c.support}, share ${Math.round(c.share * 100)}%`}
         >
@@ -156,7 +156,7 @@ function DuplicatesSection({
   if (duplicates.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
         Duplicates
       </span>
       {duplicates.map((d) => {
@@ -185,7 +185,7 @@ function SuggestedSection({ prediction }: { prediction: TaskPrediction }) {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
           Suggested
         </span>
         <PredChip label="Sprint" p={prediction.sprint} />
@@ -207,8 +207,8 @@ function SuggestedSection({ prediction }: { prediction: TaskPrediction }) {
 
       {/* Candidates behind each field prediction — the sim-weighted distribution. */}
       {prediction.sprint.candidates.length > 0 && (
-        <div className="ml-1 border-l border-zinc-200 pl-2">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+        <div className="ml-1 border-l border-border pl-2">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
             sprint candidates
           </div>
           <CandidateStrip
@@ -218,8 +218,8 @@ function SuggestedSection({ prediction }: { prediction: TaskPrediction }) {
         </div>
       )}
       {prediction.estimate.candidates.length > 0 && (
-        <div className="ml-1 border-l border-zinc-200 pl-2">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+        <div className="ml-1 border-l border-border pl-2">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
             estimate candidates
           </div>
           <CandidateStrip
@@ -245,7 +245,7 @@ function OwnerRankingSection({
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
           Owner
         </span>
         {assignment.recommended ? (
@@ -261,8 +261,8 @@ function OwnerRankingSection({
       </div>
 
       {assignment.ranked.length > 0 && (
-        <div className="ml-1 space-y-1.5 border-l border-zinc-200 pl-2">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-400">ranking</div>
+        <div className="ml-1 space-y-1.5 border-l border-border pl-2">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">ranking</div>
           {shown.map((cand, i) => (
             <RankedRow
               key={`${cand.clickupUserId ?? "null"}:${i}`}
@@ -276,7 +276,7 @@ function OwnerRankingSection({
             <button
               type="button"
               onClick={() => setExpanded(true)}
-              className="text-[11px] font-medium text-zinc-500 hover:text-zinc-800"
+              className="text-[11px] font-medium text-muted-foreground hover:text-foreground"
             >
               Show {extra} more
             </button>
@@ -285,7 +285,7 @@ function OwnerRankingSection({
             <button
               type="button"
               onClick={() => setExpanded(false)}
-              className="text-[11px] font-medium text-zinc-500 hover:text-zinc-800"
+              className="text-[11px] font-medium text-muted-foreground hover:text-foreground"
             >
               Show less
             </button>
@@ -311,31 +311,31 @@ function RankedRow({
   return (
     <div className="space-y-0.5 text-xs">
       <div className="flex items-center gap-2">
-        <span className="w-4 text-right tabular-nums text-zinc-400">{rank}.</span>
-        <span className={recommended ? "font-medium text-zinc-800" : "text-zinc-700"}>
+        <span className="w-4 text-right tabular-nums text-muted-foreground/70">{rank}.</span>
+        <span className={recommended ? "font-medium text-foreground" : "text-foreground"}>
           {cand.name}
         </span>
         {!cand.inPool && (
-          <span className="rounded bg-zinc-100 px-1 text-[10px] text-zinc-500">
+          <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">
             not in pool
           </span>
         )}
-        <span className="ml-auto tabular-nums text-zinc-500">
+        <span className="ml-auto tabular-nums text-muted-foreground">
           {cand.closedSimilar} closed · {cand.openTasks} open · {cand.trackedHours30d.toFixed(1)}h/30d
         </span>
       </div>
       <div className="ml-6 flex items-center gap-2">
-        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-zinc-100">
+        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
           <div
-            className={`h-full ${recommended ? "bg-green-500" : "bg-zinc-400"}`}
+            className={`h-full ${recommended ? "bg-green-500" : "bg-muted-foreground/70"}`}
             style={{ width: `${scorePct}%` }}
           />
         </div>
-        <span className="tabular-nums text-[11px] text-zinc-400">{scorePct}%</span>
+        <span className="tabular-nums text-[11px] text-muted-foreground/70">{scorePct}%</span>
       </div>
       {cand.evidenceTaskIds.length > 0 && (
         <div className="ml-6 flex flex-wrap items-center gap-1 pt-1">
-          <span className="text-[10px] text-zinc-400">evidence</span>
+          <span className="text-[10px] text-muted-foreground/70">evidence</span>
           {cand.evidenceTaskIds.slice(0, 5).map((tid) =>
             workspaceId ? (
               <TaskChip key={tid} taskId={tid} tone="blue">
@@ -360,7 +360,7 @@ function NudgeSection({ adjustment }: { adjustment: TaskAdjustments }) {
   if (rows.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
         Learned
       </span>
       {rows.map(({ field, a }) => (
@@ -388,7 +388,7 @@ function NeighboursSection({
   const top = neighbours.slice(0, 3);
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
         Similar
       </span>
       {top.map((n) => {
@@ -437,7 +437,7 @@ export function TaskSignals({
   if (!hasDupes && !hasPred && !hasAssign && !hasAdj && !hasNeighbours) return null;
 
   return (
-    <div className="mt-3 space-y-3 rounded-lg border border-zinc-100 bg-zinc-50/60 p-3">
+    <div className="mt-3 space-y-3 rounded-lg border border-border bg-muted/50/60 p-3">
       {hasDupes && (
         <DuplicatesSection duplicates={duplicates!} workspaceId={workspaceId} />
       )}
@@ -465,18 +465,18 @@ export function KbContextBanner({
   const tasks = hits.filter((h) => h.sourceType !== "document").length;
   const docs = hits.length - tasks;
   return (
-    <details className="rounded-xl border border-zinc-200 bg-white p-4 text-sm shadow-sm">
-      <summary className="cursor-pointer font-medium text-zinc-700">
+    <details className="rounded-xl border border-border bg-card p-4 text-sm shadow-sm">
+      <summary className="cursor-pointer font-medium text-foreground">
         Grounded in {hits.length} item{hits.length === 1 ? "" : "s"} of this
         client&apos;s history
-        <span className="ml-1 font-normal text-zinc-400">
+        <span className="ml-1 font-normal text-muted-foreground/70">
           ({tasks} task{tasks === 1 ? "" : "s"}
           {docs ? `, ${docs} doc${docs === 1 ? "" : "s"}` : ""})
         </span>
       </summary>
       <ul className="mt-3 space-y-1.5">
         {hits.map((h, i) => (
-          <li key={i} className="flex items-start gap-2 text-xs text-zinc-500">
+          <li key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
             {h.sourceType === "clickup_task" && workspaceId ? (
               <TaskChip taskId={h.sourceId} tone="blue">
                 TASK · {h.sourceId}

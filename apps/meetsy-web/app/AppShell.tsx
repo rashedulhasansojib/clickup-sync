@@ -94,12 +94,25 @@ function SignedInShell({
   useLearningStream(activeWorkspaceId);
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
+      {/* v2 Phase 6 (PR-BB) — skip-to-main link. Hidden until focused via Tab;
+          jumps past the sidebar for keyboard + screen-reader users. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground focus:shadow-md"
+      >
+        Skip to main content
+      </a>
       <Toaster richColors closeButton />
       <CommandPalette user={user} />
 
       <Sidebar user={user} />
 
-      <main className="flex-1 min-w-0">
+      <main
+        id="main-content"
+        role="main"
+        tabIndex={-1}
+        className="flex-1 min-w-0 focus:outline-none"
+      >
         <div className="mx-auto max-w-5xl px-6 py-8">
           <UserProvider user={user}>
             <div key={activeWorkspaceId ?? "none"}>{children}</div>

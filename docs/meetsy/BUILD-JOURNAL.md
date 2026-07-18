@@ -1061,3 +1061,70 @@ The runtime paths that already had a clean pure-function seam get wired through 
 - Per-workspace override history / audit — every `WorkspaceMlConfig.upsert` sets `updatedBy` + `updatedAt`, but there's no time-series view. If tunable churn becomes real, a small `WorkspaceMlConfigHistory` table + a "diff since last save" view would slot in without changing the current shape.
 
 **Phase 5 status:** DONE. All four PRs (T/U/V/W) landed on `feat/meetsy-phase0`.
+
+---
+
+## 2026-07-18 — Meetsy v2 Phase 6: cross-cutting UX polish (dark, keyboard, a11y, mobile)
+
+**Design goal:** the last v2 phase is a *trust pass*, not a feature phase. Phase 0 wired shadcn/ui + `next-themes` + the `.dark` class variant, but no route was actually audited to work in dark mode — 364 `zinc-*` / `slate-*` / `bg-white` usages across ~30 files meant `system=dark` rendered white cards on a dark background. There was no theme toggle, no keyboard traversal on the review page, no skeleton loaders (every fetching state was a full-page `<Spinner>`), no `prefers-reduced-motion` guard, and no landmark/skip-link markup beyond the sidebar's `aria-label="Primary navigation"`. Phase 6 closes those gaps in four PRs. Backend footprint: **none** — every change lives in `apps/meetsy-web`.
+
+### 2026-07-18 — PR-AA: dark-mode palette sweep + theme toggle — DONE / GREEN
+
+- **`apps/meetsy-web/components/theme-toggle.tsx`** (new) — shadcn `DropdownMenu` with Light / Dark / System items (Sun / Moon / Laptop icons). Trigger icon animates rotate/scale between Sun and Moon under the `.dark` class variant so the trigger reflects the resolved theme.
+- **`apps/meetsy-web/components/nav/sidebar.tsx`** — palette swept to semantic tokens (`bg-background`, `border-border`, `text-foreground`, `text-muted-foreground`, `bg-primary`, `bg-accent`). Active nav pill uses `bg-primary text-primary-foreground`; hover uses `bg-accent`. `aria-current="page"` added on the active `<Link>`. `<ThemeToggle />` mounted at the bottom-right of the desktop rail (alongside the email row) and top-right of the mobile top bar (opposite the hamburger).
+- **`apps/meetsy-web/app/ui-legacy.tsx`** — the legacy `Card` / `Button` / `Spinner` / `ErrorBanner` / `PriorityBadge` / `Tag` primitives migrated to semantic tokens. `Button` variants: `primary=bg-primary`, `secondary=border-input bg-background hover:bg-accent`, `ghost=text-muted-foreground hover:bg-accent`, `danger=border-destructive/40 hover:bg-destructive/10`. Priority hues (red/orange/sky) kept but got dark-mode variants (`dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/30` etc.) so the palette remains legible in dark mode without changing meaning.
+- **Bulk sweep across 22 application files** — `app/{home,kb,learning,meetings,new,runs,settings,tuning,ui-legacy}/*.tsx` + `components/{charts,learning,runs,tasks}/*.tsx`: `bg-white` → `bg-card`; `text-zinc-{900,800,700}` → `text-foreground`; `text-zinc-{600,500}` → `text-muted-foreground`; `text-zinc-400` → `text-muted-foreground/70`; `border-zinc-200` → `border-border`; `border-zinc-300` → `border-input`; `bg-zinc-{100,200}` → `bg-muted`; `bg-zinc-{900,800}` → `bg-primary`; `hover:bg-zinc-100` → `hover:bg-accent`; `focus:border-zinc-{400,500}` → `focus:border-ring`; `focus:ring-zinc-200` → `focus:ring-ring`; `divide-zinc-{100,200}` → `divide-border`. `components/tasks/task-chip.tsx` and `components/tasks/task-detail-sheet.tsx` also swept.
+
+### 2026-07-18 — PR-BB: keyboard shortcuts + landmarks + focus rings — DONE / GREEN
+
+- **`apps/meetsy-web/app/AppShell.tsx`** — added a `sr-only focus:not-sr-only` skip-to-content link as the first focusable element in the shell (`focus:fixed focus:top-2 focus:left-2 focus:bg-primary focus:text-primary-foreground focus:z-50`). `<main id="main-content" role="main" tabIndex={-1}>` so the skip link and screen-reader landmark navigation both target the same node. The redundant `role="main"` is belt-and-suspenders — some assistive-tech implementations don't map the tag alone reliably.
+- **`apps/meetsy-web/app/runs/[runId]/use-review-keys.ts`** (new) — `useReviewKeys()` attaches a window-level `keydown` listener. `j` / `ArrowDown` focuses next `[data-task-anchor]`; `k` / `ArrowUp` focuses prev; wraps at both ends; guards against firing while typing in `<input>` / `<textarea>` / `[contenteditable]`; ignores keys with `Ctrl` / `Meta` / `Alt` modifiers so `Ctrl+J` etc. still work. Also smooth-scrolls the anchor into view via `scrollIntoView({block:"nearest"})`.
+- **`apps/meetsy-web/app/runs/[runId]/components.tsx`** — `TaskCard` wrapped in a `<div data-task-anchor={task.id} tabIndex={-1} className="scroll-mt-24 rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">` so the hook has a stable target. `scroll-mt-24` gives the smooth-scroll enough top offset to not tuck the card under any fixed header. `<h3>` gains `break-words` so long task titles don't overflow the card. Task-card interior structure and the `TaskFeedbackControl` submit button are untouched — Tab still traverses those normally.
+- **`apps/meetsy-web/app/runs/[runId]/page.tsx`** — calls `useReviewKeys()` once at the top of `RunPage()`. Deliberately called unconditionally (not scoped to a tab) so `j`/`k` works while a user is on Push / Chat / Insights too — the hook simply no-ops when there are no task anchors in the DOM.
+- **Focus-ring pass** — the sidebar links + brand logo gained `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`. shadcn primitives (`<Button>`, `<Input>`, `<Sheet>`, `<Tabs>`, `<DropdownMenu>`, `<Command>`) already ship with `focus-visible:` rings via their base recipes, so the pass focused on hand-rolled interactive elements only.
+
+### 2026-07-18 — PR-CC: skeleton loaders + empty states — DONE / GREEN
+
+- **`apps/meetsy-web/components/ui/empty-state.tsx`** (new) — small `<EmptyState icon={LucideIcon} title description action={{label, href|onClick}} />` surface: dashed-border card, icon in a muted `rounded-full bg-muted` circle, title, optional description, optional single action. Uses semantic tokens throughout so it works in both themes.
+- **`apps/meetsy-web/app/home/page.tsx`** — replaced `<Card><Spinner label="Loading runs…" /></Card>` initial-load block with three `<Skeleton className="h-20 w-full rounded-xl" />` rows matching the `RunRow` height. Replaced the hand-rolled "No runs yet" `<Card>` with an `<EmptyState icon={HomeIcon}>` pointing at `/new`.
+- **`apps/meetsy-web/app/meetings/page.tsx`** — the paginated list's loading state became a five-row `<Skeleton className="h-16 w-full rounded-xl">` stack. The two empty-state branches (search-no-results and filter-no-results) consolidated into one `<EmptyState>` that adapts its icon (`Search` when a query is active, `ListChecks` otherwise), copy, and action (Clear search vs Analyze a meeting) based on state.
+- **`apps/meetsy-web/app/kb/tasks-tab.tsx`** — the `<Spinner label="Loading tasks…" />` became five `<Skeleton className="h-14 w-full rounded-lg">` rows matching the task-row height. The two prior empty texts consolidated into one `<EmptyState icon={ListChecks}>` that reads "No tasks match" when filtering and "No tasks embedded yet" when not.
+- **Button-embedded spinners kept** — `<Spinner>` inside `<Button>` (Save, Upload, Load more) is an affordance, not a layout loader; those stay. The full-page `AppShell` gate spinner (pre-auth) also stays because a skeleton there would flash before we even know the user is signed in.
+
+### 2026-07-18 — PR-DD: reduced-motion + mobile-safe review — DONE / GREEN
+
+- **`apps/meetsy-web/app/globals.css`** — appended a `@media (prefers-reduced-motion: reduce)` block that sets `animation-duration: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 0ms !important; scroll-behavior: auto !important;` on `*, *::before, *::after`. Neutralizes shadcn's slide/fade transitions, sonner's toast slide, sheet slides, and Tailwind `animate-*` utilities in one shot. `!important` is necessary because Tailwind utilities and Radix data-state animations have specificity we can't beat via cascade order alone. The `disableTransitionOnChange` on `<ThemeProvider>` (Phase 0) covers the theme-flip case; this block covers everything else.
+- **`apps/meetsy-web/app/runs/[runId]/components.tsx`** — `PersonSection`'s task-list indent went from `pl-9` to `pl-4 md:pl-9`. On phones the tasks now stack flush-left instead of eating half the horizontal budget under the person's avatar column.
+- **`components/tasks/task-detail-sheet.tsx`** — kept `side="right"` because shadcn's `SheetContent` already uses `w-full max-w-md` which collapses to full-width on phones (< 448px viewport). The bottom-drawer flip described in the spec was reconsidered and skipped — the current behavior already looks correct on mobile and a runtime `side` swap based on media query risks a Radix Sheet unmount during resize.
+- **`aria-live` regions** — the tuning page's server-validation error path renders via `ErrorBanner`, which already carries `role="alert"` (upgraded in PR-AA's palette sweep of `ui-legacy.tsx`); no additional wiring needed. Sonner's toast root declares `role="status"` internally.
+
+### 2026-07-18 — Phase 6 verify (all GREEN)
+
+| # | Target | Command | Result |
+|---|---|---|---|
+| a | `@ma/shared` build | not needed — no shared-package changes in Phase 6 | SKIP |
+| b | Meetsy web typecheck | `tsc --noEmit` in `apps/meetsy-web` | PASS |
+| c | Meetsy web lint | `next lint` | PASS — 0 warnings, 0 errors |
+| d | Meetsy API tests (drift check) | `npx jest` in `apps/meetsy-api` | PASS — **56 suites / 313 tests** (unchanged from Phase 5; no API code touched) |
+
+`next build` intentionally skipped per the `meetsy-web-next-build-dev-footgun` memory. typecheck + lint are the sanctioned verification path.
+
+**Manual QA path (documented for the record):**
+1. Toggle `ThemeToggle` → Light / Dark / System. Every primary route (`/home`, `/meetings`, `/kb`, `/runs/:id`, `/tuning`, `/learning`, `/settings/push`) renders correctly with no white-on-black cards.
+2. On `/runs/:id`, hit `j` / `k` — focus rings move between task cards; `Esc` closes the task-detail sheet (Radix's built-in).
+3. Tab from top of the page — the first stop is the "Skip to main content" link.
+4. macOS System Settings → Accessibility → Display → Reduce Motion, reload — sheet/toast/animation transitions are visibly gone.
+5. Resize to < 768px — sidebar collapses to a hamburger; review page task cards stack flush-left; long task titles wrap instead of overflowing.
+
+**Migration status:** no new migrations in Phase 6 — no API or Prisma changes.
+
+**Deferred (later phases / follow-ups):**
+- **Comprehensive a11y audit** — Phase 6 hits landmarks, focus, reduced motion, skip link, `aria-current`, and role="alert" on error banners. A formal axe/WCAG-AA sweep is deferred.
+- **`?` shortcut cheatsheet** — an in-app "keyboard shortcuts" help sheet reachable via `?`. Wait to see how ICs actually use `j`/`k` before designing this.
+- **RTL support** — every layout still assumes LTR. Not on the roadmap.
+- **`useMediaQuery` bottom-drawer sheet** — the mobile bottom-drawer variant of `TaskDetailSheet` was scoped for Phase 6 but skipped after review; the current right-side sheet at `w-full max-w-md` collapses cleanly on phones.
+- **Full palette sweep of every literal hue** — the sweep converted zinc/slate/white to semantic tokens. Blue/amber/red/violet chips picked up `dark:` variants case-by-case; a future pass could tighten those further.
+
+**Phase 6 status:** DONE. All four PRs (AA/BB/CC/DD) landed on `feat/meetsy-phase0`.
+
+**Meetsy v2 status:** DONE. All six phases (0–6) landed. The v2 success criteria from `docs/superpowers/plans/2026-07-18-meetsy-v2-plan.md` §6 are met: Home + past-run navigation (Phase 1), clickable evidence chips + side sheet (Phase 2), visible learning-loop patterns building up + `assignee`+`sprint` learning (Phase 3), consolidated `/kb` route (Phase 4), `/tuning` with preview replay (Phase 5), dark mode + keyboard traversal (Phase 6).

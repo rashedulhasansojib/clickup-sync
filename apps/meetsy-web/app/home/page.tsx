@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Home as HomeIcon } from "lucide-react";
 import type { RunListView } from "@ma/shared";
 import { api, ApiError } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
-import { Button, Card, ErrorBanner, Spinner } from "@/app/ui";
+import { Button, ErrorBanner } from "@/app/ui";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import { RunRow } from "@/components/runs/run-list";
 import { LearningDigestCard } from "@/components/learning/digest-card";
 
@@ -48,10 +51,10 @@ export default function HomePage() {
     <div className="space-y-8">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Home
           </h1>
-          <p className="mt-1 text-sm text-zinc-500">
+          <p className="mt-1 text-sm text-muted-foreground">
             Your recent meeting analyses in this workspace.
           </p>
         </div>
@@ -63,13 +66,13 @@ export default function HomePage() {
       <div className="grid gap-6 md:grid-cols-3">
         <section className="space-y-3 md:col-span-2">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Recent runs
             </h2>
             {hasRuns && (
               <Link
                 href="/meetings"
-                className="text-sm font-medium text-zinc-600 hover:text-zinc-900"
+                className="text-sm font-medium text-muted-foreground hover:text-foreground"
               >
                 View all →
               </Link>
@@ -77,27 +80,22 @@ export default function HomePage() {
           </div>
 
           {loading && !runs && (
-            <Card className="flex items-center justify-center p-8">
-              <Spinner label="Loading runs…" />
-            </Card>
+            <div className="space-y-2" aria-hidden>
+              <Skeleton className="h-20 w-full rounded-xl" />
+              <Skeleton className="h-20 w-full rounded-xl" />
+              <Skeleton className="h-20 w-full rounded-xl" />
+            </div>
           )}
 
           {error && <ErrorBanner message={error} />}
 
           {!loading && !hasRuns && !error && (
-            <Card className="p-8 text-center">
-              <h3 className="text-base font-medium text-zinc-900">
-                No runs yet
-              </h3>
-              <p className="mt-1 text-sm text-zinc-500">
-                Upload a transcript to see it turn into evidence-grounded tasks.
-              </p>
-              <div className="mt-4">
-                <Link href="/new">
-                  <Button>Analyze your first meeting</Button>
-                </Link>
-              </div>
-            </Card>
+            <EmptyState
+              icon={HomeIcon}
+              title="No meetings analyzed yet"
+              description="Upload a transcript to see it turn into evidence-grounded tasks."
+              action={{ label: "Analyze your first meeting", href: "/new" }}
+            />
           )}
 
           {hasRuns && (
@@ -110,7 +108,7 @@ export default function HomePage() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Your learning
           </h2>
           {activeWorkspaceId && (

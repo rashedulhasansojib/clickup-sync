@@ -46,7 +46,7 @@ export function StatusCard({ status }: { status: KbStatusView }) {
   return (
     <Card className="space-y-3 p-6">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-zinc-700">
+        <h2 className="text-sm font-semibold text-foreground">
           Current knowledge base
         </h2>
         <Tag>{STATUS_LABELS[status.status]}</Tag>
@@ -73,10 +73,10 @@ function Field({
 }) {
   return (
     <div>
-      <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+      <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
         {label}
       </dt>
-      <dd className="mt-0.5 text-sm text-zinc-700">{children}</dd>
+      <dd className="mt-0.5 text-sm text-foreground">{children}</dd>
     </div>
   );
 }

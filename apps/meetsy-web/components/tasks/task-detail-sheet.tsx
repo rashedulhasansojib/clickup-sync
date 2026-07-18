@@ -57,7 +57,7 @@ export function TaskDetailSheet({ workspaceId }: { workspaceId: string | null })
         <SheetHeader className="pb-4">
           <SheetTitle>ClickUp task</SheetTitle>
           <SheetDescription>
-            <code className="text-xs text-zinc-500">{taskId ?? "—"}</code>
+            <code className="text-xs text-muted-foreground">{taskId ?? "—"}</code>
           </SheetDescription>
         </SheetHeader>
 
@@ -70,8 +70,8 @@ export function TaskDetailSheet({ workspaceId }: { workspaceId: string | null })
         {error && !loading && <ErrorBanner message={error} />}
 
         {!loading && !error && data === null && (
-          <Card className="p-6 text-sm text-zinc-500">
-            <p className="font-medium text-zinc-700">Not in this workspace&apos;s KB.</p>
+          <Card className="p-6 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">Not in this workspace&apos;s KB.</p>
             <p className="mt-1">
               This ClickUp task predates the KB sync, was archived, or belongs to
               a workspace this account doesn&apos;t see. The prediction chip is
@@ -84,13 +84,13 @@ export function TaskDetailSheet({ workspaceId }: { workspaceId: string | null })
         {!loading && !error && data && (
           <div className="space-y-4">
             <div>
-              <div className="text-sm font-semibold text-zinc-900">{data.title}</div>
+              <div className="text-sm font-semibold text-foreground">{data.title}</div>
               {data.url && (
                 <a
                   href={data.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-1 inline-block text-xs font-medium text-blue-700 hover:underline"
+                  className="mt-1 inline-block text-xs font-medium text-blue-700 hover:underline dark:text-blue-400"
                 >
                   Open in ClickUp ↗
                 </a>
@@ -114,10 +114,10 @@ export function TaskDetailSheet({ workspaceId }: { workspaceId: string | null })
 function MetaRow({ label, value }: { label: string; value: string | null }) {
   return (
     <div className="space-y-0.5">
-      <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
         {label}
       </dt>
-      <dd className="truncate text-zinc-700">{value ?? "—"}</dd>
+      <dd className="truncate text-foreground">{value ?? "—"}</dd>
     </div>
   );
 }

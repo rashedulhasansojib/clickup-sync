@@ -108,7 +108,7 @@ export default function TuningPage() {
 
   if (!activeWorkspaceId) {
     return (
-      <div className="py-12 text-center text-sm text-zinc-500">
+      <div className="py-12 text-center text-sm text-muted-foreground">
         Loading workspace…
       </div>
     );
@@ -121,15 +121,15 @@ export default function TuningPage() {
       <header className="flex items-baseline justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Tuning</h1>
-          <p className="mt-1 text-sm text-zinc-500">
+          <p className="mt-1 text-sm text-muted-foreground">
             Per-workspace ML tunables + model routing. Changes to duplicate bands
             and learning-gate values take effect on the very next run; other fields
             are stored but not yet consumed by the runtime pipeline (marked below).
           </p>
         </div>
-        <div className="text-right text-xs text-zinc-500">
+        <div className="text-right text-xs text-muted-foreground">
           {initial.isDefault ? (
-            <span className="rounded-full border border-zinc-300 bg-zinc-50 px-2 py-0.5">
+            <span className="rounded-full border border-input bg-muted/50 px-2 py-0.5">
               Using defaults
             </span>
           ) : (
@@ -160,7 +160,7 @@ export default function TuningPage() {
             if (fields.length === 0) return null;
             return (
               <Card key={section} className="space-y-4 p-6">
-                <h2 className="text-sm font-semibold text-zinc-700">
+                <h2 className="text-sm font-semibold text-foreground">
                   {SECTION_TITLES[section]}
                 </h2>
                 <div className="grid gap-4">
@@ -182,7 +182,7 @@ export default function TuningPage() {
                               </span>
                             )}
                           </Label>
-                          <span className="text-[11px] text-zinc-400">
+                          <span className="text-[11px] text-muted-foreground/70">
                             default {defaultValue}
                           </span>
                         </div>
@@ -199,7 +199,7 @@ export default function TuningPage() {
                             if (Number.isFinite(n)) setField(key, n);
                           }}
                         />
-                        <p className="text-xs text-zinc-500">{meta.description}</p>
+                        <p className="text-xs text-muted-foreground">{meta.description}</p>
                       </div>
                     );
                   })}
@@ -209,14 +209,14 @@ export default function TuningPage() {
           })}
 
           <Card className="space-y-2 p-6">
-            <h2 className="text-sm font-semibold text-zinc-700">Model routing</h2>
-            <p className="text-xs text-zinc-500">
+            <h2 className="text-sm font-semibold text-foreground">Model routing</h2>
+            <p className="text-xs text-muted-foreground">
               Persisted per workspace and recorded on every run snapshot. Runtime
               pipeline currently reads hardcoded per-stage effort levels;
               consumption is deferred to a follow-up phase.
             </p>
             <table className="w-full text-xs">
-              <thead className="border-b text-zinc-500">
+              <thead className="border-b text-muted-foreground">
                 <tr>
                   <th className="py-1 text-left font-medium">Stage</th>
                   <th className="py-1 text-left font-medium">Deployment</th>
@@ -249,8 +249,8 @@ export default function TuningPage() {
 
         <aside className="space-y-4">
           <Card className="space-y-3 p-6">
-            <h3 className="text-sm font-semibold text-zinc-700">Preview & save</h3>
-            <p className="text-xs text-zinc-500">
+            <h3 className="text-sm font-semibold text-foreground">Preview & save</h3>
+            <p className="text-xs text-muted-foreground">
               Preview replays the last 10 completed runs against the current form
               values, showing how duplicate classifications would shift. Save then
               persists the values for future runs.
@@ -269,7 +269,7 @@ export default function TuningPage() {
                 </Button>
               </div>
             ) : (
-              <p className="text-xs text-zinc-400">Owners can preview and save.</p>
+              <p className="text-xs text-muted-foreground/70">Owners can preview and save.</p>
             )}
           </Card>
         </aside>
@@ -300,21 +300,21 @@ function PreviewSheet({
           <SheetTitle>Preview</SheetTitle>
         </SheetHeader>
         {!preview ? (
-          <div className="p-6 text-sm text-zinc-500">Loading…</div>
+          <div className="p-6 text-sm text-muted-foreground">Loading…</div>
         ) : (
           <div className="space-y-6 overflow-y-auto p-6 text-sm">
             <section>
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Learning gate
               </h4>
               <div className="grid grid-cols-2 gap-3 rounded-md border p-3 text-xs">
                 <div>
-                  <div className="text-zinc-500">Baseline</div>
+                  <div className="text-muted-foreground">Baseline</div>
                   <div>Gating: {preview.gate.baseline.patternsGating}</div>
                   <div>Near-gate: {preview.gate.baseline.patternsNearGate}</div>
                 </div>
                 <div>
-                  <div className="text-zinc-500">Candidate</div>
+                  <div className="text-muted-foreground">Candidate</div>
                   <div>Gating: {preview.gate.candidate.patternsGating}</div>
                   <div>Near-gate: {preview.gate.candidate.patternsNearGate}</div>
                 </div>
@@ -322,11 +322,11 @@ function PreviewSheet({
             </section>
 
             <section>
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Duplicates delta ({preview.runs.length} runs)
               </h4>
               {preview.runs.length === 0 ? (
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-muted-foreground">
                   No completed runs in this workspace yet.
                 </p>
               ) : (
@@ -337,12 +337,12 @@ function PreviewSheet({
                         <div className="truncate font-medium">
                           {r.meetingTitle ?? "(untitled)"}
                         </div>
-                        <div className="ml-2 shrink-0 text-[10px] font-mono text-zinc-400">
+                        <div className="ml-2 shrink-0 text-[10px] font-mono text-muted-foreground/70">
                           {r.runId.slice(0, 8)}
                         </div>
                       </div>
                       {r.duplicates ? (
-                        <div className="mt-1 text-xs text-zinc-600">
+                        <div className="mt-1 text-xs text-muted-foreground">
                           Flag {r.duplicates.baseline.flag} → {r.duplicates.candidate.flag}
                           {" · "}
                           Suggest {r.duplicates.baseline.suggest} → {r.duplicates.candidate.suggest}
@@ -353,7 +353,7 @@ function PreviewSheet({
                           </span>
                         </div>
                       ) : (
-                        <div className="mt-1 text-xs italic text-zinc-400">
+                        <div className="mt-1 text-xs italic text-muted-foreground/70">
                           No per-task neighbours stored on this run — skipped.
                         </div>
                       )}
@@ -365,10 +365,10 @@ function PreviewSheet({
 
             <section>
               <details className="text-xs">
-                <summary className="cursor-pointer font-medium text-zinc-600">
+                <summary className="cursor-pointer font-medium text-muted-foreground">
                   Skipped fields ({preview.skipped.length})
                 </summary>
-                <ul className="mt-2 space-y-1 text-zinc-500">
+                <ul className="mt-2 space-y-1 text-muted-foreground">
                   {preview.skipped.map((s) => (
                     <li key={s.field}>
                       <code>{s.field}</code> — {s.reason}

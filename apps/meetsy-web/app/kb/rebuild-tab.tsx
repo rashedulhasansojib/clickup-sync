@@ -95,17 +95,17 @@ function UpdateForm({
   return (
     <Card className="space-y-6 p-6">
       <div>
-        <h2 className="text-sm font-semibold text-zinc-700">
+        <h2 className="text-sm font-semibold text-foreground">
           Rebuild the knowledge base
         </h2>
-        <p className="mt-1 text-sm text-zinc-600">
+        <p className="mt-1 text-sm text-muted-foreground">
           Adjust the spaces, sub-scope, and date range, then re-embed. The build
           runs in the background — you can leave this tab.
         </p>
       </div>
 
       <section className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
           Spaces
         </h3>
         {spacesError && spaces === null ? (
@@ -122,7 +122,7 @@ function UpdateForm({
       </section>
 
       <section className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
           Sub-scope (optional)
         </h3>
         <SubScopeChecklists
@@ -138,7 +138,7 @@ function UpdateForm({
       </section>
 
       <section className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
           Date range
         </h3>
         <RangeRadios range={range} onChange={setRange} />

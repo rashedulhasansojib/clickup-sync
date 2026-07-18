@@ -16,6 +16,7 @@ import {
   PushSection,
   ResultsSection,
 } from "./components";
+import { useReviewKeys } from "./use-review-keys";
 
 type TabKey = "overview" | "push" | "chat" | "insights";
 const TAB_KEYS: TabKey[] = ["overview", "push", "chat", "insights"];
@@ -33,6 +34,9 @@ export default function RunPage() {
   const { activeWorkspaceId } = useWorkspace();
 
   const { events, latest, done, streamError } = useRunStream(runId);
+  // v2 Phase 6 (PR-BB) — j/k keyboard traversal between task anchors on the
+  // review page. The hook self-guards against typing in inputs/textareas.
+  useReviewKeys();
 
   const [status, setStatus] = useState<RunStatus>("queued");
   const [result, setResult] = useState<ReviewResult | null>(null);
@@ -130,11 +134,11 @@ export default function RunPage() {
       <div className="space-y-8">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Analysis
           </h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            Run <code className="text-zinc-400">{runId}</code> · status{" "}
+          <p className="mt-1 text-sm text-muted-foreground">
+            Run <code className="text-muted-foreground/70">{runId}</code> · status{" "}
             <StatusPill status={status} />
           </p>
         </div>
@@ -165,7 +169,7 @@ export default function RunPage() {
           {error && !result && <ErrorBanner message={error} />}
 
           {isWorking && !result && (
-            <div className="flex items-center gap-2 text-sm text-zinc-500">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner
                 label={
                   fetching
@@ -228,8 +232,8 @@ export default function RunPage() {
                 forceMount
                 className="data-[state=inactive]:hidden"
               >
-                <Card className="p-6 text-sm text-zinc-600">
-                  <h3 className="text-base font-medium text-zinc-900">
+                <Card className="p-6 text-sm text-muted-foreground">
+                  <h3 className="text-base font-medium text-foreground">
                     Where&apos;s the evidence?
                   </h3>
                   <p className="mt-1">
@@ -252,7 +256,7 @@ export default function RunPage() {
 
 function StatusPill({ status }: { status: RunStatus }) {
   const styles: Record<RunStatus, string> = {
-    queued: "bg-zinc-100 text-zinc-600",
+    queued: "bg-muted text-muted-foreground",
     running: "bg-blue-100 text-blue-700",
     completed: "bg-green-100 text-green-700",
     failed: "bg-red-100 text-red-700",

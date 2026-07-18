@@ -15,13 +15,13 @@ export function RunRow({ item }: { item: RunListItem }) {
   return (
     <Link
       href={`/runs/${encodeURIComponent(item.id)}`}
-      className="group flex items-center justify-between gap-4 rounded-lg border border-zinc-200 bg-white px-4 py-3 transition-colors hover:border-zinc-300 hover:bg-zinc-50"
+      className="group flex items-center justify-between gap-4 rounded-lg border border-border bg-card px-4 py-3 transition-colors hover:border-input hover:bg-muted/50"
     >
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-zinc-900 group-hover:text-zinc-950">
+        <div className="truncate text-sm font-medium text-foreground group-hover:text-foreground">
           {item.meetingTitle || "Untitled meeting"}
         </div>
-        <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500">
+        <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
           <span>{dateLabel}</span>
           {item.taskCount != null && (
             <>
@@ -43,7 +43,7 @@ export function RunRow({ item }: { item: RunListItem }) {
 
 function StatusPill({ status }: { status: RunStatus }) {
   const styles: Record<RunStatus, string> = {
-    queued: "bg-zinc-100 text-zinc-600",
+    queued: "bg-muted text-muted-foreground",
     running: "bg-blue-100 text-blue-700",
     completed: "bg-green-100 text-green-700",
     failed: "bg-red-100 text-red-700",
@@ -62,8 +62,8 @@ function StatusPill({ status }: { status: RunStatus }) {
 
 function PushPill({ pushStatus }: { pushStatus: RunListPushStatus }) {
   const styles: Record<RunListPushStatus, string> = {
-    not_configured: "bg-zinc-100 text-zinc-500",
-    not_pushed: "bg-zinc-100 text-zinc-600",
+    not_configured: "bg-muted text-muted-foreground",
+    not_pushed: "bg-muted text-muted-foreground",
     partial: "bg-amber-100 text-amber-700",
     pushed: "bg-emerald-100 text-emerald-700",
   };

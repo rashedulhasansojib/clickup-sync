@@ -134,7 +134,7 @@ function KbShell({ ws, canWrite }: { ws: string; canWrite: boolean }) {
               <OverviewTab ws={ws} status={status} />
             ) : (
               <Card className="p-6">
-                <p className="text-sm text-zinc-500">
+                <p className="text-sm text-muted-foreground">
                   Overview appears once the knowledge base is ready.
                 </p>
               </Card>
@@ -146,7 +146,7 @@ function KbShell({ ws, canWrite }: { ws: string; canWrite: boolean }) {
               <TasksTab ws={ws} />
             ) : (
               <Card className="p-6">
-                <p className="text-sm text-zinc-500">
+                <p className="text-sm text-muted-foreground">
                   Tasks appear here once onboarding embeds them.
                 </p>
               </Card>
@@ -162,7 +162,7 @@ function KbShell({ ws, canWrite }: { ws: string; canWrite: boolean }) {
               <SearchTab ws={ws} />
             ) : (
               <Card className="p-6">
-                <p className="text-sm text-zinc-500">
+                <p className="text-sm text-muted-foreground">
                   Search is available once the knowledge base is ready.
                 </p>
               </Card>
@@ -183,10 +183,10 @@ function KbShell({ ws, canWrite }: { ws: string; canWrite: boolean }) {
 function PageHeader() {
   return (
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+      <h1 className="text-2xl font-semibold tracking-tight text-foreground">
         Knowledge base
       </h1>
-      <p className="mt-1 text-sm text-zinc-500">
+      <p className="mt-1 text-sm text-muted-foreground">
         Browse embedded tasks and documents, search the knowledge base, or
         rebuild with a different scope.
       </p>
@@ -225,10 +225,10 @@ function IdleBanner({
     return (
       <Card className="space-y-4 p-6">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-700">
+          <h2 className="text-sm font-semibold text-foreground">
             Building the knowledge base…
           </h2>
-          <p className="mt-1 text-sm text-zinc-600">{label}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{label}</p>
         </div>
         <KbBuildPanel
           ws={ws}

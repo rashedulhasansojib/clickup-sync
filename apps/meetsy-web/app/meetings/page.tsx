@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, X } from "lucide-react";
+import { ListChecks, Search, X } from "lucide-react";
 import type { RunListView, RunStatus } from "@ma/shared";
 import { api, ApiError } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
-import { Button, Card, ErrorBanner, Spinner } from "@/app/ui";
+import { Button, ErrorBanner, Spinner } from "@/app/ui";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import { RunRow } from "@/components/runs/run-list";
 import { cn } from "@/lib/utils";
 
@@ -156,10 +158,10 @@ function MeetingsInner() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Meetings
           </h1>
-          <p className="mt-1 text-sm text-zinc-500">
+          <p className="mt-1 text-sm text-muted-foreground">
             Every analysis run in this workspace, newest first.
           </p>
         </div>
@@ -178,8 +180,8 @@ function MeetingsInner() {
               className={cn(
                 "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors",
                 status === f.value
-                  ? "border-zinc-900 bg-zinc-900 text-white"
-                  : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 hover:text-zinc-900",
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card text-muted-foreground hover:border-input hover:text-foreground",
               )}
             >
               {f.label}
@@ -189,7 +191,7 @@ function MeetingsInner() {
 
         <div className="relative w-full sm:w-72">
           <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
             aria-hidden
           />
           <input
@@ -198,7 +200,7 @@ function MeetingsInner() {
             onChange={(e) => setQInput(e.target.value)}
             placeholder="Search transcripts…"
             aria-label="Search meetings"
-            className="w-full rounded-md border border-zinc-300 bg-white py-1.5 pl-9 pr-8 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            className="w-full rounded-md border border-input bg-card py-1.5 pl-9 pr-8 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring"
           />
           {qInput && (
             <button
@@ -208,7 +210,7 @@ function MeetingsInner() {
                 commitQuery("");
               }}
               aria-label="Clear search"
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground/70 hover:bg-muted hover:text-muted-foreground"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -217,38 +219,34 @@ function MeetingsInner() {
       </div>
 
       {loading && !runs && (
-        <Card className="flex items-center justify-center p-8">
-          <Spinner label={q ? "Searching…" : "Loading runs…"} />
-        </Card>
+        <div className="space-y-2" aria-hidden>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-16 w-full rounded-xl" />
+          ))}
+        </div>
       )}
 
       {error && <ErrorBanner message={error} />}
 
       {!loading && !error && items.length === 0 && (
-        <Card className="p-8 text-center">
-          <h3 className="text-base font-medium text-zinc-900">
-            {q ? "No runs match" : "No runs match"}
-          </h3>
-          <p className="mt-1 text-sm text-zinc-500">
-            {q ? (
-              <>
-                Nothing found for <span className="font-medium">“{q}”</span>.
-                {" "}
-                <button
-                  type="button"
-                  onClick={() => commitQuery("")}
-                  className="text-zinc-700 underline hover:text-zinc-900"
-                >
-                  Clear search
-                </button>
-              </>
-            ) : status === "all" ? (
-              "Upload a transcript to get started."
-            ) : (
-              `No runs with status “${status}.” Clear the filter to see everything.`
-            )}
-          </p>
-        </Card>
+        <EmptyState
+          icon={q ? Search : ListChecks}
+          title={q ? `No runs match “${q}”` : "No runs match"}
+          description={
+            q
+              ? "Try a shorter search, or clear it to see everything."
+              : status === "all"
+                ? "Upload a transcript to get started."
+                : `No runs with status “${status}.” Clear the filter to see everything.`
+          }
+          action={
+            q
+              ? { label: "Clear search", onClick: () => commitQuery("") }
+              : status !== "all"
+                ? undefined
+                : { label: "Analyze a meeting", href: "/new" }
+          }
+        />
       )}
 
       {items.length > 0 && (
@@ -265,7 +263,7 @@ function MeetingsInner() {
       )}
 
       {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-zinc-500">
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
           <Button
             variant="secondary"
             disabled={page <= 1}

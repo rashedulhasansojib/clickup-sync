@@ -78,8 +78,8 @@ export function PipelineStepper({
   return (
     <Card className="p-6">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-zinc-700">Pipeline progress</h2>
-        <span className="text-xs text-zinc-400">
+        <h2 className="text-sm font-semibold text-foreground">Pipeline progress</h2>
+        <span className="text-xs text-muted-foreground/70">
           {Math.round(progress * 100)}%
         </span>
       </div>
@@ -90,10 +90,10 @@ export function PipelineStepper({
         aria-valuenow={Math.round(progress * 100)}
         aria-valuemin={0}
         aria-valuemax={100}
-        className="mb-5 h-2 w-full overflow-hidden rounded-full bg-zinc-100"
+        className="mb-5 h-2 w-full overflow-hidden rounded-full bg-muted"
       >
         <div
-          className="h-full rounded-full bg-zinc-900 transition-all duration-500"
+          className="h-full rounded-full bg-primary transition-all duration-500"
           style={{ width: `${Math.min(100, Math.round(progress * 100))}%` }}
         />
       </div>
@@ -111,17 +111,17 @@ export function PipelineStepper({
                 <div className="flex items-center gap-2">
                   <span
                     className={`text-sm font-medium ${
-                      state === "pending" ? "text-zinc-400" : "text-zinc-800"
+                      state === "pending" ? "text-muted-foreground/70" : "text-foreground"
                     }`}
                   >
                     {label}
                   </span>
                   {state === "active" && (
-                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600" />
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-input border-t-foreground" />
                   )}
                 </div>
                 {latestForStage && (
-                  <p className="truncate text-xs text-zinc-500">
+                  <p className="truncate text-xs text-muted-foreground">
                     {latestForStage.message}
                   </p>
                 )}
@@ -136,9 +136,9 @@ export function PipelineStepper({
 
 function StepDot({ state }: { state: StepState }) {
   const styles: Record<StepState, string> = {
-    pending: "border-zinc-300 bg-white text-transparent",
-    active: "border-zinc-600 bg-white text-zinc-600",
-    done: "border-zinc-900 bg-zinc-900 text-white",
+    pending: "border-input bg-card text-transparent",
+    active: "border-input bg-card text-muted-foreground",
+    done: "border-primary bg-primary text-primary-foreground",
     failed: "border-red-500 bg-red-500 text-white",
   };
   return (
@@ -251,8 +251,8 @@ export function ResultsSection({
       <ResultView result={result} />
 
       <Card className="space-y-3 p-5">
-        <p className="text-xs leading-relaxed text-zinc-500">
-          <span className="font-medium text-zinc-700">How feedback works:</span>{" "}
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          <span className="font-medium text-foreground">How feedback works:</span>{" "}
           👍 = correct · 👎 with a comment = we revise it · 👎 with no comment =
           it&apos;s removed · no vote = accepted by default.
         </p>
@@ -261,7 +261,7 @@ export function ResultsSection({
             {submitting ? <Spinner label="Submitting…" /> : "Submit feedback"}
           </Button>
           {items.length > 0 && !submitting && (
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-muted-foreground">
               {items.length} task{items.length === 1 ? "" : "s"} marked
             </span>
           )}
@@ -282,11 +282,11 @@ export function ResultView({ result }: { result: ReviewResult }) {
   return (
     <div className="space-y-8">
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Overview
         </h2>
         <Card className="p-5">
-          <p className="text-sm leading-relaxed text-zinc-700">
+          <p className="text-sm leading-relaxed text-foreground">
             {result.overview}
           </p>
         </Card>
@@ -296,11 +296,11 @@ export function ResultView({ result }: { result: ReviewResult }) {
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Tasks by person
         </h2>
         {result.people.length === 0 && (
-          <p className="text-sm text-zinc-400">No assigned tasks.</p>
+          <p className="text-sm text-muted-foreground/70">No assigned tasks.</p>
         )}
         {result.people.map((pt) => (
           <PersonSection
@@ -317,7 +317,7 @@ export function ResultView({ result }: { result: ReviewResult }) {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-600">
             Unassigned
           </h2>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-muted-foreground">
             Tasks the pipeline couldn&apos;t confidently assign to anyone.
           </p>
           <div className="space-y-3">
@@ -349,19 +349,19 @@ function PersonSection({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-200 text-xs font-semibold text-zinc-700">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
           {participant.displayName.charAt(0).toUpperCase()}
         </span>
-        <span className="font-medium text-zinc-900">
+        <span className="font-medium text-foreground">
           {participant.displayName}
         </span>
-        <span className="text-xs text-zinc-400">
+        <span className="text-xs text-muted-foreground/70">
           {tasks.length} task{tasks.length === 1 ? "" : "s"}
         </span>
       </div>
-      <div className="space-y-3 pl-9">
+      <div className="space-y-3 pl-4 md:pl-9">
         {tasks.length === 0 ? (
-          <p className="text-sm text-zinc-400">No tasks.</p>
+          <p className="text-sm text-muted-foreground/70">No tasks.</p>
         ) : (
           tasks.map((t) => (
             <TaskCard
@@ -386,38 +386,46 @@ function TaskCard({
   signals?: TaskSignalData;
   workspaceId: string | null;
 }) {
+  // v2 Phase 6 (PR-BB) — data-task-anchor + tabIndex={-1} make this card a
+  // programmatic focus target for the j/k keyboard hook. Tab still traverses
+  // this card's own interactive children (buttons, textareas) normally.
   return (
+    <div
+      data-task-anchor={task.id}
+      tabIndex={-1}
+      className="scroll-mt-24 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
     <Card className="p-4">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="font-medium text-zinc-900">{task.title}</h3>
+        <h3 className="font-medium text-foreground break-words">{task.title}</h3>
         <PriorityBadge priority={task.priority} />
       </div>
 
       {signals && <TaskSignals signals={signals} workspaceId={workspaceId} />}
 
       {task.description && (
-        <p className="mt-1.5 text-sm leading-relaxed text-zinc-600">
+        <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
           {task.description}
         </p>
       )}
 
       {(task.dueDate || task.estimate || task.estimateHours !== null) && (
-        <div className="mt-3 flex flex-wrap gap-4 text-xs text-zinc-500">
+        <div className="mt-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
           {task.dueDate && (
             <span>
-              <span className="font-medium text-zinc-400">Due: </span>
+              <span className="font-medium text-muted-foreground/70">Due: </span>
               {task.dueDate}
             </span>
           )}
           {task.estimateHours !== null && (
             <span>
-              <span className="font-medium text-zinc-400">Est: </span>
+              <span className="font-medium text-muted-foreground/70">Est: </span>
               {task.estimateHours}h
             </span>
           )}
           {task.estimate && (
             <span>
-              <span className="font-medium text-zinc-400">Estimate: </span>
+              <span className="font-medium text-muted-foreground/70">Estimate: </span>
               {task.estimate}
             </span>
           )}
@@ -451,16 +459,17 @@ function TaskCard({
 
       <TaskFeedbackControl task={task} />
     </Card>
+    </div>
   );
 }
 
 function DetailList({ label, items }: { label: string; items: string[] }) {
   return (
     <div className="mt-3">
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
+      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
         {label}
       </p>
-      <ul className="list-disc space-y-0.5 pl-5 text-sm text-zinc-600">
+      <ul className="list-disc space-y-0.5 pl-5 text-sm text-muted-foreground">
         {items.map((item, i) => (
           <li key={i}>{item}</li>
         ))}
@@ -472,12 +481,12 @@ function DetailList({ label, items }: { label: string; items: string[] }) {
 function EvidenceDisclosure({ task }: { task: Task }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="mt-3 border-t border-zinc-100 pt-3">
+    <div className="mt-3 border-t border-border pt-3">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex items-center gap-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-800"
+        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
       >
         <span className={`transition-transform ${open ? "rotate-90" : ""}`}>
           ▸
@@ -489,13 +498,13 @@ function EvidenceDisclosure({ task }: { task: Task }) {
           {task.evidence.map((ev, i) => (
             <li
               key={i}
-              className="rounded-lg border-l-2 border-zinc-300 bg-zinc-50 px-3 py-2"
+              className="rounded-lg border-l-2 border-input bg-muted/50 px-3 py-2"
             >
-              <p className="text-sm italic text-zinc-700">
+              <p className="text-sm italic text-foreground">
                 &ldquo;{ev.quote}&rdquo;
               </p>
               {(ev.speaker || ev.timestamp) && (
-                <p className="mt-1 text-xs text-zinc-400">
+                <p className="mt-1 text-xs text-muted-foreground/70">
                   {ev.speaker ?? "Unknown"}
                   {ev.timestamp ? ` · ${ev.timestamp}` : ""}
                 </p>
@@ -517,9 +526,9 @@ function TaskFeedbackControl({ task }: { task: Task }) {
   const vote = fb?.vote;
 
   return (
-    <div className="mt-3 border-t border-zinc-100 pt-3">
+    <div className="mt-3 border-t border-border pt-3">
       <div className="flex items-center gap-2">
-        <span className="text-xs text-zinc-400">Helpful?</span>
+        <span className="text-xs text-muted-foreground/70">Helpful?</span>
         <button
           type="button"
           disabled={disabled}
@@ -529,7 +538,7 @@ function TaskFeedbackControl({ task }: { task: Task }) {
           className={`rounded-md border px-2 py-0.5 text-xs transition-colors disabled:opacity-50 ${
             vote === "up"
               ? "border-green-300 bg-green-50 text-green-700"
-              : "border-zinc-200 text-zinc-500 hover:bg-zinc-50"
+              : "border-border text-muted-foreground hover:bg-muted/50"
           }`}
         >
           👍
@@ -543,7 +552,7 @@ function TaskFeedbackControl({ task }: { task: Task }) {
           className={`rounded-md border px-2 py-0.5 text-xs transition-colors disabled:opacity-50 ${
             vote === "down"
               ? "border-red-300 bg-red-50 text-red-700"
-              : "border-zinc-200 text-zinc-500 hover:bg-zinc-50"
+              : "border-border text-muted-foreground hover:bg-muted/50"
           }`}
         >
           👎
@@ -557,7 +566,7 @@ function TaskFeedbackControl({ task }: { task: Task }) {
           onChange={(e) => setComment(task.id, e.target.value)}
           placeholder="What's wrong? (optional — we'll fix it)"
           rows={2}
-          className="mt-2 w-full resize-y rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none disabled:opacity-50"
+          className="mt-2 w-full resize-y rounded-lg border border-border px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 focus:border-ring focus:outline-none disabled:opacity-50"
         />
       )}
     </div>
@@ -635,11 +644,11 @@ export function ChatPanel({
   return (
     <Card className="flex flex-col p-5">
       <div className="mb-1 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-zinc-700">
+        <h2 className="text-sm font-semibold text-foreground">
           Recover missed tasks
         </h2>
       </div>
-      <p className="mb-3 text-xs text-zinc-500">
+      <p className="mb-3 text-xs text-muted-foreground">
         Notice a missing task? Tell me, e.g. &ldquo;You missed the task about
         the database migration.&rdquo;
       </p>
@@ -650,7 +659,7 @@ export function ChatPanel({
         aria-live="polite"
       >
         {messages.length === 0 && !sending && (
-          <p className="text-sm text-zinc-400">No messages yet.</p>
+          <p className="text-sm text-muted-foreground/70">No messages yet.</p>
         )}
         {messages.map((m) => (
           <div
@@ -660,8 +669,8 @@ export function ChatPanel({
             <div
               className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
                 m.role === "user"
-                  ? "bg-zinc-900 text-white"
-                  : "border border-zinc-200 bg-zinc-50 text-zinc-700"
+                  ? "bg-primary text-primary-foreground"
+                  : "border border-border bg-muted/50 text-foreground"
               }`}
             >
               {m.content}
@@ -670,7 +679,7 @@ export function ChatPanel({
         ))}
         {sending && (
           <div className="flex justify-start">
-            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+            <div className="rounded-lg border border-border bg-muted/50 px-3 py-2">
               <Spinner label="thinking…" />
             </div>
           </div>
@@ -692,7 +701,7 @@ export function ChatPanel({
           disabled={sending}
           onChange={(e) => setInput(e.target.value)}
           placeholder="e.g. You missed the task about the database migration."
-          className="flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none disabled:opacity-50"
+          className="flex-1 rounded-lg border border-border px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 focus:border-ring focus:outline-none disabled:opacity-50"
         />
         <Button type="submit" disabled={sending || input.trim().length === 0}>
           Send
@@ -869,14 +878,14 @@ export function PushSection({
   if (!status.config) {
     return (
       <Card className="space-y-2 p-5">
-        <h2 className="text-sm font-semibold text-zinc-700">Push to ClickUp</h2>
-        <p className="text-sm text-zinc-600">
+        <h2 className="text-sm font-semibold text-foreground">Push to ClickUp</h2>
+        <p className="text-sm text-muted-foreground">
           Configure ClickUp push settings (target list + assignable members) to
           enable pushing tasks.
         </p>
         <Link
           href="/settings/push"
-          className="text-sm font-medium text-zinc-900 underline underline-offset-2 hover:text-zinc-700"
+          className="text-sm font-medium text-foreground underline underline-offset-2 hover:text-foreground"
         >
           Open push settings →
         </Link>
@@ -998,12 +1007,12 @@ export function PushSection({
     <Card className="space-y-4 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-700">
+          <h2 className="text-sm font-semibold text-foreground">
             Push to ClickUp
           </h2>
-          <p className="mt-0.5 text-xs text-zinc-500">
+          <p className="mt-0.5 text-xs text-muted-foreground">
             Target list:{" "}
-            <span className="font-medium text-zinc-600">
+            <span className="font-medium text-muted-foreground">
               {config.targetListName ?? config.targetListId}
             </span>
           </p>
@@ -1080,16 +1089,16 @@ function LearningPanel({ workspaceId }: { workspaceId: string }) {
   const pct = (n: number | null) => (n == null ? "—" : `${Math.round(n * 100)}%`);
 
   return (
-    <details className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 text-sm">
-      <summary className="cursor-pointer font-medium text-zinc-700">
+    <details className="rounded-lg border border-border bg-muted/50/60 p-3 text-sm">
+      <summary className="cursor-pointer font-medium text-foreground">
         What we&apos;ve learned
-        <span className="ml-1 font-normal text-zinc-400">({data.totalOverrides} past push{data.totalOverrides === 1 ? "" : "es"})</span>
+        <span className="ml-1 font-normal text-muted-foreground/70">({data.totalOverrides} past push{data.totalOverrides === 1 ? "" : "es"})</span>
       </summary>
       <div className="mt-3 space-y-3">
         {data.fields.map((f) => (
           <div key={f.field}>
-            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">{f.field}</p>
-            <p className="mt-0.5 text-xs text-zinc-500">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{f.field}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
               Raw model accuracy proxy: {pct(f.rawOverrideRate)} changed (n={f.rawSample}) · Nudge acceptance: {pct(f.nudgeAcceptanceRate)} (n={f.nudgeSample})
               {f.unresolved > 0 && <span className="text-amber-600"> · {f.unresolved} unresolved</span>}
             </p>
@@ -1098,14 +1107,14 @@ function LearningPanel({ workspaceId }: { workspaceId: string }) {
                 {f.corrections
                   .filter((c) => c.gatePassed)
                   .map((c, i) => (
-                    <li key={i} className="text-xs text-zinc-600">
-                      <span className="text-zinc-400">{c.predicted}</span> → <span className="font-medium">{c.confirmed}</span>
-                      <span className="text-zinc-400"> ({c.count}×, {Math.round(c.agreement * 100)}% agree)</span>
+                    <li key={i} className="text-xs text-muted-foreground">
+                      <span className="text-muted-foreground/70">{c.predicted}</span> → <span className="font-medium">{c.confirmed}</span>
+                      <span className="text-muted-foreground/70"> ({c.count}×, {Math.round(c.agreement * 100)}% agree)</span>
                     </li>
                   ))}
               </ul>
             ) : (
-              <p className="mt-1 text-xs text-zinc-400">Not enough consistent corrections to adjust yet.</p>
+              <p className="mt-1 text-xs text-muted-foreground/70">Not enough consistent corrections to adjust yet.</p>
             )}
           </div>
         ))}
@@ -1137,7 +1146,7 @@ function TaskPushRow({
   if (pushed) {
     return (
       <div className="flex items-center justify-between gap-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
-        <span className="min-w-0 truncate text-sm font-medium text-zinc-800">
+        <span className="min-w-0 truncate text-sm font-medium text-foreground">
           <span className="mr-1.5 text-green-600">✓</span>
           {task.title}
         </span>
@@ -1160,24 +1169,24 @@ function TaskPushRow({
   if (!edit) return null;
 
   return (
-    <div className="rounded-lg border border-zinc-200 px-3 py-2.5">
+    <div className="rounded-lg border border-border px-3 py-2.5">
       <div className="flex items-start gap-2">
         <input
           type="checkbox"
           checked={edit.include}
           disabled={disabled}
           onChange={(e) => onChange({ include: e.target.checked })}
-          className="mt-1 h-4 w-4 rounded border-zinc-300"
+          className="mt-1 h-4 w-4 rounded border-input"
           aria-label={`Include "${task.title}" in push`}
         />
         <div className="min-w-0 flex-1 space-y-2">
-          <p className="truncate text-sm font-medium text-zinc-800">
+          <p className="truncate text-sm font-medium text-foreground">
             {task.title}
           </p>
 
           <div className="flex flex-wrap gap-2">
             {/* Assignee — from the allowlist only. */}
-            <label className="flex flex-col text-[11px] text-zinc-400">
+            <label className="flex flex-col text-[11px] text-muted-foreground/70">
               Assignee
               <select
                 value={edit.clickupUserId ?? ""}
@@ -1185,7 +1194,7 @@ function TaskPushRow({
                 onChange={(e) =>
                   onChange({ clickupUserId: e.target.value || null })
                 }
-                className="mt-0.5 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 focus:border-zinc-400 focus:outline-none"
+                className="mt-0.5 rounded-md border border-input px-2 py-1 text-sm text-foreground focus:border-ring focus:outline-none"
               >
                 <option value="">Unassigned</option>
                 {members.map((m) => (
@@ -1197,7 +1206,7 @@ function TaskPushRow({
             </label>
 
             {/* Priority. */}
-            <label className="flex flex-col text-[11px] text-zinc-400">
+            <label className="flex flex-col text-[11px] text-muted-foreground/70">
               Priority
               <select
                 value={edit.priority}
@@ -1205,7 +1214,7 @@ function TaskPushRow({
                 onChange={(e) =>
                   onChange({ priority: e.target.value as TaskPriority })
                 }
-                className="mt-0.5 rounded-md border border-zinc-300 px-2 py-1 text-sm capitalize text-zinc-800 focus:border-zinc-400 focus:outline-none"
+                className="mt-0.5 rounded-md border border-input px-2 py-1 text-sm capitalize text-foreground focus:border-ring focus:outline-none"
               >
                 {PRIORITY_OPTIONS.map((p) => (
                   <option key={p} value={p} className="capitalize">
@@ -1216,27 +1225,27 @@ function TaskPushRow({
             </label>
 
             {/* Due date. */}
-            <label className="flex flex-col text-[11px] text-zinc-400">
+            <label className="flex flex-col text-[11px] text-muted-foreground/70">
               Due date
               <input
                 type="date"
                 value={edit.dueDate}
                 disabled={disabled}
                 onChange={(e) => onChange({ dueDate: e.target.value })}
-                className="mt-0.5 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 focus:border-zinc-400 focus:outline-none"
+                className="mt-0.5 rounded-md border border-input px-2 py-1 text-sm text-foreground focus:border-ring focus:outline-none"
               />
             </label>
 
             {/* Sprint = the target list. A select when refresh-fields has run; a
                 free-text list-id override otherwise. (Phase 2c.3) */}
-            <label className="flex flex-col text-[11px] text-zinc-400">
+            <label className="flex flex-col text-[11px] text-muted-foreground/70">
               Sprint / list
               {config.sprintLists && config.sprintLists.length > 0 ? (
                 <select
                   value={edit.listOverride}
                   disabled={disabled}
                   onChange={(e) => onChange({ listOverride: e.target.value })}
-                  className="mt-0.5 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 focus:border-zinc-400 focus:outline-none"
+                  className="mt-0.5 rounded-md border border-input px-2 py-1 text-sm text-foreground focus:border-ring focus:outline-none"
                 >
                   <option value="">Default ({config.targetListName ?? config.targetListId})</option>
                   {config.sprintLists.map((l) => (
@@ -1250,20 +1259,20 @@ function TaskPushRow({
                   disabled={disabled}
                   placeholder="default list"
                   onChange={(e) => onChange({ listOverride: e.target.value })}
-                  className="mt-0.5 w-32 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 placeholder:text-zinc-300 focus:border-zinc-400 focus:outline-none"
+                  className="mt-0.5 w-32 rounded-md border border-input px-2 py-1 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none"
                 />
               )}
             </label>
 
             {/* Client dropdown (Phase 2c.3) — only when a client field is configured. */}
             {config.clientFieldId && (config.clientOptions?.length ?? 0) > 0 && (
-              <label className="flex flex-col text-[11px] text-zinc-400">
+              <label className="flex flex-col text-[11px] text-muted-foreground/70">
                 {config.clientFieldName ?? "Client"}
                 <select
                   value={edit.clientOptionId}
                   disabled={disabled}
                   onChange={(e) => onChange({ clientOptionId: e.target.value })}
-                  className="mt-0.5 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 focus:border-zinc-400 focus:outline-none"
+                  className="mt-0.5 rounded-md border border-input px-2 py-1 text-sm text-foreground focus:border-ring focus:outline-none"
                 >
                   <option value="">—</option>
                   {config.clientOptions!.map((o) => (
@@ -1275,7 +1284,7 @@ function TaskPushRow({
 
             {/* Points (Phase 2c.3) — only when enabled. */}
             {config.pointsEnabled && (
-              <label className="flex flex-col text-[11px] text-zinc-400">
+              <label className="flex flex-col text-[11px] text-muted-foreground/70">
                 Points
                 <input
                   type="number"
@@ -1284,7 +1293,7 @@ function TaskPushRow({
                   disabled={disabled}
                   placeholder="—"
                   onChange={(e) => onChange({ points: e.target.value })}
-                  className="mt-0.5 w-20 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 placeholder:text-zinc-300 focus:border-zinc-400 focus:outline-none"
+                  className="mt-0.5 w-20 rounded-md border border-input px-2 py-1 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none"
                 />
               </label>
             )}
@@ -1294,7 +1303,7 @@ function TaskPushRow({
           {result && result.status !== "pushed" && (
             <p
               className={`text-xs ${
-                result.status === "failed" ? "text-red-600" : "text-zinc-500"
+                result.status === "failed" ? "text-red-600" : "text-muted-foreground"
               }`}
             >
               {result.status === "failed"

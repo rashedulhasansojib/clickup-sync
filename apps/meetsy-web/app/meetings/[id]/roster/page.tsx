@@ -197,10 +197,10 @@ export default function RosterPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           Confirm the participants
         </h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <p className="mt-1 text-sm text-muted-foreground">
           Confirm the participants before we assign tasks. Edit names, remove
           anyone who isn&apos;t a real attendee, or add someone the extractor
           missed.
@@ -216,9 +216,9 @@ export default function RosterPage() {
       {error && <ErrorBanner message={error} />}
 
       <Card>
-        <ul className="divide-y divide-zinc-100">
+        <ul className="divide-y divide-border">
           {roster.length === 0 && (
-            <li className="px-6 py-10 text-center text-sm text-zinc-400">
+            <li className="px-6 py-10 text-center text-sm text-muted-foreground/70">
               No participants yet. Add one to continue.
             </li>
           )}
@@ -237,11 +237,11 @@ export default function RosterPage() {
                   value={p.displayName}
                   onChange={(e) => updateName(p.id, e.target.value)}
                   disabled={submitting}
-                  className="w-full rounded-lg border border-zinc-300 px-3 py-1.5 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                  className="w-full rounded-lg border border-input px-3 py-1.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring"
                 />
                 {p.aliases.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-xs text-zinc-400">aliases:</span>
+                    <span className="text-xs text-muted-foreground/70">aliases:</span>
                     {p.aliases.map((a, i) => (
                       <Tag key={`${p.id}-${i}`}>{a}</Tag>
                     ))}
@@ -273,7 +273,7 @@ export default function RosterPage() {
             </li>
           ))}
         </ul>
-        <div className="border-t border-zinc-100 px-6 py-4">
+        <div className="border-t border-border px-6 py-4">
           <Button
             type="button"
             variant="secondary"
@@ -332,7 +332,7 @@ function MemberSelect({
     <div className="space-y-1">
       <label
         htmlFor={`member-${participant.id}`}
-        className="flex flex-col text-[11px] text-zinc-400"
+        className="flex flex-col text-[11px] text-muted-foreground/70"
       >
         ClickUp member
         <select
@@ -340,7 +340,7 @@ function MemberSelect({
           value={participant.clickupUserId ?? ""}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value || null)}
-          className="mt-0.5 rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-800 focus:border-zinc-400 focus:outline-none"
+          className="mt-0.5 rounded-md border border-input px-2 py-1 text-sm text-foreground focus:border-ring focus:outline-none"
         >
           <option value="">Unassigned / no match</option>
           {members.map((m) => (
@@ -351,7 +351,7 @@ function MemberSelect({
         </select>
       </label>
       {showHint && selected && (
-        <p className="text-xs text-zinc-400">
+        <p className="text-xs text-muted-foreground/70">
           transcript: &ldquo;{participant.displayName}&rdquo; → ClickUp: &ldquo;
           {selected.name}&rdquo;
         </p>

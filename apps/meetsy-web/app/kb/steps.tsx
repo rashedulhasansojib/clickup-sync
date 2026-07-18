@@ -128,19 +128,19 @@ export function SpacesChecklist({
       {spaces.map((space) => (
         <label
           key={space.spaceId}
-          className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+          className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2 py-2 text-sm text-foreground hover:bg-muted/50"
         >
           <span className="flex items-center gap-2">
             <input
               type="checkbox"
               checked={selected.has(space.spaceId)}
               onChange={() => toggle(space.spaceId)}
-              className="h-4 w-4 rounded border-zinc-300"
+              className="h-4 w-4 rounded border-input"
             />
             <span className="font-medium">{space.name}</span>
             {!space.enabled && <Tag>not enabled</Tag>}
           </span>
-          <span className="text-xs text-zinc-400">
+          <span className="text-xs text-muted-foreground/70">
             {space.taskCount > 0
               ? `${space.taskCount.toLocaleString()} tasks mirrored`
               : "0 — not synced yet"}
@@ -229,7 +229,7 @@ export function SubScopeChecklists({
       {error && <ErrorBanner message={error} />}
 
       {nothingToNarrow ? (
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-muted-foreground">
           No folders, lists, or clients found to narrow by. The whole selection
           will be included.
         </p>
@@ -281,20 +281,20 @@ export function ChecklistGroup({
 }) {
   return (
     <div className="space-y-1.5">
-      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
         {title}
       </p>
       <div className="grid gap-1.5 sm:grid-cols-2">
         {items.map((item) => (
           <label
             key={item.id}
-            className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50"
+            className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-foreground hover:bg-muted/50"
           >
             <input
               type="checkbox"
               checked={selected.has(item.id)}
               onChange={() => onToggle(item.id)}
-              className="h-4 w-4 rounded border-zinc-300"
+              className="h-4 w-4 rounded border-input"
             />
             <span className="min-w-0 truncate">{item.label}</span>
           </label>
@@ -327,14 +327,14 @@ export function RangeRadios({
       {RANGE_OPTIONS.map((opt) => (
         <label
           key={opt.value}
-          className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50"
+          className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-foreground hover:bg-muted/50"
         >
           <input
             type="radio"
             name="kb-range"
             checked={range === opt.value}
             onChange={() => onChange(opt.value)}
-            className="h-4 w-4 border-zinc-300"
+            className="h-4 w-4 border-input"
           />
           <span>{opt.label}</span>
         </label>
@@ -425,10 +425,10 @@ export function KbBuildPanel({
     return (
       <Card className="space-y-4 p-6">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-700">
+          <h2 className="text-sm font-semibold text-foreground">
             Build the knowledge base
           </h2>
-          <p className="mt-1 text-sm text-zinc-600">
+          <p className="mt-1 text-sm text-muted-foreground">
             We&apos;ll read the selected tasks and embed them. This can take a
             few minutes for large workspaces — you can leave this page; the build
             keeps running.
@@ -445,22 +445,22 @@ export function KbBuildPanel({
   return (
     <Card className="space-y-4 p-6">
       <div>
-        <h2 className="text-sm font-semibold text-zinc-700">
+        <h2 className="text-sm font-semibold text-foreground">
           Building the knowledge base…
         </h2>
-        <p className="mt-1 text-sm text-zinc-600">
+        <p className="mt-1 text-sm text-muted-foreground">
           {latest?.message ?? "Starting up…"}
         </p>
       </div>
 
       <div className="space-y-1.5">
-        <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-100">
+        <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
           <div
-            className="h-full rounded-full bg-zinc-900 transition-all"
+            className="h-full rounded-full bg-primary transition-all"
             style={{ width: `${pct}%` }}
           />
         </div>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-muted-foreground">
           {total > 0
             ? `${embedded.toLocaleString()} / ${total.toLocaleString()} embedded (${pct}%)`
             : "Counting tasks…"}
@@ -483,7 +483,7 @@ export function KbBuildPanel({
           </StepActions>
         </div>
       ) : (
-        <div className="flex items-center gap-2 text-sm text-zinc-500">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner label={confirming ? "Confirming…" : "Embedding tasks…"} />
         </div>
       )}

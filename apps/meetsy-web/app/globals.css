@@ -94,3 +94,21 @@ body {
     Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/*
+ * v2 Phase 6 (PR-DD) — respect the OS-level "reduce motion" preference.
+ * Neutralizes shadcn's slide/fade transitions, sonner's toast slide, sheet
+ * slides, and Tailwind's animate-* utilities in one shot. `!important` is
+ * necessary because Tailwind utilities + Radix data-state animations have
+ * specificity we can't beat cleanly via cascade order.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}

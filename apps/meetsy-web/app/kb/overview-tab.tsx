@@ -50,8 +50,8 @@ export function OverviewTab({
 
       <Card className="space-y-5 p-6">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-700">What we learned</h2>
-          <p className="mt-1 text-xs text-zinc-500">
+          <h2 className="text-sm font-semibold text-foreground">What we learned</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
             A snapshot distilled from your workspace history.
           </p>
         </div>
@@ -62,12 +62,12 @@ export function OverviewTab({
         {summary && (
           <>
             {summary.narrative && (
-              <p className="whitespace-pre-line text-sm leading-relaxed text-zinc-700">
+              <p className="whitespace-pre-line text-sm leading-relaxed text-foreground">
                 {summary.narrative}
               </p>
             )}
             <FactsSummary facts={summary.facts} />
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-muted-foreground/70">
               Generated {formatWhen(summary.generatedAt)}.
             </p>
           </>

@@ -88,8 +88,8 @@ export default function LearningPage() {
   return (
     <div className="space-y-8">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">Learning</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Learning</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           What patterns the loop has learned in this workspace — and what it&apos;s
           about to.
         </p>
@@ -163,11 +163,11 @@ function SummaryHeader({
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div>
-      <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </div>
-      <div className="mt-1 text-lg font-semibold text-zinc-900">{value}</div>
-      {hint && <div className="text-xs text-zinc-500">{hint}</div>}
+      <div className="mt-1 text-lg font-semibold text-foreground">{value}</div>
+      {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
     </div>
   );
 }
@@ -183,12 +183,12 @@ function ActiveSection({
 }) {
   return (
     <section className="space-y-3">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
         Active
       </h2>
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-muted-foreground">
         Patterns the loop applies to new runs. Fires when a prediction matches{" "}
-        <code className="text-zinc-400">predicted</code> and enough corrections
+        <code className="text-muted-foreground/70">predicted</code> and enough corrections
         agreed on the same fix.
       </p>
       {gate.fields.map((field) => (
@@ -217,12 +217,12 @@ function BuildingSection({
 }) {
   return (
     <section className="space-y-3">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
         Building up
       </h2>
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-muted-foreground">
         Patterns partway to the gate. Each one is a{" "}
-        <code className="text-zinc-400">predicted → confirmed</code> the model
+        <code className="text-muted-foreground/70">predicted → confirmed</code> the model
         has seen at least once organically.
       </p>
       {gate.fields.map((field) => (
@@ -248,10 +248,10 @@ function BuildingSection({
 function CoverageSection({ fields }: { fields: LearningFieldSummary[] }) {
   return (
     <section className="space-y-3">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
         Coverage
       </h2>
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-muted-foreground">
         How much of your push history the loop has actually reasoned over.
       </p>
       <div className="grid gap-3 md:grid-cols-2">
@@ -274,8 +274,8 @@ function CoverageCard({ field }: { field: LearningFieldSummary }) {
       : `${Math.round(field.nudgeAcceptanceRate * 100)}%`;
   return (
     <Card className="space-y-2 p-4">
-      <div className="text-sm font-medium capitalize text-zinc-800">{field.field}</div>
-      <dl className="space-y-1 text-xs text-zinc-500">
+      <div className="text-sm font-medium capitalize text-foreground">{field.field}</div>
+      <dl className="space-y-1 text-xs text-muted-foreground">
         <MetricRow label="Predictions seen" value={String(field.rawSample)} />
         <MetricRow label="Predictions you changed" value={`${changed} (of ${field.rawSample})`} />
         <MetricRow
@@ -311,14 +311,14 @@ function MetricRow({
   return (
     <div className="flex items-baseline justify-between gap-2">
       <div className="flex items-baseline gap-1.5">
-        <dt className="text-zinc-600">{label}</dt>
-        {hint && <span className="text-[10px] text-zinc-400">{hint}</span>}
+        <dt className="text-muted-foreground">{label}</dt>
+        {hint && <span className="text-[10px] text-muted-foreground/70">{hint}</span>}
       </div>
       <dd
         className={
           danger
             ? "font-medium tabular-nums text-amber-700"
-            : "font-medium tabular-nums text-zinc-800"
+            : "font-medium tabular-nums text-foreground"
         }
       >
         {value}
@@ -340,11 +340,11 @@ function FieldBlock({
 }) {
   return (
     <div>
-      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {fieldLabel(field)}
       </div>
       {rows.length === 0 ? (
-        <Card className="p-3 text-xs text-zinc-500">{emptyText}</Card>
+        <Card className="p-3 text-xs text-muted-foreground">{emptyText}</Card>
       ) : (
         <div className="space-y-1.5">{rows.map(renderRow)}</div>
       )}
@@ -365,20 +365,20 @@ function PatternRow({
     <button
       type="button"
       onClick={() => onOpen(row.key)}
-      className="flex w-full items-center justify-between gap-3 rounded-md border border-zinc-100 bg-white px-3 py-2 text-left text-sm transition-colors hover:border-zinc-200 hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-blue-300"
+      className="flex w-full items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2 text-left text-sm transition-colors hover:border-border hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-blue-300"
     >
       <div className="flex-1 truncate">
-        <span className="text-zinc-500">{row.predicted}</span>
-        <span className="mx-1.5 text-zinc-400">→</span>
-        <span className="font-medium text-zinc-900">{row.confirmed}</span>
+        <span className="text-muted-foreground">{row.predicted}</span>
+        <span className="mx-1.5 text-muted-foreground/70">→</span>
+        <span className="font-medium text-foreground">{row.confirmed}</span>
       </div>
-      <div className="flex shrink-0 items-center gap-3 text-xs tabular-nums text-zinc-500">
+      <div className="flex shrink-0 items-center gap-3 text-xs tabular-nums text-muted-foreground">
         <span>
-          <span className="font-medium text-zinc-800">{row.count}</span> corrections
+          <span className="font-medium text-foreground">{row.count}</span> corrections
         </span>
         {showAgreement && (
           <span>
-            <span className="font-medium text-zinc-800">{Math.round(row.agreement * 100)}%</span>{" "}
+            <span className="font-medium text-foreground">{Math.round(row.agreement * 100)}%</span>{" "}
             consistency
           </span>
         )}
@@ -401,18 +401,18 @@ function ProgressRow({
     <button
       type="button"
       onClick={() => onOpen(row.key)}
-      className="flex w-full items-center justify-between gap-3 rounded-md border border-zinc-100 bg-white px-3 py-2 text-left text-sm transition-colors hover:border-zinc-200 hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-blue-300"
+      className="flex w-full items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2 text-left text-sm transition-colors hover:border-border hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-blue-300"
     >
       <div className="flex-1 truncate">
-        <span className="text-zinc-500">{row.predicted}</span>
-        <span className="mx-1.5 text-zinc-400">→</span>
-        <span className="font-medium text-zinc-900">{row.confirmed}</span>
+        <span className="text-muted-foreground">{row.predicted}</span>
+        <span className="mx-1.5 text-muted-foreground/70">→</span>
+        <span className="font-medium text-foreground">{row.confirmed}</span>
       </div>
-      <div className="flex shrink-0 items-center gap-3 text-xs tabular-nums text-zinc-500">
-        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-zinc-100">
-          <div className="h-full bg-zinc-500" style={{ width: `${pct}%` }} />
+      <div className="flex shrink-0 items-center gap-3 text-xs tabular-nums text-muted-foreground">
+        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+          <div className="h-full bg-muted-foreground" style={{ width: `${pct}%` }} />
         </div>
-        <span className="font-medium text-zinc-700">
+        <span className="font-medium text-foreground">
           {row.count} of {target}
         </span>
       </div>
@@ -489,11 +489,11 @@ function PatternHistorySheet({
             </div>
 
             <div>
-              <div className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
+              <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
                 Entries
               </div>
               {data.entries.length === 0 ? (
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-muted-foreground">
                   No matching entries in the last 500 rows.
                 </p>
               ) : (
@@ -501,17 +501,17 @@ function PatternHistorySheet({
                   {data.entries.map((e) => (
                     <li
                       key={`${e.runId}:${e.meetsyTaskId}`}
-                      className="flex items-center justify-between gap-2 rounded border border-zinc-100 px-2 py-1"
+                      className="flex items-center justify-between gap-2 rounded border border-border px-2 py-1"
                     >
-                      <span className="truncate text-zinc-500">
-                        Run <code className="text-zinc-400">{e.runId.slice(0, 8)}</code>
+                      <span className="truncate text-muted-foreground">
+                        Run <code className="text-muted-foreground/70">{e.runId.slice(0, 8)}</code>
                         {e.nudgeShown && (
                           <span className="ml-2 rounded bg-violet-50 px-1 text-[10px] font-medium text-violet-700">
                             nudge shown
                           </span>
                         )}
                       </span>
-                      <span className="tabular-nums text-zinc-400">
+                      <span className="tabular-nums text-muted-foreground/70">
                         {new Date(e.createdAt).toLocaleString()}
                       </span>
                     </li>

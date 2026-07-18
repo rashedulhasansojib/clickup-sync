@@ -82,8 +82,8 @@ export function SearchTab({ ws }: { ws: string }) {
   return (
     <Card className="space-y-4 p-6">
       <div>
-        <h2 className="text-sm font-semibold text-zinc-700">Search the knowledge base</h2>
-        <p className="mt-1 text-sm text-zinc-600">
+        <h2 className="text-sm font-semibold text-foreground">Search the knowledge base</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
           Hybrid vector + keyword search across embedded ClickUp tasks. Click a
           result to open the task details.
         </p>
@@ -102,7 +102,7 @@ export function SearchTab({ ws }: { ws: string }) {
       {loading && !hits && <Spinner label="Searching…" />}
 
       {hits !== null && hits.length === 0 && !loading && (
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-muted-foreground">
           {q.trim()
             ? `No embedded tasks match "${q.trim()}".`
             : "Type a query to search."}
@@ -116,17 +116,17 @@ export function SearchTab({ ws }: { ws: string }) {
               <button
                 type="button"
                 onClick={() => openTaskSheet(hit.sourceId)}
-                className="flex w-full flex-col gap-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-left hover:bg-zinc-50"
+                className="flex w-full flex-col gap-1 rounded-lg border border-border bg-card px-3 py-2 text-left hover:bg-muted/50"
               >
                 <div className="flex items-center justify-between gap-3">
-                  <code className="truncate text-xs text-zinc-500">
+                  <code className="truncate text-xs text-muted-foreground">
                     {hit.sourceId}
                   </code>
-                  <span className="text-xs text-zinc-400">
+                  <span className="text-xs text-muted-foreground/70">
                     score {hit.score.toFixed(3)}
                   </span>
                 </div>
-                <p className="line-clamp-2 text-sm text-zinc-700">
+                <p className="line-clamp-2 text-sm text-foreground">
                   {hit.snippet}
                 </p>
                 <div className="flex flex-wrap gap-1.5 pt-1">

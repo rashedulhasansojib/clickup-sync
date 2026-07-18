@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ListChecks } from "lucide-react";
 import { api, ApiError, type KbTaskRow } from "@/lib/api";
 import { Button, Card, ErrorBanner, Spinner, Tag } from "@/app/ui";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useTaskSheet } from "@/components/tasks/task-sheet-context";
 import { Input } from "@/components/ui/input";
 import { formatWhen } from "@/app/kb/facts-summary";
@@ -78,8 +81,8 @@ export function TasksTab({ ws }: { ws: string }) {
     <Card className="space-y-4 p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-700">Embedded tasks</h2>
-          <p className="mt-1 text-sm text-zinc-600">
+          <h2 className="text-sm font-semibold text-foreground">Embedded tasks</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
             {total !== null
               ? `${total.toLocaleString()} task${total === 1 ? "" : "s"} in the knowledge base — most-recently-updated first.`
               : "Browsing embedded tasks — most-recently-updated first."}
@@ -97,38 +100,46 @@ export function TasksTab({ ws }: { ws: string }) {
       {error && <ErrorBanner message={error} />}
 
       {loading ? (
-        <Spinner label="Loading tasks…" />
+        <div className="space-y-2" aria-hidden>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-14 w-full rounded-lg" />
+          ))}
+        </div>
       ) : tasks.length === 0 ? (
-        <p className="text-sm text-zinc-500">
-          {filter.trim()
-            ? `No embedded tasks match "${filter.trim()}". Clear the filter to browse everything.`
-            : "No tasks embedded yet. Run Rebuild to include a wider range."}
-        </p>
+        <EmptyState
+          icon={ListChecks}
+          title={filter.trim() ? `No tasks match “${filter.trim()}”` : "No tasks embedded yet"}
+          description={
+            filter.trim()
+              ? "Clear the filter to browse everything."
+              : "Run Rebuild to include a wider range."
+          }
+        />
       ) : (
         <>
-          <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
+          <ul className="divide-y divide-border rounded-lg border border-border">
             {tasks.map((task) => (
               <li key={task.taskId}>
                 <button
                   type="button"
                   onClick={() => openTaskSheet(task.taskId)}
-                  className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-zinc-50"
+                  className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-muted/50"
                 >
                   <div className="min-w-0 flex-1 space-y-1">
-                    <p className="truncate font-medium text-zinc-800">
+                    <p className="truncate font-medium text-foreground">
                       {task.taskName}
                     </p>
                     <div className="flex flex-wrap gap-1.5">
                       {task.status && <Tag>{task.status}</Tag>}
                       {task.client && <Tag>{task.client}</Tag>}
                       {task.assigneesNames && (
-                        <span className="text-xs text-zinc-500">
+                        <span className="text-xs text-muted-foreground">
                           {task.assigneesNames}
                         </span>
                       )}
                     </div>
                   </div>
-                  <div className="shrink-0 text-right text-xs text-zinc-400">
+                  <div className="shrink-0 text-right text-xs text-muted-foreground/70">
                     <div>{formatWhen(task.updatedDate)}</div>
                     <div>
                       {task.chunkCount} chunk{task.chunkCount === 1 ? "" : "s"}

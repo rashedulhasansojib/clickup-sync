@@ -30,7 +30,7 @@ export default function PushSettingsPage() {
       <div className="space-y-4">
         <PageHeader />
         <Card className="p-6">
-          <p className="text-sm text-zinc-600">
+          <p className="text-sm text-muted-foreground">
             You don&apos;t have access to push settings. Ask an Owner or Admin to
             configure the ClickUp target list and assignable members.
           </p>
@@ -50,10 +50,10 @@ export default function PushSettingsPage() {
 function PageHeader() {
   return (
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+      <h1 className="text-2xl font-semibold tracking-tight text-foreground">
         ClickUp push settings
       </h1>
-      <p className="mt-1 text-sm text-zinc-500">
+      <p className="mt-1 text-sm text-muted-foreground">
         Choose where Meetsy creates tasks and who can be assigned. Applied per
         workspace.
       </p>
@@ -209,14 +209,14 @@ function WorkspacePushForm({ workspaceId }: { workspaceId: string }) {
       {/* Target list picker */}
       <Card className="space-y-3 p-5">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-700">Target list</h2>
-          <p className="mt-0.5 text-xs text-zinc-500">
+          <h2 className="text-sm font-semibold text-foreground">Target list</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
             New ClickUp tasks are created here by default.
           </p>
         </div>
 
         {!hasLists ? (
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-muted-foreground">
             No ClickUp lists available. Make sure this workspace has a connected
             ClickUp token.
           </p>
@@ -224,7 +224,7 @@ function WorkspacePushForm({ workspaceId }: { workspaceId: string }) {
           <div className="space-y-4">
             {spaces.map((space) => (
               <div key={space.id} className="space-y-1.5">
-                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
                   {space.name}
                 </p>
                 <div className="space-y-1 pl-2">
@@ -239,7 +239,7 @@ function WorkspacePushForm({ workspaceId }: { workspaceId: string }) {
                   ))}
                   {space.folders.map((folder) => (
                     <div key={folder.id} className="pl-2">
-                      <p className="py-0.5 text-xs font-medium text-zinc-500">
+                      <p className="py-0.5 text-xs font-medium text-muted-foreground">
                         {folder.name}
                       </p>
                       <div className="pl-2">
@@ -265,17 +265,17 @@ function WorkspacePushForm({ workspaceId }: { workspaceId: string }) {
       {/* Assignable members checklist */}
       <Card className="space-y-3 p-5">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-700">
+          <h2 className="text-sm font-semibold text-foreground">
             Assignable members
           </h2>
-          <p className="mt-0.5 text-xs text-zinc-500">
+          <p className="mt-0.5 text-xs text-muted-foreground">
             Only these ClickUp members can be picked as task assignees during a
             push.
           </p>
         </div>
 
         {members.length === 0 ? (
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-muted-foreground">
             No ClickUp members available. Make sure this workspace has a
             connected ClickUp token.
           </p>
@@ -284,18 +284,18 @@ function WorkspacePushForm({ workspaceId }: { workspaceId: string }) {
             {members.map((m) => (
               <label
                 key={m.clickupUserId}
-                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50"
+                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-foreground hover:bg-muted/50"
               >
                 <input
                   type="checkbox"
                   checked={selectedIds.has(m.clickupUserId)}
                   onChange={() => toggleMember(m.clickupUserId)}
-                  className="h-4 w-4 rounded border-zinc-300"
+                  className="h-4 w-4 rounded border-input"
                 />
                 <span className="min-w-0">
                   <span className="font-medium">{m.name}</span>
                   {m.email && (
-                    <span className="ml-1 text-xs text-zinc-400">{m.email}</span>
+                    <span className="ml-1 text-xs text-muted-foreground/70">{m.email}</span>
                   )}
                 </span>
               </label>
@@ -306,17 +306,17 @@ function WorkspacePushForm({ workspaceId }: { workspaceId: string }) {
 
       {/* Optional default status */}
       <Card className="space-y-2 p-5">
-        <label className="block text-sm font-medium text-zinc-700">
+        <label className="block text-sm font-medium text-foreground">
           Default status (optional)
           <input
             type="text"
             value={defaultStatus}
             onChange={(e) => setDefaultStatus(e.target.value)}
             placeholder="e.g. to do"
-            className="mt-1.5 block w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-800 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none"
+            className="mt-1.5 block w-full rounded-lg border border-input px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 focus:border-ring focus:outline-none"
           />
         </label>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-muted-foreground">
           Leave blank to use the list&apos;s default status.
         </p>
       </Card>
@@ -330,7 +330,7 @@ function WorkspacePushForm({ workspaceId }: { workspaceId: string }) {
           <span className="text-xs font-medium text-green-700">{saveOk}</span>
         )}
         {config?.updatedAt && !saveOk && (
-          <span className="text-xs text-zinc-400">
+          <span className="text-xs text-muted-foreground/70">
             Last updated {new Date(config.updatedAt).toLocaleString()}
           </span>
         )}
@@ -352,13 +352,13 @@ function ListRadio({
   onSelect: (id: string) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-sm text-zinc-700 hover:bg-zinc-50">
+    <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-sm text-foreground hover:bg-muted/50">
       <input
         type="radio"
         name="targetList"
         checked={checked}
         onChange={() => onSelect(id)}
-        className="h-4 w-4 border-zinc-300"
+        className="h-4 w-4 border-input"
       />
       <span>{name}</span>
     </label>

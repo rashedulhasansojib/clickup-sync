@@ -51,7 +51,7 @@ export function FactsSummary({ facts }: { facts: KbFacts }) {
 
   if (!hasAnything) {
     return (
-      <p className="text-sm text-zinc-500">
+      <p className="text-sm text-muted-foreground">
         No structured facts yet — the knowledge base is built but didn&apos;t
         surface a summary breakdown.
       </p>
@@ -65,23 +65,23 @@ export function FactsSummary({ facts }: { facts: KbFacts }) {
   return (
     <div className="space-y-3">
       {coverage.totalTasks > 0 && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border bg-muted/50 p-3 text-sm text-foreground">
           <span>
-            <span className="font-semibold text-zinc-900">
+            <span className="font-semibold text-foreground">
               {coverage.embeddedCount}
             </span>{" "}
             of{" "}
-            <span className="font-semibold text-zinc-900">
+            <span className="font-semibold text-foreground">
               {coverage.totalTasks}
             </span>{" "}
             tasks embedded
           </span>
-          <span className="text-zinc-400">·</span>
+          <span className="text-muted-foreground/70">·</span>
           <span>
             {coverage.dateRange.earliest ?? "—"} →{" "}
             {coverage.dateRange.latest ?? "—"}
           </span>
-          <span className="text-zinc-400">·</span>
+          <span className="text-muted-foreground/70">·</span>
           <span>{coverage.commentCoveragePct}% comment coverage</span>
         </div>
       )}
@@ -105,16 +105,16 @@ export function FactsSummary({ facts }: { facts: KbFacts }) {
 
       {components.length > 0 && (
         <SectionCard title="Components">
-          <ul className="space-y-1 text-sm text-zinc-700">
+          <ul className="space-y-1 text-sm text-foreground">
             {shownComponents.map((c, i) => (
               <li key={`${c.component}-${i}`}>
                 {c.component} ·{" "}
-                <span className="text-zinc-500">{c.taskCount} tasks</span>
+                <span className="text-muted-foreground">{c.taskCount} tasks</span>
               </li>
             ))}
           </ul>
           {extraComponents > 0 && (
-            <p className="mt-1 text-xs text-zinc-400">+{extraComponents} more</p>
+            <p className="mt-1 text-xs text-muted-foreground/70">+{extraComponents} more</p>
           )}
         </SectionCard>
       )}
@@ -125,12 +125,12 @@ export function FactsSummary({ facts }: { facts: KbFacts }) {
             {roster.map((r, i) => (
               <li key={`${r.name}-${i}`} className="space-y-1">
                 <div>
-                  <span className="font-medium text-zinc-800">{r.name}</span>
+                  <span className="font-medium text-foreground">{r.name}</span>
                   {r.email && (
-                    <span className="ml-2 text-xs text-zinc-400">{r.email}</span>
+                    <span className="ml-2 text-xs text-muted-foreground/70">{r.email}</span>
                   )}
                 </div>
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-muted-foreground">
                   {r.taskCount} tasks ({r.openCount} open / {r.closedCount}{" "}
                   closed)
                 </p>
@@ -149,11 +149,11 @@ export function FactsSummary({ facts }: { facts: KbFacts }) {
 
       {workload.length > 0 && (
         <SectionCard title="Workload">
-          <ul className="space-y-1 text-sm text-zinc-700">
+          <ul className="space-y-1 text-sm text-foreground">
             {workload.map((w, i) => (
               <li key={`${w.user}-${i}`}>
                 {w.user} ·{" "}
-                <span className="text-zinc-500">{w.hours.toFixed(1)} hrs</span>
+                <span className="text-muted-foreground">{w.hours.toFixed(1)} hrs</span>
               </li>
             ))}
           </ul>
@@ -181,7 +181,7 @@ export function FactsSummary({ facts }: { facts: KbFacts }) {
             <StatTile label="Reopened" value={String(blockers.reopened.count)} />
           </div>
           {blockers.overdueOpen.samples.length > 0 && (
-            <ul className="mt-2 space-y-0.5 text-xs text-zinc-500">
+            <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
               {blockers.overdueOpen.samples.slice(0, 3).map((s) => (
                 <li key={s.taskId} className="truncate">
                   {s.taskName}
@@ -203,8 +203,8 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+    <div className="rounded-lg border border-border bg-muted/50 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
         {title}
       </p>
       <div className="mt-2">{children}</div>
@@ -214,9 +214,9 @@ function SectionCard({
 
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-zinc-200 bg-white px-3 py-2">
-      <p className="text-lg font-semibold text-zinc-800">{value}</p>
-      <p className="text-xs text-zinc-500">{label}</p>
+    <div className="rounded-md border border-border bg-card px-3 py-2">
+      <p className="text-lg font-semibold text-foreground">{value}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
     </div>
   );
 }
@@ -231,7 +231,7 @@ function BucketRow({
   if (buckets.length === 0) return null;
   return (
     <div className="space-y-1">
-      <p className="text-xs font-medium text-zinc-500">{label}</p>
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
       <div className="flex flex-wrap gap-1.5">
         {buckets.map((b, i) => (
           <Tag key={`${b.label}-${i}`}>

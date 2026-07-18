@@ -54,10 +54,10 @@ export function LearningDigestCard({ workspaceId }: { workspaceId: string }) {
   if (!data || data.totalOverrides === 0) {
     return (
       <Card className="p-6">
-        <h3 className="text-base font-medium text-zinc-900">
+        <h3 className="text-base font-medium text-foreground">
           Learning digest
         </h3>
-        <p className="mt-2 text-sm text-zinc-500">
+        <p className="mt-2 text-sm text-muted-foreground">
           As you review runs and push tasks, we&apos;ll show a weekly trend of
           how often the model got your assignments right.
         </p>
@@ -84,10 +84,10 @@ export function LearningDigestCard({ workspaceId }: { workspaceId: string }) {
   return (
     <Card className="space-y-4 p-6">
       <div className="flex items-baseline justify-between">
-        <h3 className="text-base font-medium text-zinc-900">
+        <h3 className="text-base font-medium text-foreground">
           Learning digest
         </h3>
-        <span className="text-xs text-zinc-400">last 6 weeks</span>
+        <span className="text-xs text-muted-foreground/70">last 6 weeks</span>
       </div>
 
       <MetricRow
@@ -109,14 +109,14 @@ export function LearningDigestCard({ workspaceId }: { workspaceId: string }) {
         formatValue={(v) => `${Math.round(v * 100)}%`}
       />
 
-      <div className="flex items-center justify-between border-t border-zinc-100 pt-3 text-sm">
-        <span className="text-zinc-500">
+      <div className="flex items-center justify-between border-t border-border pt-3 text-sm">
+        <span className="text-muted-foreground">
           {data.totalOverrides.toLocaleString()} correction
           {data.totalOverrides === 1 ? "" : "s"} total
         </span>
         <Link
           href="/learning"
-          className="font-medium text-zinc-700 hover:text-zinc-900"
+          className="font-medium text-foreground hover:text-foreground"
         >
           See patterns →
         </Link>
@@ -144,10 +144,10 @@ function MetricRow({
     <div className="space-y-1">
       <div className="flex items-baseline justify-between text-sm">
         <div className="flex items-baseline gap-2">
-          <span className="font-medium text-zinc-800">{label}</span>
-          <span className="text-xs text-zinc-400">{hint}</span>
+          <span className="font-medium text-foreground">{label}</span>
+          <span className="text-xs text-muted-foreground/70">{hint}</span>
         </div>
-        <span className="tabular-nums text-zinc-700">{latestLabel}</span>
+        <span className="tabular-nums text-foreground">{latestLabel}</span>
       </div>
       <Sparkline data={points} />
     </div>

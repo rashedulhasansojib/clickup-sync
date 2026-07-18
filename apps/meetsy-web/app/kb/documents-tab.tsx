@@ -74,10 +74,10 @@ export function DocumentsTab({ ws, canWrite }: { ws: string; canWrite: boolean }
   return (
     <Card className="space-y-5 p-6">
       <div>
-        <h2 className="text-sm font-semibold text-zinc-700">
+        <h2 className="text-sm font-semibold text-foreground">
           SOPs &amp; reference documents
         </h2>
-        <p className="mt-1 text-sm text-zinc-600">
+        <p className="mt-1 text-sm text-muted-foreground">
           Upload process docs, style guides, or definitions so Meetsy can ground
           its suggestions in how your team actually works.
         </p>
@@ -85,7 +85,7 @@ export function DocumentsTab({ ws, canWrite }: { ws: string; canWrite: boolean }
 
       {canWrite && (
         <div className="flex flex-wrap items-center gap-3">
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50">
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-input bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/50">
             <input
               type="file"
               onChange={onUpload}
@@ -105,15 +105,15 @@ export function DocumentsTab({ ws, canWrite }: { ws: string; canWrite: boolean }
         ) : loadError ? (
           <ErrorBanner message={loadError} />
         ) : docs.length === 0 ? (
-          <p className="text-sm text-zinc-500">No documents yet.</p>
+          <p className="text-sm text-muted-foreground">No documents yet.</p>
         ) : (
-          <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
+          <ul className="divide-y divide-border rounded-lg border border-border">
             {docs.map((doc) => (
               <li
                 key={doc.id}
                 className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
               >
-                <span className="min-w-0 truncate text-zinc-700">
+                <span className="min-w-0 truncate text-foreground">
                   {doc.filename ?? doc.name ?? doc.id}
                   {doc.status && (
                     <span className="ml-2">

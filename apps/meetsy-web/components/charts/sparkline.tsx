@@ -51,7 +51,7 @@ export function Sparkline({
             rx={1}
             className={cn(
               "transition-colors",
-              missing ? "fill-zinc-200" : "fill-zinc-700",
+              missing ? "fill-muted" : "fill-foreground",
             )}
           />
         );

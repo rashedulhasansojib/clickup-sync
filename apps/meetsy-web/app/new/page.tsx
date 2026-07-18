@@ -128,10 +128,10 @@ export default function UploadPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           Analyze a meeting transcript
         </h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <p className="mt-1 text-sm text-muted-foreground">
           Paste a transcript or upload a file. We&apos;ll extract the
           participants, then turn the discussion into grounded, assignable
           tasks.
@@ -145,7 +145,7 @@ export default function UploadPage() {
           <div className="space-y-1.5">
             <label
               htmlFor="title"
-              className="block text-sm font-medium text-zinc-700"
+              className="block text-sm font-medium text-foreground"
             >
               Meeting title
             </label>
@@ -157,17 +157,17 @@ export default function UploadPage() {
               placeholder="e.g. Q3 Planning — Engineering Sync"
               maxLength={300}
               disabled={submitting}
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="w-full rounded-lg border border-input px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring"
             />
           </div>
 
           <div className="space-y-1.5">
             <label
               htmlFor="meetingDate"
-              className="block text-sm font-medium text-zinc-700"
+              className="block text-sm font-medium text-foreground"
             >
               Meeting date{" "}
-              <span className="font-normal text-zinc-400">(optional)</span>
+              <span className="font-normal text-muted-foreground/70">(optional)</span>
             </label>
             <input
               id="meetingDate"
@@ -175,9 +175,9 @@ export default function UploadPage() {
               value={meetingDate}
               onChange={(e) => setMeetingDate(e.target.value)}
               disabled={submitting}
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="w-full rounded-lg border border-input px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring"
             />
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-muted-foreground/70">
               Anchors relative due dates like &ldquo;by Wednesday.&rdquo;
               Auto-filled from Zoom filenames when possible.
             </p>
@@ -187,7 +187,7 @@ export default function UploadPage() {
             <div className="space-y-1.5">
               <label
                 htmlFor="client"
-                className="block text-sm font-medium text-zinc-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Client
               </label>
@@ -197,7 +197,7 @@ export default function UploadPage() {
                 onChange={(e) => setClientOptionId(e.target.value)}
                 disabled={submitting}
                 required
-                className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                className="w-full rounded-lg border border-input px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring"
               >
                 <option value="">Select a client…</option>
                 {clientOptions.map((o) => (
@@ -206,13 +206,13 @@ export default function UploadPage() {
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-zinc-400">
+              <p className="text-xs text-muted-foreground/70">
                 Applies to the whole meeting. You can still change it per task
                 when pushing to ClickUp.
               </p>
             </div>
           ) : (
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-muted-foreground/70">
               No client field configured for this workspace.
             </p>
           )}
@@ -221,13 +221,13 @@ export default function UploadPage() {
             <div className="flex items-center justify-between">
               <label
                 htmlFor="transcript"
-                className="block text-sm font-medium text-zinc-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Transcript
               </label>
               <div className="flex items-center gap-3">
                 {fileName && (
-                  <span className="text-xs text-zinc-400">
+                  <span className="text-xs text-muted-foreground/70">
                     Loaded {fileName}
                   </span>
                 )}
@@ -259,9 +259,9 @@ export default function UploadPage() {
               placeholder="Paste your meeting transcript here…"
               rows={14}
               disabled={submitting}
-              className="w-full resize-y rounded-lg border border-zinc-300 px-3 py-2 font-mono text-sm leading-relaxed outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="w-full resize-y rounded-lg border border-input px-3 py-2 font-mono text-sm leading-relaxed outline-none focus:border-ring focus:ring-2 focus:ring-ring"
             />
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-muted-foreground/70">
               {transcript.length.toLocaleString()} characters
             </p>
           </div>

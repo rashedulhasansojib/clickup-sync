@@ -23,6 +23,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 /**
  * Persistent left navigation for the signed-in shell. Renders as a fixed
@@ -82,11 +83,13 @@ function SidebarBody({
         key={item.href}
         href={item.href}
         onClick={onNavigate}
+        aria-current={active ? "page" : undefined}
         className={cn(
           "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
           active
-            ? "bg-zinc-900 text-white"
-            : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900",
+            ? "bg-primary text-primary-foreground"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground",
         )}
       >
         <Icon className="h-4 w-4" />
@@ -103,12 +106,12 @@ function SidebarBody({
       <Link
         href="/home"
         onClick={onNavigate}
-        className="flex items-center gap-2 px-2"
+        className="flex items-center gap-2 px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md"
       >
-        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-900 text-sm font-bold text-white">
+        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
           M
         </span>
-        <span className="text-lg font-semibold tracking-tight text-zinc-900">
+        <span className="text-lg font-semibold tracking-tight text-foreground">
           Meeting Analyzer
         </span>
       </Link>
@@ -121,17 +124,18 @@ function SidebarBody({
 
       {canSeeSettings && (
         <div className="flex flex-col gap-1">
-          <div className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+          <div className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Settings
           </div>
           {SETTINGS.map(renderItem)}
         </div>
       )}
 
-      <div className="mt-auto border-t border-zinc-200 pt-4 text-xs text-zinc-500">
+      <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-4 text-xs text-muted-foreground">
         <div className="truncate px-2" title={user.email ?? "Signed in"}>
           {user.email ?? "Signed in"}
         </div>
+        <ThemeToggle />
       </div>
     </nav>
   );
@@ -146,11 +150,11 @@ export function Sidebar({ user }: { user: AuthPrincipal }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <aside className="hidden border-r border-zinc-200 bg-white md:flex md:w-64 md:shrink-0 md:flex-col">
+      <aside className="hidden border-r border-border bg-background md:flex md:w-64 md:shrink-0 md:flex-col">
         <SidebarBody user={user} />
       </aside>
 
-      <div className="flex h-14 items-center gap-2 border-b border-zinc-200 bg-white px-4 md:hidden">
+      <div className="flex h-14 items-center gap-2 border-b border-border bg-background px-4 md:hidden">
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger asChild>
             <Button variant="ghost" size="icon" aria-label="Open navigation">
@@ -162,14 +166,17 @@ export function Sidebar({ user }: { user: AuthPrincipal }) {
             <SidebarBody user={user} onNavigate={() => setOpen(false)} />
           </SheetContent>
         </Sheet>
-        <Link href="/home" className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-900 text-sm font-bold text-white">
+        <Link href="/home" className="flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md">
+          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
             M
           </span>
-          <span className="text-base font-semibold text-zinc-900">
+          <span className="text-base font-semibold text-foreground">
             Meeting Analyzer
           </span>
         </Link>
+        <div className="ml-auto">
+          <ThemeToggle />
+        </div>
       </div>
     </>
   );
