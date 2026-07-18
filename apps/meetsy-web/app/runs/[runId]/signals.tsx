@@ -1,79 +1,33 @@
-import type { AnalysisResult } from "@ma/shared";
+import type {
+  AssignmentCandidate,
+  DuplicateHit,
+  DuePrediction,
+  FieldAdjustment,
+  FieldPrediction,
+  KbContextHit,
+  ReviewResult,
+  TaskAdjustments,
+  TaskAssignment,
+  TaskPrediction,
+} from "@ma/shared";
 
 /**
- * Phase 2c/3 review-UI signals. The backend attaches these EXTRA top-level keys to
- * the stored run result (not in the @ma/shared AnalysisResult schema), keyed by the
- * task `id` (e.g. "t1"). These mirror the meetsy-api output shapes 1:1.
+ * Phase 2c/3 review-UI signals. All shapes are now defined in @ma/shared
+ * (`ReviewResultSchema`) as the single source of truth — the API validates writes
+ * with the same schemas so signals round-trip through feedback + chat mutations.
  */
-export interface FieldPrediction {
-  value: string | null;
-  abstain: boolean;
-  support: number;
-  share: number;
-  isModal: boolean;
-  confidence: "high" | "low";
-  candidates: Array<{ value: string; support: number; share: number }>;
-  reason?: string;
-}
-export interface DuePrediction {
-  date: string | null;
-  abstain: boolean;
-  basedOnClosedTasks: number;
-  cycleDaysP80: number | null;
-}
-export interface TaskPrediction {
-  sprint: FieldPrediction;
-  assigneeHint: FieldPrediction;
-  estimate: FieldPrediction;
-  due: DuePrediction;
-  qualifyingNeighbours: number;
-}
-export interface DuplicateHit {
-  taskId: string;
-  score: number;
-  band: "flag" | "suggest";
-}
-export interface AssignmentCandidate {
-  clickupUserId: string | null;
-  name: string;
-  inPool: boolean;
-  ownershipScore: number;
-  closedSimilar: number;
-  openTasks: number;
-  trackedHours30d: number;
-  evidenceTaskIds: string[];
-}
-export interface TaskAssignment {
-  recommended: AssignmentCandidate | null;
-  ranked: AssignmentCandidate[];
-  abstain: boolean;
-  conditionedOnClient: boolean;
-  rationale: string;
-}
-export interface FieldAdjustment {
-  from: string;
-  to: string;
-  count: number;
-  agreement: number;
-}
-export interface TaskAdjustments {
-  assignee?: FieldAdjustment;
-}
-export interface KbContextHit {
-  sourceType: string;
-  sourceId: string;
-  score: number;
-  snippet: string;
-}
-
-/** AnalysisResult + the review-UI signal maps (all optional — older runs lack them). */
-export interface ReviewResult extends AnalysisResult {
-  kbContext?: KbContextHit[];
-  fieldPredictions?: Record<string, TaskPrediction>;
-  duplicates?: Record<string, DuplicateHit[]>;
-  assignment?: Record<string, TaskAssignment>;
-  adjustments?: Record<string, TaskAdjustments>;
-}
+export type {
+  AssignmentCandidate,
+  DuplicateHit,
+  DuePrediction,
+  FieldAdjustment,
+  FieldPrediction,
+  KbContextHit,
+  ReviewResult,
+  TaskAdjustments,
+  TaskAssignment,
+  TaskPrediction,
+};
 
 export interface TaskSignalData {
   prediction?: TaskPrediction;

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AnalysisResultSchema } from "./domain";
+import { ReviewResultSchema } from "./review-result";
 
 /**
  * Phase 3 — feedback loop + chat-over-result contracts.
@@ -32,8 +32,8 @@ export const SubmitFeedbackResponseSchema = z.object({
   accepted: z.boolean(),
   /** True if the targeted re-run changed the result. */
   changed: z.boolean(),
-  /** The (possibly revised) result. */
-  result: AnalysisResultSchema,
+  /** The (possibly revised) result, with review-UI signals preserved. */
+  result: ReviewResultSchema,
 });
 export type SubmitFeedbackResponse = z.infer<typeof SubmitFeedbackResponseSchema>;
 
@@ -64,7 +64,7 @@ export const SendChatResponseSchema = z.object({
   reply: ChatMessageSchema,
   /** True if the assistant added/changed tasks in the result. */
   resultUpdated: z.boolean(),
-  /** The updated result when resultUpdated is true, else null. */
-  result: AnalysisResultSchema.nullable(),
+  /** The updated result when resultUpdated is true (with review-UI signals preserved), else null. */
+  result: ReviewResultSchema.nullable(),
 });
 export type SendChatResponse = z.infer<typeof SendChatResponseSchema>;

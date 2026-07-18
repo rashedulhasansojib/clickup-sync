@@ -15,6 +15,7 @@ import { KbQueue } from "../../kb/kb.queue";
 import { FieldPredictionService, type TaskAnalysis } from "../../kb/field-prediction.service";
 import { AssignmentService, type TaskAssignment } from "../../kb/assignment.service";
 import { LearningService, type TaskAdjustments } from "../../kb/learning.service";
+import { MlConfigService } from "../../kb/ml-config.service";
 import type { AssignableMember } from "../../clickup/clickup.types";
 import { buildContextQuery, formatContextForPrompt } from "../pipeline-context";
 
@@ -43,6 +44,7 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly fieldPrediction: FieldPredictionService,
     private readonly assignment: AssignmentService,
     private readonly learning: LearningService,
+    private readonly mlConfig: MlConfigService,
   ) {}
 
   onModuleInit(): void {
@@ -255,6 +257,29 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
       this.logger.log(
         `Run ${runId} usage: ${usage.calls} LLM calls, ${usage.promptTokens} prompt + ${usage.completionTokens} completion tokens`,
       );
+
+      // v2 Phase 0 — freeze the workspace's ML config on run completion so
+      // Phase 5's preview replay can reproduce the run's parameters exactly.
+      // Best-effort: a snapshot failure NEVER blocks run completion (the run
+      // is already `completed` on the row above). Wraps a fresh read of the
+      // workspace's tunables + models (falls back to hardcoded defaults when
+      // no row exists yet — see MlConfigService).
+      try {
+        const snapshot = await this.mlConfig.forWorkspace(workspaceId);
+        await this.prisma.analysisRunSnapshot.create({
+          data: {
+            runId,
+            workspaceId,
+            tunables: snapshot.tunables as unknown as Prisma.InputJsonValue,
+            models: snapshot.models as unknown as Prisma.InputJsonValue,
+          },
+        });
+      } catch (err) {
+        this.logger.warn(
+          `AnalysisRunSnapshot write skipped for run ${runId}: ${(err as Error).message}`,
+        );
+      }
+
       await this.emit(runId, "assemble", "completed", "Analysis complete", 1);
     } catch (err) {
       const message = (err as Error).message ?? "Unknown error";

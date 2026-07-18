@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import type { AnalysisResult, RunStatus } from "@ma/shared";
+import type { ReviewResult, RunStatus } from "@ma/shared";
 import { api, ApiError } from "@/lib/api";
 import { useRunStream } from "@/lib/useRunStream";
 import { Button, Card, ErrorBanner, Spinner } from "@/app/ui";
@@ -21,7 +21,7 @@ export default function RunPage() {
   const { events, latest, done, streamError } = useRunStream(runId);
 
   const [status, setStatus] = useState<RunStatus>("queued");
-  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [result, setResult] = useState<ReviewResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
   const settledRef = useRef(false);

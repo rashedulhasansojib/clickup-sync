@@ -515,3 +515,120 @@ Migrated chat + embeddings off the old two-resource setup (`niftyai`/`niftyocr`)
 **Verify:** `pnpm --filter @ma/api typecheck` clean; `pnpm --filter @ma/api test` = **37 suites / 213 tests** green (under Homebrew Node v25.9.0). NOT nest-built.
 
 **Deferred / noted:** (1) **cross-family critic A/B** (analyze=gpt-5.5, critic=DeepSeek/Kimi) — approved to *benchmark* only, NOT defaulted; the diverse second opinion may catch more, validate before switching. (2) gpt-image-2 + 5.4-nano available but unused. (3) The 3 aux model constants are still hardcoded (not env-driven) — fine for now; env-ify if tuning cadence grows. (4) Owner will rotate the placeholder API key.
+
+---
+
+## Meetsy v2 — Reorganization (2026-07-18 kickoff)
+
+Meetsy v1 Phases 0–3 are complete: engine works, tasks push to ClickUp, KB is grounded, learning loop fires. **v2 rebuilds the cockpit** — information architecture, evidence surfacing, learning-loop trust, KB legibility, per-workspace tunables — tuned for **IC engineers checking their assignments** (evidence expanded by default, chips clickable, keyboard-first).
+
+**Read first (v2 chain):**
+1. `docs/superpowers/plans/2026-07-18-meetsy-v2-plan.md` — umbrella plan (6 phases: Foundations → IA/Home → Evidence → Learning trust → KB → Tuning → Polish).
+2. `docs/superpowers/specs/2026-07-18-meetsy-v2-phase0-foundations-design.md` — Phase 0 spec (start here).
+3. This journal (v1 entries above are the engine; v2 entries append below as work lands).
+
+**v2 audience decision (locked 2026-07-18):** IC engineers. Every design choice biases toward evidence + drill-down over speed-to-push. The push editor becomes a secondary tab, not the default view.
+
+**Phase 0 backend changes (approved 2026-07-18):**
+- **Signal-loss fix.** `analysis.service.ts:227` uses plain `.parse()` — strips `kbContext / fieldPredictions / duplicates / assignment / adjustments` from `AnalysisRun.result` on every feedback submit and every chat-added task. Also `push.service.ts:158-159` then reads `.fieldPredictions` and gets `{}`, so the learning-loop signal silently dies for those runs. Fix = `ReviewResultSchema` in `@ma/shared` + `mergeSignals(assembled, ctx.result)` before every write.
+- **`WorkspaceMlConfig`** (per-workspace tunables container) + **`AnalysisRunSnapshot`** (frozen mlConfig/model routing per completed run — enables reproducible /tuning preview in Phase 5). Both `@@schema("meetsy")`, no cross-schema FKs.
+- **`GET /workspaces/:id/clickup/tasks/:taskId`** — resolves ClickUp task ids (surfaced in duplicate chips + `evidenceTaskIds` + kbContext) to `{title, status, assigneeName, url}`. Enables clickable evidence chips in Phase 2.
+- **`GET /workspaces/:id/runs?limit&offset&status`** — paginated run list. Powers Phase 1 `/home` recent runs + `/meetings` history.
+- **Design system foundations** — `shadcn/ui` primitives (Button, Dialog, Sheet, Tabs, Toast, Command, DropdownMenu, Skeleton, Tooltip), `lucide-react`, `next-themes` (dark mode wired but no toggle UI in Phase 0), `sonner` toast. Transitional shim in `app/ui.tsx` re-exports so no big-bang caller migration.
+
+**v2 phases at a glance (see plan §3 for full table):**
+| Phase | Focus | Notable backend additions |
+|---|---|---|
+| 0 | Foundations (this spec) | signal-loss fix, `WorkspaceMlConfig`, `AnalysisRunSnapshot`, task-lookup + runs-list endpoints, `ReviewResultSchema` |
+| 1 | IA + Home + History | `/learning/me`, full-text `runs/search` (tsvector + GIN) |
+| 2 | Evidence-first review | attach raw kNN neighbours to result; push retry queue + dead-letter |
+| 3 | Learning trust | `patterns/:key/history`, learning cache, near-gate SSE, **expand `FIELDS` to include `sprint`** |
+| 4 | /kb consolidation | `kb/tasks?cursor&filter` (browse) |
+| 5 | /tuning (Owner) | `ml-config` GET/PUT + preview endpoint (replays past runs against candidate config) |
+| 6 | Cross-cutting UX | dark, keyboard, empty states, a11y, mobile |
+
+**v2 status:** plan + Phase 0 spec written 2026-07-18. Not yet implemented. Recommended PR split (see Phase 0 spec §6): PR-A signal-loss fix, PR-B Prisma models + endpoints, PR-C design-system foundations.
+
+<!-- Append new v2 entries below as steps complete. -->
+
+### 2026-07-18 — v2 Phase 0 · PR-A: signal-loss fix — GREEN (typecheck + 217 tests)
+
+Fixed the silent-loss bug that stripped `kbContext / fieldPredictions / duplicates / assignment / adjustments` from `AnalysisRun.result` on every feedback submit and every chat-added task, and (as a knock-on) made `push.service.ts:158` read `{}` from `.fieldPredictions` — killing the FieldOverride logger on those runs. Not committed yet.
+
+**Root cause (grounded in v2 spec §1.1):** `loadRunContext` at `analysis.service.ts:227` parsed `run.result` with plain `AnalysisResultSchema.parse()` (strict) — dropping the five signal keys. `assemble()` then rebuilt a strict AnalysisResult without them. Both `submitFeedback` (line 295) and `sendChat` (line 363) persisted the stripped payload. `push.service.ts:158-159` read `.fieldPredictions` off the raw JSON blob and silently returned `{}` for any run touched by feedback/chat.
+
+**New shared schema (@ma/shared):**
+- New file `packages/shared/src/review-result.ts` — Zod-typed source-of-truth for the five signal keys: `KbContextHitSchema`, `TaskPredictionSchema` (with `FieldPredictionSchema` + `PriorCandidateSchema` + `DuePredictionSchema`), `DuplicateHitSchema`, `TaskAssignmentSchema` (+ `AssignmentCandidateSchema`), `TaskAdjustmentsSchema` (+ `FieldAdjustmentSchema`). All five signal keys are OPTIONAL on `ReviewResultSchema` so historical runs still parse. Also exports `TaskAdjustments.sprint?` (reserved for v2 Phase 3 — learning-loop expansion to sprint).
+- Re-exported from `packages/shared/src/index.ts`.
+- `RunResponseSchema.result` (`api.ts:50`) and both `SubmitFeedbackResponseSchema.result` + `SendChatResponseSchema.result` (`feedback.ts:36, 68`) switched from `AnalysisResultSchema` → `ReviewResultSchema` — so signals now round-trip on the wire type, not just at runtime.
+
+**Backend changes (apps/meetsy-api):**
+- `analysis.service.ts:227` — `loadRunContext` now parses with `ReviewResultSchema.parse()`; the returned `result` type widens from `AnalysisResult` to `ReviewResult` in the context object.
+- New `mergeSignals(base, source)` helper at file bottom — re-attaches the five signal keys onto a freshly-`assemble()`d result. Called from both write paths (`submitFeedback` line 291 and `sendChat` line 366) — the merged `ReviewResult` (not the stripped `AnalysisResult`) is what gets persisted and returned. `assemble()` itself stays strict; separation-of-concerns preserved.
+- `push.service.ts:82` (`getStatus`) — kept `AnalysisResultSchema.safeParse` (only reads tasks). `pushTasks` reads `estimateHours` via `AnalysisResultSchema.safeParse` AND reads `fieldPredictions` via a **dedicated** `z.record(z.string(), TaskPredictionSchema.passthrough())` parse with a raw-fallback — this independent read means predictions survive even when the AnalysisResult base is malformed (existing `push.fieldoverride.spec.ts` uses a minimal partial stub; behavior preserved).
+
+**Frontend changes (apps/meetsy-web):**
+- `app/runs/[runId]/signals.tsx` — deleted the local `interface FieldPrediction/DuePrediction/TaskPrediction/DuplicateHit/AssignmentCandidate/TaskAssignment/FieldAdjustment/TaskAdjustments/KbContextHit/ReviewResult` (77 lines); now `import type { … } from "@ma/shared"` + `export type { … }` for the two consumers. `TaskSignalData` (a local aggregation type) stays.
+- `app/runs/[runId]/page.tsx` — `useState<AnalysisResult | null>` → `useState<ReviewResult | null>`.
+- `app/runs/[runId]/components.tsx` — `ResultsSection`, `ResultView`, `PushSection`, `ChatPanel` signatures switched from `AnalysisResult` to `ReviewResult`; deleted both `as ReviewResult` casts (lines 281 + 731) as unneeded now.
+
+**New tests:**
+- `apps/meetsy-api/src/analysis/analysis.service.signal-roundtrip.spec.ts` — v2 Phase 0 acceptance test. Four cases:
+  1. `submitFeedback` with downvote-no-comment on a task NOT in the result → signals survive on both the response and the persisted row.
+  2. `submitFeedback` with downvote-no-comment on a task IN the result → assemble runs (changed=true), signals still survive.
+  3. `sendChat` with `newTasks.length > 0` (mocked azure returns a valid FullTaskLLM) → resultUpdated + signals survive on both response and persisted row.
+  4. `sendChat` with `newTasks.length === 0` → no `analysisRun.update` call (unchanged branch).
+
+**Verify (all green):**
+| # | Target | Command | Result |
+|---|---|---|---|
+| a | `@ma/shared` build | `pnpm --filter @ma/shared build` | PASS |
+| b | Meetsy API typecheck | `pnpm --filter @ma/api typecheck` | PASS |
+| c | Meetsy web typecheck | `pnpm --filter @ma/web typecheck` | PASS |
+| d | Meetsy API tests | `pnpm --filter @ma/api test` | PASS — 38 suites / 217 tests (+4 new round-trip cases) |
+| e | Clicksy backend tests | `pnpm test` (root) | PASS — 105 suites / 806 tests (no regression) |
+
+**Not touched by this PR (per spec §6 — deferred to PR-B / PR-C):** WorkspaceMlConfig + AnalysisRunSnapshot migrations, task-lookup + runs-list endpoints, shadcn/ui + lucide + next-themes + sonner. This PR is the standalone signal-loss fix; PR-B (backend models + endpoints) and PR-C (design system) can land in either order after.
+
+**Next:** PR-B — Prisma models (`WorkspaceMlConfig` + `AnalysisRunSnapshot`), migration, `GET /workspaces/:id/clickup/tasks/:taskId`, `GET /workspaces/:id/runs`.
+
+### 2026-07-18 — v2 Phase 0 · PR-B: Prisma models + endpoints — GREEN (typecheck + 235 tests)
+
+Landed the two new Meetsy-schema tables + the two new read endpoints the later phases build on. Not committed yet.
+
+**Schema changes (apps/meetsy-api/prisma/schema.prisma + new migration):**
+- New model `WorkspaceMlConfig` — `workspaceId` PK (one row per workspace), `orgId`, `tunables` JSONB, `models` JSONB, `updatedBy?`, `createdAt`/`updatedAt`. Index on `orgId`. Soft ref to `public.workspaces` (no cross-schema FK).
+- New model `AnalysisRunSnapshot` — `runId` PK (1:1 with AnalysisRun via cascade FK), `workspaceId`, frozen `tunables` + `models` JSONB, `createdAt`. Index on `workspaceId`. Append-only.
+- Added `@@index([workspaceId, createdAt])` on `AnalysisRun` — powers the newest-first paginated runs-list endpoint.
+- Hand-authored migration `apps/meetsy-api/prisma/migrations/20260718120000_meetsy_v2_phase0_foundations/migration.sql` — `meetsy` schema only, no `public` writes. Note: the AnalysisRun index uses `"createdAt"` (camelCase — no `@map` on that field, unlike the new tables where every column is `@map`-ed to snake_case).
+
+**Shared schemas (@ma/shared):**
+- New file `packages/shared/src/ml-config.ts` — `WorkspaceTunablesSchema` (with defaults matching the hardcoded thresholds: dupFlag 0.72, dupSuggest 0.64, simFloor 0.5, minQualifying 3, closedWeight 2, minCorrections 3, minAgreement 0.6, rrfK 60, novelMaxSimCutoff 0.6, linkMinSim 0.75, embedBatch 64), `StageRoutingSchema` + `WorkspaceModelsSchema` (per-pipeline-stage effort routing), `RunSnapshotPayloadSchema` (the `AnalysisRunSnapshot` shape). Re-exported from `index.ts`.
+- `api.ts` — added `ClickUpTaskLookupViewSchema` + `RunListItemSchema` + `RunListPushStatus` enum (`not_configured | not_pushed | partial | pushed`) + `RunListViewSchema`.
+
+**Backend changes (apps/meetsy-api):**
+- New `apps/meetsy-api/src/kb/ml-config.defaults.ts` — single source-of-truth for `DEFAULT_TUNABLES` + `DEFAULT_MODELS`, each field annotated with the file:line of the hardcoded constant it mirrors (so a code drift is visible in one place).
+- New `apps/meetsy-api/src/kb/ml-config.service.ts` — `MlConfigService.forWorkspace(id)` reads `WorkspaceMlConfig` and falls back to the defaults on missing row / malformed JSON / DB error (never throws). Exported from `KbModule` for `AnalysisProcessor` to consume.
+- `apps/meetsy-api/src/analysis/queue/analysis.processor.ts` — added `MlConfigService` dep + snapshot write immediately after the `status: "completed"` update. Wrapped in try/catch — snapshot failure logs a warning but never blocks run completion (the run row is already `completed` at that point).
+- New `apps/meetsy-api/src/clickup/tasks-lookup.controller.ts` + `tasks-lookup.service.ts` — `GET /workspaces/:id/clickup/tasks/:taskId` returns `ClickUpTaskLookupView | null`. Soft-scopes to the requesting workspace via `workspaceId` comparison; also returns null for soft-deleted tasks so the chip degrades to "unavailable" instead of an error. Reads the read-only `public.clickup_tasks` mirror. Any authenticated user.
+- `apps/meetsy-api/src/analysis/analysis.service.ts` — new `listRuns(workspaceId, {limit, offset, status?})` method. Batches: one `$transaction([findMany, count])` for the page + total; one `TaskPush.findMany` for the whole page's push audits; one `WorkspacePushConfig.findUnique` for the "not_configured" branch. `derivePushStatus` collapses per-run audit counts to a single label; `extractTaskCount` defensively counts `people[i].tasks + unassignedTasks` without a full Zod parse (returns null on a malformed row).
+- `apps/meetsy-api/src/analysis/analysis.controller.ts` — new `@Get("workspaces/:id/runs")` route on the existing controller. Clamps `limit` to `[1, 100]` (default 20), `offset` to `≥ 0`. Unknown `status` query values are silently dropped rather than 400ing — stale client bookmarks don't error.
+
+**New tests (all green):**
+- `apps/meetsy-api/src/kb/ml-config.service.spec.ts` — 4 cases: default fallback on missing row, merge partial DB row over defaults, DB error → defaults, unparsable JSON → defaults.
+- `apps/meetsy-api/src/clickup/tasks-lookup.service.spec.ts` — 5 cases: found, missing, cross-workspace (null), soft-deleted (null), null updatedDate → epoch ISO.
+- `apps/meetsy-api/src/analysis/analysis.service.list-runs.spec.ts` — 9 cases: pagination + meeting join, status filter branch, taskCount from well-formed result, taskCount = null on malformed, pushStatus null when queued, `not_configured`, `not_pushed`, `pushed` (all-pushed), `partial` (mixed).
+
+**Verify (all green):**
+| # | Target | Command | Result |
+|---|---|---|---|
+| a | `@ma/shared` build | `pnpm --filter @ma/shared build` | PASS |
+| b | Meetsy API typecheck | `pnpm --filter @ma/api typecheck` | PASS |
+| c | Meetsy web typecheck | `pnpm --filter @ma/web typecheck` | PASS |
+| d | Meetsy API tests | `pnpm --filter @ma/api test` | PASS — 41 suites / 235 tests (+18 new: 4 ml-config + 5 tasks-lookup + 9 list-runs) |
+| e | Clicksy backend tests | `pnpm test` (root) | PASS — 108 suites / 824 tests (no regression) |
+
+**Deferred to Phase 5:** the `/tuning` UI that writes `WorkspaceMlConfig`; the preview endpoint that replays a past run against a candidate config (reads `AnalysisRunSnapshot`). Nothing today READS `WorkspaceMlConfig` — the snapshot writer only writes the defaults today (via `MlConfigService.forWorkspace` which returns defaults when the row is absent).
+
+**Next:** PR-C — design-system foundations (shadcn/ui primitives, lucide-react, next-themes, sonner toast, ThemeProvider, transitional re-export shim in `app/ui.tsx`).
+

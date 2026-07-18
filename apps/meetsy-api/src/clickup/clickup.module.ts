@@ -11,6 +11,8 @@ import { PushConfigController } from "./push-config.controller";
 import { ClickUpController } from "./clickup.controller";
 import { PushController } from "./push.controller";
 import { WorkspacesController } from "./workspaces.controller";
+import { TasksLookupController } from "./tasks-lookup.controller";
+import { TasksLookupService } from "./tasks-lookup.service";
 
 /**
  * Phase 1 ClickUp write-back: per-workspace push config, the minimal ClickUp
@@ -21,7 +23,13 @@ import { WorkspacesController } from "./workspaces.controller";
   // Phase 3.2 — PushService uses LearningService (clickup → kb, one-way) to record
   // the shown nudge + acceptance on each FieldOverride.
   imports: [KbModule],
-  controllers: [PushConfigController, ClickUpController, PushController, WorkspacesController],
+  controllers: [
+    PushConfigController,
+    ClickUpController,
+    PushController,
+    WorkspacesController,
+    TasksLookupController,
+  ],
   providers: [
     ClickUpTokenService,
     ClickUpClient,
@@ -29,6 +37,7 @@ import { WorkspacesController } from "./workspaces.controller";
     TaskMapperService,
     PushConfigService,
     PushService,
+    TasksLookupService,
     WorkspaceResolver,
   ],
   // Exported so AnalysisModule can suggest a ClickUp member per roster participant

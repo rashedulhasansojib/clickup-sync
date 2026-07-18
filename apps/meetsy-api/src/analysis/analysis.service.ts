@@ -8,13 +8,23 @@ import type {
   CreateMeetingResponse,
   Participant,
   ProgressEvent,
+  ReviewResult,
+  ReviewSignals,
+  RunListItem,
+  RunListPushStatus,
+  RunListView,
   RunResponse,
+  RunStatus,
   SendChatResponse,
   SubmitFeedbackRequest,
   SubmitFeedbackResponse,
   Task,
 } from "@ma/shared";
-import { AnalysisResultSchema, ParticipantSchema, ProgressEventSchema } from "@ma/shared";
+import {
+  ParticipantSchema,
+  ProgressEventSchema,
+  ReviewResultSchema,
+} from "@ma/shared";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AzureOpenAIService } from "../azure/azure-openai.service";
@@ -179,6 +189,89 @@ export class AnalysisService {
     return { runId: run.id };
   }
 
+  /**
+   * GET /workspaces/:id/runs — paginated run list (newest first). Powers Phase 1's
+   * /home recent-runs card + /meetings history. Workspace-scoped via
+   * WorkspaceResolver; the count is over the same predicate as the page.
+   *
+   * `pushStatus` collapses TaskPush audit rows to a single label so the UI can
+   * render one badge per run (see RunListPushStatus). Requires ONE extra query
+   * per page (a groupBy over TaskPush + a single push-config lookup) — small vs.
+   * the alternative of joining in the DB with a raw SQL, and keeps the endpoint
+   * within Prisma's typed surface.
+   */
+  async listRuns(
+    workspaceId: string,
+    opts: { limit: number; offset: number; status?: RunStatus },
+  ): Promise<RunListView> {
+    const where = {
+      workspaceId,
+      ...(opts.status ? { status: opts.status } : {}),
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.analysisRun.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: opts.offset,
+        take: opts.limit,
+        select: {
+          id: true,
+          meetingId: true,
+          status: true,
+          result: true,
+          createdAt: true,
+          meeting: { select: { title: true, meetingDate: true } },
+        },
+      }),
+      this.prisma.analysisRun.count({ where }),
+    ]);
+
+    // Batch-fetch every run's push audit rows in one query, then reduce.
+    const runIds = items.map((r) => r.id);
+    const pushRows = runIds.length
+      ? await this.prisma.taskPush.findMany({
+          where: { runId: { in: runIds } },
+          select: { runId: true, status: true },
+        })
+      : [];
+    const byRun = new Map<string, { pushed: number; failed: number; skipped: number }>();
+    for (const p of pushRows) {
+      const acc = byRun.get(p.runId) ?? { pushed: 0, failed: 0, skipped: 0 };
+      if (p.status === "pushed") acc.pushed += 1;
+      else if (p.status === "failed") acc.failed += 1;
+      else acc.skipped += 1;
+      byRun.set(p.runId, acc);
+    }
+
+    // One workspace-scoped push-config lookup covers the whole page.
+    const pushConfig = await this.prisma.workspacePushConfig.findUnique({
+      where: { workspaceId },
+      select: { workspaceId: true },
+    });
+
+    const rows: RunListItem[] = items.map((r) => {
+      const taskCount = extractTaskCount(r.result);
+      const pushStatus = derivePushStatus({
+        completed: r.status === "completed",
+        taskCount,
+        pushCounts: byRun.get(r.id) ?? null,
+        hasPushConfig: !!pushConfig,
+      });
+      return {
+        id: r.id,
+        meetingId: r.meetingId,
+        meetingTitle: r.meeting.title,
+        meetingDate: r.meeting.meetingDate ? r.meeting.meetingDate.toISOString() : null,
+        status: r.status,
+        pushStatus,
+        taskCount,
+        createdAt: r.createdAt.toISOString(),
+      };
+    });
+
+    return { items: rows, total, limit: opts.limit, offset: opts.offset };
+  }
+
   /** GET /runs/:id — current status + result. */
   async getRun(orgId: string, runId: string, workspaceIdParam?: string): Promise<RunResponse> {
     const workspaceId = await this.workspaces.resolve(orgId, workspaceIdParam);
@@ -192,23 +285,28 @@ export class AnalysisService {
       runId: run.id,
       meetingId: run.meetingId,
       status: run.status,
-      // `.passthrough()` so the Phase-2c/3 signal keys the processor attaches
-      // alongside the AnalysisResult (kbContext / fieldPredictions / duplicates /
-      // assignment / adjustments) survive to the review UI — plain `.parse()`
-      // strips unknown keys and the signals never reach the client.
-      result: run.result
-        ? AnalysisResultSchema.passthrough().parse(run.result)
-        : null,
+      // ReviewResultSchema validates the AnalysisResult base + the five Phase-2c/3
+      // signal keys (kbContext / fieldPredictions / duplicates / assignment /
+      // adjustments) as first-class optional fields — so the signals survive
+      // end-to-end with real Zod validation, not `.passthrough()` widening.
+      result: run.result ? ReviewResultSchema.parse(run.result) : null,
       error: run.error ?? null,
     };
   }
 
   // ── Phase 3: feedback + chat ─────────────────────────────────────────────
 
-  /** Load a completed run's full context for feedback/chat operations (workspace-scoped). */
+  /** Load a completed run's full context for feedback/chat operations (workspace-scoped).
+   *
+   * Parses `run.result` with ReviewResultSchema so the Phase-2c/3 signal keys
+   * (kbContext / fieldPredictions / duplicates / assignment / adjustments) round-trip
+   * through feedback + chat writes — previously plain `.parse()` here silently stripped
+   * them and every mutation persisted a signal-free result, killing the learning-loop
+   * FieldOverride reader at push.service.ts (which reads .fieldPredictions).
+   */
   private async loadRunContext(orgId: string, runId: string, workspaceId: string): Promise<{
     orgId: string;
-    result: AnalysisResult;
+    result: ReviewResult;
     roster: Participant[];
     transcript: string;
     meetingDateISO: string;
@@ -224,7 +322,7 @@ export class AnalysisService {
     });
     if (!meeting) throw new NotFoundException(`Meeting ${run.meetingId} not found`);
 
-    const result = AnalysisResultSchema.parse(run.result);
+    const result = ReviewResultSchema.parse(run.result);
     const roster = ParticipantSchema.array().parse(meeting.roster ?? []);
     const transcript = meeting.normalizedTranscript ?? meeting.transcript;
     const meetingDateISO = (meeting.meetingDate ?? meeting.createdAt)
@@ -287,8 +385,11 @@ export class AnalysisService {
     const newTasks = ctx.tasks
       .filter((t) => !removeIds.has(t.id))
       .map((t) => revised.get(t.id) ?? t);
-    const result = changed
-      ? assemble(ctx.result.overview, ctx.roster, newTasks)
+    // assemble() rebuilds a strict AnalysisResult — merge the review signals back
+    // on so evidence (kbContext / fieldPredictions / duplicates / assignment /
+    // adjustments) survives the feedback write.
+    const result: ReviewResult = changed
+      ? mergeSignals(assemble(ctx.result.overview, ctx.roster, newTasks), ctx.result)
       : ctx.result;
     const accepted = !hasNegative;
 
@@ -358,9 +459,15 @@ export class AnalysisService {
     );
 
     let resultUpdated = false;
-    let result: AnalysisResult | null = null;
+    let result: ReviewResult | null = null;
     if (newTasks.length > 0) {
-      result = assemble(ctx.result.overview, ctx.roster, ctx.tasks.concat(newTasks));
+      // Same as submitFeedback: assemble() is strict; merge the review signals
+      // (kbContext / fieldPredictions / duplicates / assignment / adjustments)
+      // back on so chat-added tasks don't strip evidence from the run.
+      result = mergeSignals(
+        assemble(ctx.result.overview, ctx.roster, ctx.tasks.concat(newTasks)),
+        ctx.result,
+      );
       await this.prisma.analysisRun.update({
         where: { id: runId },
         data: { result: result as unknown as Prisma.InputJsonValue },
@@ -482,6 +589,28 @@ function flattenTasks(result: AnalysisResult): Task[] {
   return [...result.people.flatMap((p) => p.tasks), ...result.unassignedTasks];
 }
 
+/**
+ * Re-attach the five Phase-2c/3 signal keys onto a freshly-assembled AnalysisResult.
+ * Called after `assemble()` in feedback + chat writes so evidence (kbContext /
+ * fieldPredictions / duplicates / assignment / adjustments) survives the mutation
+ * — assemble() itself is intentionally signal-agnostic (parses to strict
+ * AnalysisResultSchema on output).
+ *
+ * The signals are OPTIONAL — a run whose pipeline abstained on all fields will
+ * legitimately have no `fieldPredictions`, and older v1 runs may have none at all.
+ * We copy whichever keys are present on `source`; missing keys stay missing.
+ */
+function mergeSignals(base: AnalysisResult, source: ReviewResult): ReviewResult {
+  const signals: ReviewSignals = {
+    kbContext: source.kbContext,
+    fieldPredictions: source.fieldPredictions,
+    duplicates: source.duplicates,
+    assignment: source.assignment,
+    adjustments: source.adjustments,
+  };
+  return { ...base, ...signals };
+}
+
 /** Next numeric task id ("t7" → 7), so newly-added tasks get fresh ids. */
 function nextTaskNumber(tasks: Task[]): number {
   let max = 0;
@@ -490,4 +619,47 @@ function nextTaskNumber(tasks: Task[]): number {
     if (m) max = Math.max(max, parseInt(m[1], 10));
   }
   return max + 1;
+}
+
+/**
+ * Best-effort task count for the runs-list badge. Doesn't Zod-parse the full
+ * result (this is called per row); reads people[i].tasks + unassignedTasks
+ * defensively so a malformed row degrades to null rather than throwing.
+ */
+function extractTaskCount(raw: unknown): number | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as { people?: unknown; unassignedTasks?: unknown };
+  if (!Array.isArray(r.people)) return null;
+  let n = 0;
+  for (const p of r.people) {
+    if (p && typeof p === "object" && Array.isArray((p as { tasks?: unknown }).tasks)) {
+      n += ((p as { tasks: unknown[] }).tasks).length;
+    }
+  }
+  if (Array.isArray(r.unassignedTasks)) n += r.unassignedTasks.length;
+  return n;
+}
+
+/**
+ * Collapse a run's TaskPush audit into one label. Non-completed runs get null.
+ * Completed but zero-task runs stay `not_pushed` (there was nothing to push).
+ *   not_configured — no push config for the workspace
+ *   not_pushed     — config exists but no push has been attempted for this run
+ *   pushed         — every task successfully pushed
+ *   partial        — some pushed, some failed/skipped (a re-push resolves this)
+ */
+function derivePushStatus(input: {
+  completed: boolean;
+  taskCount: number | null;
+  pushCounts: { pushed: number; failed: number; skipped: number } | null;
+  hasPushConfig: boolean;
+}): RunListPushStatus | null {
+  if (!input.completed) return null;
+  if (!input.hasPushConfig) return "not_configured";
+  if (!input.pushCounts) return "not_pushed";
+  const { pushed, failed, skipped } = input.pushCounts;
+  const total = pushed + failed + skipped;
+  if (total === 0) return "not_pushed";
+  if (failed === 0 && skipped === 0) return "pushed";
+  return "partial";
 }

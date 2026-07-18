@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { AnalysisResultSchema, ParticipantSchema, RunStatus } from "./domain";
+import { ParticipantSchema, RunStatus } from "./domain";
+import { ReviewResultSchema } from "./review-result";
 
 /**
  * HTTP request/response contracts between web and api.
@@ -42,12 +43,62 @@ export const ConfirmRosterRequestSchema = z.object({
 });
 export type ConfirmRosterRequest = z.infer<typeof ConfirmRosterRequestSchema>;
 
-// GET /runs/:id — poll run status + result
+// GET /runs/:id — poll run status + result. `result` carries the Phase-2c/3
+// signal keys (kbContext, fieldPredictions, duplicates, assignment, adjustments)
+// alongside the AnalysisResult base — see ReviewResultSchema.
 export const RunResponseSchema = z.object({
   runId: z.string(),
   meetingId: z.string(),
   status: RunStatus,
-  result: AnalysisResultSchema.nullable(),
+  result: ReviewResultSchema.nullable(),
   error: z.string().nullable().default(null),
 });
 export type RunResponse = z.infer<typeof RunResponseSchema>;
+
+// GET /workspaces/:id/clickup/tasks/:taskId — resolve a ClickUp task id to
+// human-readable metadata (title + status + assignee + url). Returns null (200)
+// when the task isn't in the workspace's read-only mirror — a chip pointing at
+// a task predating the KB sync is expected, not an error.
+export const ClickUpTaskLookupViewSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  status: z.string().nullable(),
+  assigneeName: z.string().nullable(),
+  url: z.string().nullable(),
+  updatedAt: z.string(),
+});
+export type ClickUpTaskLookupView = z.infer<typeof ClickUpTaskLookupViewSchema>;
+
+// GET /workspaces/:id/runs — paginated run list for Phase 1's /home + /meetings
+// history. `pushStatus` collapses TaskPush audit rows into a single label:
+//   not_configured — no push config for this workspace
+//   not_pushed     — config exists but no push has been attempted
+//   partial        — some tasks pushed / some failed or skipped
+//   pushed         — every task successfully pushed
+export const RunListPushStatus = z.enum([
+  "not_configured",
+  "not_pushed",
+  "partial",
+  "pushed",
+]);
+export type RunListPushStatus = z.infer<typeof RunListPushStatus>;
+
+export const RunListItemSchema = z.object({
+  id: z.string(),
+  meetingId: z.string(),
+  meetingTitle: z.string(),
+  meetingDate: z.string().nullable(),
+  status: RunStatus,
+  pushStatus: RunListPushStatus.nullable(),
+  taskCount: z.number().int().nonnegative().nullable(),
+  createdAt: z.string(),
+});
+export type RunListItem = z.infer<typeof RunListItemSchema>;
+
+export const RunListViewSchema = z.object({
+  items: z.array(RunListItemSchema),
+  total: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
+});
+export type RunListView = z.infer<typeof RunListViewSchema>;

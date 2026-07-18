@@ -7,6 +7,7 @@ import type {
   CreateMeetingRequest,
   CreateMeetingResponse,
   ProgressEvent,
+  RunListView,
   RunResponse,
   SendChatRequest,
   SendChatResponse,
@@ -16,16 +17,47 @@ import type {
 import {
   ConfirmRosterRequestSchema,
   CreateMeetingRequestSchema,
+  RunStatus,
   SendChatRequestSchema,
   SubmitFeedbackRequestSchema,
 } from "@ma/shared";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { CurrentUser } from "../auth/decorators";
+import { WorkspaceResolver } from "./workspace.resolver";
 import { AnalysisService } from "./analysis.service";
 
 @Controller()
 export class AnalysisController {
-  constructor(private readonly analysis: AnalysisService) {}
+  constructor(
+    private readonly analysis: AnalysisService,
+    private readonly workspaces: WorkspaceResolver,
+  ) {}
+
+  /**
+   * Paginated run list (newest first) for a workspace. Powers Phase 1's home +
+   * meetings-history pages. Any authenticated user; the WorkspaceResolver
+   * enforces same-org scoping.
+   */
+  @Get("workspaces/:id/runs")
+  async listRuns(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id") id: string,
+    @Query("limit") limitParam?: string,
+    @Query("offset") offsetParam?: string,
+    @Query("status") statusParam?: string,
+  ): Promise<RunListView> {
+    const workspaceId = await this.workspaces.resolve(user.orgId, id);
+    const limit = Math.min(
+      Math.max(Number.parseInt(limitParam ?? "20", 10) || 20, 1),
+      100,
+    );
+    const offset = Math.max(Number.parseInt(offsetParam ?? "0", 10) || 0, 0);
+    // Unknown status → drop the filter rather than 400 — the query-string is
+    // client-controlled and a stale bookmark shouldn't error.
+    const parsedStatus = statusParam ? RunStatus.safeParse(statusParam) : null;
+    const status = parsedStatus?.success ? parsedStatus.data : undefined;
+    return this.analysis.listRuns(workspaceId, { limit, offset, status });
+  }
 
   /** Upload a transcript: creates meeting + Stage-0 roster + queued run. */
   @Post("meetings")

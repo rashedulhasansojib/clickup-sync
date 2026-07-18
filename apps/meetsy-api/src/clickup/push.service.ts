@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { AnalysisResultSchema } from "@ma/shared";
+import { AnalysisResultSchema, TaskPredictionSchema, type TaskPrediction } from "@ma/shared";
+import { z } from "zod";
 import { PrismaService } from "../prisma/prisma.service";
 import { TaskMapperService } from "./task-mapper.service";
 import { PushConfigService } from "./push-config.service";
@@ -155,8 +156,21 @@ export class PushService {
 
     // Phase 2c.3 — the run's stored weak predictions, keyed by the SAME task id
     // (`t1..tM`) the push request carries as meetsyTaskId (assemble preserves it).
-    const predictions =
-      (run.result as { fieldPredictions?: Record<string, unknown> } | null)?.fieldPredictions ?? {};
+    // Read via a dedicated Zod schema over the top-level `fieldPredictions` map
+    // so v2 Phase 0's ReviewResultSchema stays the source of truth for the
+    // prediction shape (previously an untyped raw cast). Independent of the
+    // AnalysisResult base parse: even if the base is malformed (unlikely, but
+    // possible with legacy fixtures), predictions still resolve — this preserves
+    // the FieldOverride logging invariant "predicted is captured whenever it exists".
+    const PredictionsMapSchema = z.record(z.string(), TaskPredictionSchema.passthrough());
+    const rawPredictions = (run.result as { fieldPredictions?: unknown } | null)?.fieldPredictions;
+    const parsedPredictions = rawPredictions
+      ? PredictionsMapSchema.safeParse(rawPredictions)
+      : null;
+    const predictions: Record<string, TaskPrediction | Record<string, unknown>> =
+      parsedPredictions?.success
+        ? parsedPredictions.data
+        : ((rawPredictions ?? {}) as Record<string, Record<string, unknown>>);
     // Phase 3.2 — the learning snapshot (organic corrections only), computed ONCE
     // before the loop. Used to recompute the nudge the loop showed per task so the
     // FieldOverride records {shown, accepted} — the honest loop-effectiveness signal.

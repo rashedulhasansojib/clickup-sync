@@ -70,28 +70,28 @@ enum KbSourceType {
 }
 
 model Meeting {
-  id          String  @id @default(cuid())
+  id                   String    @id @default(cuid())
   // Soft references to public (no DB FK): org owns users, workspace owns meetings.
-  orgId       String
-  workspaceId String  @map("workspace_id")
-  title       String
+  orgId                String
+  workspaceId          String    @map("workspace_id")
+  title                String
   // Raw uploaded transcript (plain text or Zoom VTT).
-  transcript  String  @db.Text
+  transcript           String    @db.Text
   // Deterministically normalized transcript (VTT parsed to clean timestamped
   // turns). The pipeline analyzes this; null for legacy rows.
-  normalizedTranscript String? @db.Text
+  normalizedTranscript String?   @db.Text
   // The date the meeting took place — anchor for resolving relative due dates.
-  meetingDate DateTime?
+  meetingDate          DateTime?
   // Confirmed participant roster (Participant[] from @ma/shared). Null until the
   // user confirms the Stage-0 extracted roster via POST /meetings/:id/roster.
-  roster      Json?
+  roster               Json?
   // Meeting-level client, chosen by the user AT UPLOAD (Meetsy never predicts it).
   // `clientOptionId` is the ClickUp dropdown option UUID (the push default for every
   // task); `clientName` is its display name (conditions assignment ranking + UI).
   // Both null ⇒ no meeting client (push omits client unless a per-task override).
-  clientOptionId String? @map("client_option_id")
-  clientName     String? @map("client_name")
-  createdAt   DateTime @default(now())
+  clientOptionId       String?   @map("client_option_id")
+  clientName           String?   @map("client_name")
+  createdAt            DateTime  @default(now())
 
   runs AnalysisRun[]
 
@@ -101,31 +101,34 @@ model Meeting {
 }
 
 model AnalysisRun {
-  id          String    @id @default(cuid())
-  orgId       String
-  workspaceId String    @map("workspace_id")
-  meetingId   String
-  status      RunStatus @default(queued)
+  id               String    @id @default(cuid())
+  orgId            String
+  workspaceId      String    @map("workspace_id")
+  meetingId        String
+  status           RunStatus @default(queued)
   // Stores the AnalysisResult shape (@ma/shared) once the pipeline completes.
-  result      Json?
-  error       String?
+  result           Json?
+  error            String?
   // True once the user has accepted the result (or left it unreviewed = default
   // accepted). Downvoted/commented tasks trigger a targeted re-run.
-  accepted    Boolean   @default(false)
+  accepted         Boolean   @default(false)
   // Observability: LLM usage accumulated across the pipeline for this run.
-  promptTokens     Int @default(0)
-  completionTokens Int @default(0)
-  llmCalls         Int @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  promptTokens     Int       @default(0)
+  completionTokens Int       @default(0)
+  llmCalls         Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  meeting      Meeting       @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  meeting      Meeting              @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   feedback     Feedback[]
   chatMessages ChatMessage[]
+  snapshot     AnalysisRunSnapshot?
 
   @@index([orgId])
   @@index([workspaceId])
   @@index([meetingId])
+  // v2 Phase 0 — powers GET /workspaces/:id/runs (newest first, paginated).
+  @@index([workspaceId, createdAt])
   @@schema("meetsy")
 }
 
@@ -257,11 +260,11 @@ model KbChunk {
   chunkIndex  Int          @default(0)
 
   // The embedded card text + its sha256 — the incremental-refresh gate.
-  content     String  @db.Text
+  content     String @db.Text
   contentHash String
 
   // pgvector column; the migration adds the real `vector(1024)` + the HNSW index.
-  embedding   Unsupported("vector(1024)")?
+  embedding Unsupported("vector(1024)")?
 
   // Filter metadata (workspace scope today; facet filters in 2c).
   status        String?
@@ -274,7 +277,7 @@ model KbChunk {
   // Model provenance — a future model/dim bump becomes a controlled re-embed.
   embeddingModel   String?
   embeddingDims    Int
-  embeddingVersion Int      @default(1)
+  embeddingVersion Int     @default(1)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -323,7 +326,7 @@ model KbSyncState {
 // the EXTRACTED TEXT (to re-chunk on a future model bump) and discard raw bytes;
 // `sha256` (over the raw bytes) is the idempotency/dedup key.
 model KbDocument {
-  id            String  @id @default(cuid())
+  id            String   @id @default(cuid())
   workspaceId   String
   filename      String
   mimeType      String
@@ -331,13 +334,13 @@ model KbDocument {
   sha256        String
   byteSize      Int
   pageCount     Int?
-  charCount     Int     @default(0)
-  chunkCount    Int     @default(0)
+  charCount     Int      @default(0)
+  chunkCount    Int      @default(0)
   // Extracted plain text (kept so a model/dim bump can re-chunk without the file).
-  extractedText String? @db.Text
+  extractedText String?  @db.Text
   // pending | parsing | embedding | ready | error
-  status        String  @default("pending")
-  error         String? @db.Text
+  status        String   @default("pending")
+  error         String?  @db.Text
   // The honest improvement metric output (novelty + answerability-lift), JSON.
   // See KbDocMetric in the app — reported as two never-blended signals.
   metric        Json?
@@ -368,6 +371,45 @@ model KbDocTaskLink {
 
   @@unique([documentId, taskId])
   @@index([workspaceId, taskId])
+  @@schema("meetsy")
+}
+
+// v2 Phase 0 — per-workspace ML tunables + model routing. WRITTEN in Phase 0
+// (via the Phase 5 `/tuning` UI in the future); READ today only by the snapshot
+// writer (`MlConfigService.forWorkspace`) which falls back to hardcoded defaults
+// when the row is absent. One config per workspace (`workspaceId` is the PK).
+//
+// `tunables` shape: WorkspaceTunablesSchema (@ma/shared/ml-config)
+// `models`   shape: WorkspaceModelsSchema (@ma/shared/ml-config)
+// Soft ref to public.workspaces — no cross-schema FK.
+model WorkspaceMlConfig {
+  workspaceId String   @id @map("workspace_id")
+  orgId       String   @map("org_id")
+  tunables    Json
+  models      Json
+  updatedBy   String?  @map("updated_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([orgId])
+  @@schema("meetsy")
+}
+
+// v2 Phase 0 — a frozen copy of the ML config at run-completion time. Written
+// after `AnalysisRun.status = completed` in the analysis processor; read by
+// Phase 5's preview replay (unused today). Append-only, 1:1 with AnalysisRun.
+//
+// `tunables` / `models` shape: same as WorkspaceMlConfig (they're a snapshot).
+model AnalysisRunSnapshot {
+  runId       String   @id @map("run_id")
+  workspaceId String   @map("workspace_id")
+  tunables    Json
+  models      Json
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  run AnalysisRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
   @@schema("meetsy")
 }
 
@@ -446,12 +488,12 @@ model Workspace {
 // workspace covers (coverage check + Clicksy backfill trigger). Maps match
 // Clicksy's `workspace_spaces` exactly. Read-only.
 model WorkspaceSpace {
-  id                   String   @id @default(cuid())
-  workspaceId          String   @map("workspace_id")
-  spaceId              String   @map("space_id")
+  id                   String  @id @default(cuid())
+  workspaceId          String  @map("workspace_id")
+  spaceId              String  @map("space_id")
   name                 String
-  backfillLookbackDays Int      @default(30) @map("backfill_lookback_days")
-  enabled              Boolean  @default(true)
+  backfillLookbackDays Int     @default(30) @map("backfill_lookback_days")
+  enabled              Boolean @default(true)
 
   @@unique([workspaceId, spaceId])
   @@index([workspaceId])
@@ -502,15 +544,15 @@ model ClickupTask {
 // Clicksy's mirrored ClickUp task comments (the 2.0 table). Folded into a task's
 // card once `ClickupTask.commentsSyncedAt` is set. Read-only.
 model ClickupTaskComment {
-  commentId    String    @id @map("comment_id")
-  workspaceId  String    @map("workspace_id")
-  taskId       String    @map("task_id")
-  commentText  String?   @map("comment_text")
-  userId       String?   @map("user_id")
-  userName     String?   @map("user_name")
-  userEmail    String?   @map("user_email")
-  commentDate  DateTime? @map("comment_date")
-  isDeleted    Boolean   @default(false) @map("is_deleted")
+  commentId   String    @id @map("comment_id")
+  workspaceId String    @map("workspace_id")
+  taskId      String    @map("task_id")
+  commentText String?   @map("comment_text")
+  userId      String?   @map("user_id")
+  userName    String?   @map("user_name")
+  userEmail   String?   @map("user_email")
+  commentDate DateTime? @map("comment_date")
+  isDeleted   Boolean   @default(false) @map("is_deleted")
 
   @@index([taskId])
   @@map("clickup_task_comments")

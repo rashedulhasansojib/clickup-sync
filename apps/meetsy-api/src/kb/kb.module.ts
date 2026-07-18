@@ -22,6 +22,7 @@ import { AssignmentService } from "./assignment.service";
 import { AssigneeResolverService } from "../clickup/assignee-resolver.service";
 import { LearningService } from "./learning.service";
 import { LearningController } from "./learning.controller";
+import { MlConfigService } from "./ml-config.service";
 
 /**
  * Phase 2a knowledge-base slice: per-workspace onboarding (coverage check →
@@ -52,10 +53,19 @@ import { LearningController } from "./learning.controller";
     AssignmentService,
     AssigneeResolverService,
     LearningService,
+    MlConfigService,
     WorkspaceResolver,
   ],
   // Phase 2c/3 — the analysis pipeline + push ground themselves via these (one-way
   // deps analysis → kb and clickup → kb; KbModule imports neither at module level).
-  exports: [KbSearchService, KbQueue, FieldPredictionService, AssignmentService, LearningService],
+  // v2 Phase 0 — MlConfigService feeds the AnalysisRunSnapshot writer.
+  exports: [
+    KbSearchService,
+    KbQueue,
+    FieldPredictionService,
+    AssignmentService,
+    LearningService,
+    MlConfigService,
+  ],
 })
 export class KbModule {}

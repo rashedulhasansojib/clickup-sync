@@ -62,7 +62,11 @@
       "Bash(npm install *)",
       "Bash(dir /B \"C:\\\\Users\\\\Pingu\\\\Downloads\\\\Clcikup\\\\clickup-sync-nestjs-starter-with-claude\\\\clickup-sync-nestjs\")",
       "Bash(npx vite *)",
-      "Bash(dir *)"
+      "Bash(dir *)",
+      "Bash(docker exec clickup-sync-postgres-1 *)",
+      "Bash(curl -sS -o /dev/null -w \"clicksy-api /api/health: HTTP %{http_code}\\\\n\" http://localhost:3002/api/health)",
+      "Bash(curl -sS -o /dev/null -w \"clicksy-web \\(5173\\): HTTP %{http_code}\\\\n\" http://localhost:5173)",
+      "Bash(grep -vE \"= \\(\\\\\"|'|\\\\`\\)\")"
     ]
   }
 }

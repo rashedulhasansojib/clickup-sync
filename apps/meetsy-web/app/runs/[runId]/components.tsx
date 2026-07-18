@@ -10,7 +10,6 @@ import {
 } from "react";
 import Link from "next/link";
 import type {
-  AnalysisResult,
   ChatMessage,
   FeedbackItem,
   PersonTasks,
@@ -176,8 +175,8 @@ export function ResultsSection({
   onResultReplace,
 }: {
   runId: string;
-  result: AnalysisResult;
-  onResultReplace: (result: AnalysisResult) => void;
+  result: ReviewResult;
+  onResultReplace: (result: ReviewResult) => void;
 }) {
   const [feedback, setFeedback] = useState<Record<string, TaskFeedback>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -276,9 +275,8 @@ export function ResultsSection({
 }
 
 // ── Result rendering ──────────────────────────────────────────────────
-export function ResultView({ result }: { result: AnalysisResult }) {
-  // The stored result carries Phase-2c/3 signal maps not in the @ma/shared type.
-  const rr = result as ReviewResult;
+export function ResultView({ result }: { result: ReviewResult }) {
+  const rr = result;
   return (
     <div className="space-y-8">
       <section>
@@ -537,7 +535,7 @@ export function ChatPanel({
   onResultReplace,
 }: {
   runId: string;
-  onResultReplace: (result: AnalysisResult) => void;
+  onResultReplace: (result: ReviewResult) => void;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -696,7 +694,7 @@ interface PushEdit {
 }
 
 /** Flatten a result into one ordered task list (assigned people, then unassigned). */
-function flattenTasks(result: AnalysisResult): Task[] {
+function flattenTasks(result: ReviewResult): Task[] {
   return [...result.people.flatMap((p) => p.tasks), ...result.unassignedTasks];
 }
 
@@ -713,7 +711,7 @@ export function PushSection({
   result,
 }: {
   runId: string;
-  result: AnalysisResult;
+  result: ReviewResult;
 }) {
   const [status, setStatus] = useState<RunPushStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -728,7 +726,7 @@ export function PushSection({
 
   const tasks = flattenTasks(result);
   // The result also carries the Phase-3.1 assignment recs (for assignee pre-fill).
-  const rr = result as ReviewResult;
+  const rr = result;
 
   // Build the initial editable state from the loaded status + each task's
   // pipeline defaults. Already-`pushed` tasks are excluded from the push by
