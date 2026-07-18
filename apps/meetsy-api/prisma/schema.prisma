@@ -95,6 +95,12 @@ model Meeting {
 
   runs AnalysisRun[]
 
+  // v2 Phase 1 — a DB-only `tsv` tsvector column (title=A + transcript=C) with
+  // a GIN index. Prisma can't model tsvector; the migration adds it as a
+  // generated column so writes populate it automatically. Powers full-text
+  // search at GET /workspaces/:id/runs/search. See migration
+  // 20260718150000_meetsy_v2_phase1_run_search.
+
   @@index([orgId])
   @@index([workspaceId])
   @@schema("meetsy")

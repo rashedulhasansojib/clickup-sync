@@ -3,6 +3,8 @@ import type {
   CreateMeetingResponse,
   ConfirmRosterRequest,
   RunResponse,
+  RunListView,
+  RunStatus,
   FeedbackItem,
   SubmitFeedbackResponse,
   ChatHistoryResponse,
@@ -199,6 +201,20 @@ export interface LearningFieldSummary {
 export interface LearningSummary {
   totalOverrides: number;
   fields: LearningFieldSummary[];
+}
+
+/** v2 Phase 1 — GET /workspaces/:id/learning/me — per-user weekly digest. */
+export interface LearningMeWeek {
+  weekStart: string;
+  overrides: number;
+  agreements: number;
+  nudgesShown: number;
+  nudgesAccepted: number;
+}
+export interface LearningMeView {
+  userId: string;
+  totalOverrides: number;
+  weeks: LearningMeWeek[];
 }
 
 /** Per-task outcome from POST /runs/:id/push. */
@@ -505,6 +521,42 @@ export const api = {
   },
 
   /**
+   * GET /workspaces/:id/runs — paginated run history (newest first). Powers
+   * v2 Phase 1's /home recent-runs card + /meetings history list.
+   */
+  listRuns(
+    workspaceId: string,
+    opts: { limit?: number; offset?: number; status?: RunStatus } = {},
+  ): Promise<RunListView> {
+    const qs = new URLSearchParams();
+    if (opts.limit != null) qs.set("limit", String(opts.limit));
+    if (opts.offset != null) qs.set("offset", String(opts.offset));
+    if (opts.status) qs.set("status", opts.status);
+    const q = qs.toString();
+    return request<RunListView>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/runs${q ? `?${q}` : ""}`,
+    );
+  },
+
+  /**
+   * GET /workspaces/:id/runs/search — full-text search across meeting title +
+   * transcript. Same RunListView shape as listRuns; empty `q` is a 400.
+   */
+  searchRuns(
+    workspaceId: string,
+    opts: { q: string; limit?: number; offset?: number; status?: RunStatus },
+  ): Promise<RunListView> {
+    const qs = new URLSearchParams();
+    qs.set("q", opts.q);
+    if (opts.limit != null) qs.set("limit", String(opts.limit));
+    if (opts.offset != null) qs.set("offset", String(opts.offset));
+    if (opts.status) qs.set("status", opts.status);
+    return request<RunListView>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/runs/search?${qs.toString()}`,
+    );
+  },
+
+  /**
    * Absolute URL for the SSE progress stream (consumed by EventSource).
    * The stream is now an authenticated route — the EventSource is created with
    * `{ withCredentials: true }` so the cookie is sent (see `useRunStream`).
@@ -627,6 +679,16 @@ export const api = {
   getLearning(workspaceId: string): Promise<LearningSummary> {
     return request<LearningSummary>(
       `/workspaces/${encodeURIComponent(workspaceId)}/learning?workspaceId=${encodeURIComponent(workspaceId)}`,
+    );
+  },
+
+  /**
+   * GET /workspaces/:id/learning/me — per-user weekly digest. Powers /home's
+   * "Learning digest" card. Always returns 6 zero-padded weeks.
+   */
+  getLearningMe(workspaceId: string): Promise<LearningMeView> {
+    return request<LearningMeView>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/learning/me`,
     );
   },
 

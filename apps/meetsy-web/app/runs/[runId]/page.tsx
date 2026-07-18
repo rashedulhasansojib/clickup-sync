@@ -6,12 +6,22 @@ import type { ReviewResult, RunStatus } from "@ma/shared";
 import { api, ApiError } from "@/lib/api";
 import { useRunStream } from "@/lib/useRunStream";
 import { Button, Card, ErrorBanner, Spinner } from "@/app/ui";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ChatPanel,
   PipelineStepper,
   PushSection,
   ResultsSection,
 } from "./components";
+
+type TabKey = "overview" | "push" | "chat" | "insights";
+const TAB_KEYS: TabKey[] = ["overview", "push", "chat", "insights"];
+
+function tabFromHash(): TabKey {
+  if (typeof window === "undefined") return "overview";
+  const raw = window.location.hash.replace(/^#/, "");
+  return (TAB_KEYS as string[]).includes(raw) ? (raw as TabKey) : "overview";
+}
 
 export default function RunPage() {
   const router = useRouter();
@@ -25,6 +35,27 @@ export default function RunPage() {
   const [error, setError] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
   const settledRef = useRef(false);
+
+  // Which tab is active — synced with #hash so a shared link opens the right view.
+  const [tab, setTab] = useState<TabKey>("overview");
+  useEffect(() => {
+    setTab(tabFromHash());
+    function onHash() {
+      setTab(tabFromHash());
+    }
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  function selectTab(next: string) {
+    const key = (TAB_KEYS as string[]).includes(next) ? (next as TabKey) : "overview";
+    setTab(key);
+    if (typeof window !== "undefined") {
+      // history.replaceState to avoid piling up back-stack entries per tab click.
+      const url = `${window.location.pathname}${window.location.search}#${key}`;
+      window.history.replaceState(null, "", url);
+    }
+  }
 
   // Authoritative status + result come from GET /runs/:id — the SSE stream
   // never carries the result. We fetch on the stream's "done" signal, then
@@ -101,7 +132,7 @@ export default function RunPage() {
             <StatusPill status={status} />
           </p>
         </div>
-        <Button variant="secondary" onClick={() => router.push("/")}>
+        <Button variant="secondary" onClick={() => router.push("/new")}>
           New analysis
         </Button>
       </div>
@@ -109,7 +140,7 @@ export default function RunPage() {
       {status === "failed" ? (
         <Card className="space-y-3 p-6">
           <ErrorBanner message={error ?? "The run failed."} />
-          <Button variant="secondary" onClick={() => router.push("/")}>
+          <Button variant="secondary" onClick={() => router.push("/new")}>
             Start over
           </Button>
         </Card>
@@ -140,21 +171,68 @@ export default function RunPage() {
           )}
 
           {result && (
-            <ResultsSection
-              runId={runId}
-              result={result}
-              onResultReplace={setResult}
-            />
-          )}
+            <Tabs
+              value={tab}
+              onValueChange={selectTab}
+              className="w-full space-y-4"
+            >
+              <TabsList>
+                <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="push">Push</TabsTrigger>
+                <TabsTrigger value="chat">Chat</TabsTrigger>
+                <TabsTrigger value="insights">Insights</TabsTrigger>
+              </TabsList>
 
-          {/* ClickUp write-back — edit assignee/priority/due, then push. */}
-          {result && <PushSection runId={runId} result={result} />}
+              {/*
+                `forceMount` keeps every tab's subtree alive across switches so
+                ChatPanel's history + PushSection's in-flight fetches don't
+                restart. Inactive panels hide via `data-[state=inactive]:hidden`
+                — Radix still handles focus and ARIA correctly.
+              */}
+              <TabsContent
+                value="overview"
+                forceMount
+                className="data-[state=inactive]:hidden"
+              >
+                <ResultsSection
+                  runId={runId}
+                  result={result}
+                  onResultReplace={setResult}
+                />
+              </TabsContent>
 
-          {/* Chat panel — only meaningful once a result exists. Mounted once
-              and left mounted (not keyed on result) so feedback/chat updates
-              to the result never wipe chat history or in-flight state. */}
-          {result && (
-            <ChatPanel runId={runId} onResultReplace={setResult} />
+              <TabsContent
+                value="push"
+                forceMount
+                className="data-[state=inactive]:hidden"
+              >
+                <PushSection runId={runId} result={result} />
+              </TabsContent>
+
+              <TabsContent
+                value="chat"
+                forceMount
+                className="data-[state=inactive]:hidden"
+              >
+                <ChatPanel runId={runId} onResultReplace={setResult} />
+              </TabsContent>
+
+              <TabsContent
+                value="insights"
+                forceMount
+                className="data-[state=inactive]:hidden"
+              >
+                <Card className="p-8 text-center">
+                  <h3 className="text-base font-medium text-zinc-900">
+                    Insights coming in Phase 2
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    Evidence panels (owner ranking, precedent tasks,
+                    kbContext) + learning-loop nudges will surface here.
+                  </p>
+                </Card>
+              </TabsContent>
+            </Tabs>
           )}
         </>
       )}

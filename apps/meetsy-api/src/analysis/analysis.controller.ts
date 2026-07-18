@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Post, Query, Sse } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Sse,
+} from "@nestjs/common";
 import { Observable } from "rxjs";
 import type { AuthPrincipal } from "@clicksy/shared";
 import type {
@@ -57,6 +66,47 @@ export class AnalysisController {
     const parsedStatus = statusParam ? RunStatus.safeParse(statusParam) : null;
     const status = parsedStatus?.success ? parsedStatus.data : undefined;
     return this.analysis.listRuns(workspaceId, { limit, offset, status });
+  }
+
+  /**
+   * v2 Phase 1 — full-text search over meeting title + transcript for the
+   * workspace's runs. Same RunListView shape as listRuns; empty `q` is a
+   * 400 (the client should call listRuns for the unfiltered view).
+   *
+   * NB: this route MUST be declared BEFORE `GET /runs/:id` in NestJS's route
+   * table so `runs/search` is not swallowed as a run id. Same reason listRuns
+   * lives at the top of this controller.
+   */
+  @Get("workspaces/:id/runs/search")
+  async searchRuns(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id") id: string,
+    @Query("q") q?: string,
+    @Query("limit") limitParam?: string,
+    @Query("offset") offsetParam?: string,
+    @Query("status") statusParam?: string,
+  ): Promise<RunListView> {
+    const trimmed = (q ?? "").trim();
+    if (!trimmed) {
+      throw new BadRequestException("Query parameter `q` is required");
+    }
+    if (trimmed.length > 200) {
+      throw new BadRequestException("Query is too long (max 200 chars)");
+    }
+    const workspaceId = await this.workspaces.resolve(user.orgId, id);
+    const limit = Math.min(
+      Math.max(Number.parseInt(limitParam ?? "20", 10) || 20, 1),
+      100,
+    );
+    const offset = Math.max(Number.parseInt(offsetParam ?? "0", 10) || 0, 0);
+    const parsedStatus = statusParam ? RunStatus.safeParse(statusParam) : null;
+    const status = parsedStatus?.success ? parsedStatus.data : undefined;
+    return this.analysis.searchRuns(workspaceId, {
+      q: trimmed,
+      limit,
+      offset,
+      status,
+    });
   }
 
   /** Upload a transcript: creates meeting + Stage-0 roster + queued run. */

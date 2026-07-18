@@ -172,7 +172,7 @@ function Wizard({ ws, workspaceName }: { ws: string; workspaceName: string }) {
       )}
       {step === 6 && <SummaryStep ws={ws} onNext={() => setStep(7)} />}
       {step === 7 && (
-        <DocumentsStep ws={ws} onFinish={() => router.replace("/")} />
+        <DocumentsStep ws={ws} onFinish={() => router.replace("/home")} />
       )}
     </div>
   );

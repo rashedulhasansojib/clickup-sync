@@ -695,3 +695,84 @@ button, card, dialog, sheet, tabs, dropdown-menu, command, tooltip, skeleton, so
 
 **Phase 0 status:** DONE. All three PRs (A/B/C) landed on `feat/meetsy-phase0`. Ready for Phase 1 (Sidebar + Home + History).
 
+---
+
+## Phase 1 (v2) — IA + Home + History
+
+Spec: `docs/superpowers/specs/2026-07-18-meetsy-v2-phase1-ia-home-history-design.md`
+Branch: `feat/meetsy-phase0` (still owns v2 work until it lands on `main`)
+
+### 2026-07-18 — PR-D: sidebar shell + /home + /meetings history (frontend only) — DONE / GREEN
+
+Frontend-only; no schema, no endpoints. Uses the `GET /workspaces/:id/runs` endpoint that already landed in Phase-0 PR-B.
+
+- **New:** `apps/meetsy-web/components/nav/sidebar.tsx` — a persistent left rail (Brand · Home / New meeting / Meetings · Workspace switcher · Settings [Owner/Admin only: Push, KB] · user email). `md+` shows a fixed 256px column; smaller screens collapse into an off-canvas `Sheet` triggered by a hamburger in a slim top bar. Active-route highlight matches the current pathname's PREFIX (`/settings/kb/documents` still highlights KB).
+- **AppShell rewrite:** `SignedInShell` swaps horizontal Brand → two-column `flex md:flex-row` (Sidebar + main). `<Toaster />` stays mounted at the shell level; `UserProvider` + `KbGate` + the keyed workspace-remount div are preserved verbatim.
+- **`/` → redirect to `/home`.** The old upload form moved to `/new/page.tsx` (`git mv` — history intact). Root is now a client `router.replace("/home")` with a Spinner fallback (client-side because the AppShell auth gate runs client-side and a server redirect would race the KB gate).
+- **`/home` (new):** two-column layout — recent-runs list (limit 5) on the left `md:col-span-2`, learning-digest slot on the right. Reuses the shared `RunRow` component. Empty state links to `/new`.
+- **`/meetings` (new):** paginated full history — Filter chips (All / Completed / Running / Failed) + a `?q=&page=&status=` deep-linkable URL surface. Filter changes `router.replace()` (no back-stack churn). Wrapped in `<Suspense>` per Next 15's `useSearchParams` rule.
+- **Shared `RunRow`** (`apps/meetsy-web/components/runs/run-list.tsx`) — one look for both /home and /meetings rows: title · meeting-date-or-relative · task count · status pill · push-status pill (`not_configured/not_pushed/partial/pushed`).
+- **`api.listRuns`** exported from `apps/meetsy-web/lib/api.ts` (thin `/workspaces/:id/runs?limit&offset&status` wrapper).
+- **Hardcoded `/` refs updated explicitly** rather than relying on the new redirect: `runs/[runId]/page.tsx`'s "New analysis" + "Start over" buttons → `/new`; `meetings/[id]/roster/page.tsx`'s Back → `/new`; `onboarding/page.tsx`'s Finish → `/home`.
+
+### 2026-07-18 — PR-E: runs full-text search backend + UI — DONE / GREEN
+
+Full-text search over meeting title + transcript, backing `/meetings?q=…`.
+
+- **New migration** `apps/meetsy-api/prisma/migrations/20260718150000_meetsy_v2_phase1_run_search/migration.sql` — HAND-AUTHORED. Adds a generated `tsv tsvector` column to `meetsy."Meeting"` (title weighted A, transcript weighted C) + a GIN index. Postgres 12+ generated column recomputes on every INSERT/UPDATE — no trigger, no backfill needed. Prisma can't model `tsvector`, so a comment-only hint on `Meeting` in schema.prisma points to the migration.
+- **New service method** `AnalysisService.searchRuns` in `apps/meetsy-api/src/analysis/analysis.service.ts` — uses `$queryRaw` for the WHERE + rank + count (order `ts_rank_cd DESC, createdAt DESC`), reuses the same push-status derivation as `listRuns`. Returns the exact `RunListView` shape so the client renders search results with the same component.
+- **New endpoint** `GET /workspaces/:id/runs/search?q=&limit=&offset=&status=` on `AnalysisController` — empty/whitespace-only `q` → 400; `q` > 200 chars → 400; unknown `status` silently dropped (matches `listRuns`). Declared BEFORE `GET /runs/:id` in the file's route table so it isn't shadowed as a run id.
+- **`api.searchRuns`** exported from `apps/meetsy-web/lib/api.ts`.
+- **`/meetings` search UX:** a `Search`-icon-prefixed input on the right of the filter row, debounced 300ms into the URL's `?q=`. Non-empty q hits `searchRuns`; empty q hits `listRuns`. Clear button (`X` icon) inside the input clears both the local input state and `?q=`. No-results state shows the searched string + a "Clear search" link. Loading state keeps the last results with `opacity-50 pointer-events-none`.
+- **Spec** `analysis.service.search-runs.spec.ts` — 4 tests: shape-mapping, empty-q guard, no-match, BigInt→number coercion of the Postgres COUNT.
+
+### 2026-07-18 — PR-F: per-user learning digest — DONE / GREEN
+
+Per-user rollup for /home's "is the model getting better at predicting me?" card.
+
+- **New service method** `LearningService.meSummary(workspaceId, userId)` in `apps/meetsy-api/src/kb/learning.service.ts` — joins `FieldOverride ↔ TaskPush` on `(runId, meetsyTaskId)` and filters by `TaskPush.pushedBy = userId`. Buckets the last 6 ISO weeks (Monday UTC), zero-padded so a sparkline has a fixed x-axis whether or not the user pushed anything that week. Rows outside the 6-week window still count in `totalOverrides`.
+- **Rationale for the join** (not a new `userId` column): the workspace-wide `summary()` already loads every FieldOverride per call — the join is strictly less work. Denormalization waits for the Redis learning cache (v2 §4 N6, Phase 3).
+- **New endpoint** `GET /workspaces/:id/learning/me` on `LearningController` — any authenticated user; the `me` in the path is a literal, the userId comes from the session principal.
+- **Shared types** `LearningMeView`/`LearningMeWeek` added to `apps/meetsy-web/lib/api.ts` (mirrors meetsy-api's convention — feedback/learning types stay local to the web client).
+- **New component** `apps/meetsy-web/components/learning/digest-card.tsx` — one card, three metric rows (Accuracy, Corrections, Nudge acceptance), each with a `Sparkline`. Latest week's value rendered as the headline; empty state ("As you review runs…") when totalOverrides = 0. Links to `/settings/kb` for now (Phase 3's `/learning` route replaces the link).
+- **New component** `apps/meetsy-web/components/charts/sparkline.tsx` — hand-drawn SVG, 6 bars, ~40 lines. No charting-lib dep. `value: null` renders a placeholder to distinguish "no data" from "zero."
+- **Spec** `learning.service.me-summary.spec.ts` — 7 tests: zero-pad, in-window agreement + nudge acceptance count, out-of-window preservation in `totalOverrides` only, abstain does NOT count as agreement, userId reaches the SQL, week-boundary helpers (`weekStartIso` + `lastNWeekStarts`).
+
+### 2026-07-18 — PR-G: /runs/:id tabbed scaffold — DONE / GREEN
+
+Frontend-only; wraps the existing sections in shadcn Tabs so ICs stop scrolling a ~1200-line column.
+
+- `apps/meetsy-web/app/runs/[runId]/page.tsx` — `ResultsSection` / `PushSection` / `ChatPanel` split into `Overview` / `Push` / `Chat` tabs plus a placeholder `Insights` tab (Phase 2 fills it).
+- **`forceMount` on every `TabsContent`** with `data-[state=inactive]:hidden` — Radix would otherwise unmount inactive panels, restarting `ChatPanel` state + `PushSection` fetches. Verified manually: switching Overview → Push → Chat → Overview preserves chat history, form edits, and open menus.
+- **Hash sync:** initial tab reads from `#hash` (deep-linkable — `/runs/abc#push` opens on Push). Tab clicks use `history.replaceState` so tab churn doesn't fill the back stack. `hashchange` listener catches external hash edits.
+- The `PipelineStepper` and error banners stay ABOVE the tabs — while a run is not settled, only the stepper + spinner show and the tabs are hidden. Tabs appear the moment `result` lands.
+- Default tab: `overview`. Unknown hashes fall back to `overview`.
+
+### 2026-07-18 — Phase 1 verify (all GREEN)
+
+| # | Target | Command | Result |
+|---|---|---|---|
+| a | `@ma/shared` build | `pnpm --filter @ma/shared build` | PASS |
+| b | Meetsy API typecheck | `pnpm --filter @ma/api typecheck` | PASS |
+| c | Meetsy web typecheck | `pnpm --filter @ma/web typecheck` | PASS |
+| d | Meetsy web lint | `pnpm --filter @ma/web lint` | PASS (0 warnings, 0 errors) |
+| e | Meetsy API tests | `pnpm --filter @ma/api test` | PASS — 43 suites / 246 tests (was 41/235; +2 suites, +11 tests: search-runs + me-summary) |
+| f | Clicksy backend tests | `pnpm test` (root) | PASS — 110 suites / 835 tests (was 108/824 baseline in another journal window; unchanged by Phase 1 — meetsy-only work) |
+
+`next build` intentionally skipped per the `meetsy-web-next-build-dev-footgun` memory (running `next build` against a live `next dev` server's shared `.next` state breaks every route in dev). typecheck + lint are the sanctioned verification path here.
+
+**Migration status:** `20260718150000_meetsy_v2_phase1_run_search` is UNAPPLIED (Docker not running at build time). The orchestrator applies via `prisma migrate deploy` on next deploy — see the "Never run `prisma migrate dev` for meetsy-api" invariant in Phase-0 Step 2 (Prisma would try to introspect the DB-only `tsv` column; the migration is hand-authored and stays that way).
+
+**What's now unblocked for Phase 2:**
+- Every run in the history has a stable clickable Row (`RunRow`) — the review page's evidence chips will match its look.
+- `/runs/:id` tabs give Phase 2's "evidence-first review" a place to land without a full-page redesign: the `Insights` tab is already carved out.
+- `LearningDigestCard` proves the sparkline + weekly-bucket pattern that Phase 3's `/learning` page (workspace-wide, gate-progress) will reuse.
+
+**Deferred (later phases):**
+- `router.replace()`-based ⌘K palette wiring (Phase 4 — `cmdk` and `command.tsx` already installed in Phase 0).
+- Rendering `assignment.ranked[]`, `evidenceTaskIds`, `FieldPrediction.candidates[]` inside `Insights` (Phase 2).
+- Header dark-mode toggle (Phase 6).
+- Migrating the moved `/new` page's imports from `@/app/ui` to `@/components/ui/*` (per-phase opt-in).
+
+**Phase 1 status:** DONE. All four PRs (D/E/F/G) landed on `feat/meetsy-phase0`. Ready for Phase 2 (evidence-first review).
+

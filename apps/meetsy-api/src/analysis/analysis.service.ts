@@ -272,6 +272,119 @@ export class AnalysisService {
     return { items: rows, total, limit: opts.limit, offset: opts.offset };
   }
 
+  /**
+   * GET /workspaces/:id/runs/search — full-text search over meeting title +
+   * transcript, ordered by ts_rank_cd then recency. Backs the /meetings search
+   * box in v2 Phase 1.
+   *
+   * The `tsv` column is a DB-only generated tsvector (see migration
+   * 20260718150000_meetsy_v2_phase1_run_search); Prisma can't model it, so
+   * this method uses `$queryRawUnsafe` for the filter + rank, then re-runs
+   * the same push-status pass `listRuns` does over the result set (small
+   * cardinality — bounded by `limit`).
+   *
+   * `q` is trimmed + validated at the controller; empty q must never reach
+   * here (defense-in-depth: an empty plainto_tsquery would match nothing,
+   * not everything, but the guard keeps the signal honest).
+   */
+  async searchRuns(
+    workspaceId: string,
+    opts: { q: string; limit: number; offset: number; status?: RunStatus },
+  ): Promise<RunListView> {
+    const q = opts.q.trim();
+    if (!q) throw new BadRequestException("Search query is required");
+
+    // Build the WHERE clause piecewise so the optional status filter can be
+    // inlined safely (RunStatus is a Zod enum — no user data reaches the SQL).
+    const statusClause = opts.status
+      ? Prisma.sql`AND r.status = ${opts.status}::"meetsy"."RunStatus"`
+      : Prisma.empty;
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        meeting_id: string;
+        status: RunStatus;
+        result: unknown;
+        created_at: Date;
+        meeting_title: string;
+        meeting_date: Date | null;
+        rank: number;
+      }>
+    >(Prisma.sql`
+      SELECT
+        r.id,
+        r.meeting_id,
+        r.status,
+        r.result,
+        r."createdAt" AS created_at,
+        m.title AS meeting_title,
+        m."meetingDate" AS meeting_date,
+        ts_rank_cd(m.tsv, plainto_tsquery('english', ${q})) AS rank
+      FROM "meetsy"."AnalysisRun" r
+      JOIN "meetsy"."Meeting" m ON m.id = r.meeting_id
+      WHERE r.workspace_id = ${workspaceId}
+        AND m.tsv @@ plainto_tsquery('english', ${q})
+        ${statusClause}
+      ORDER BY rank DESC, r."createdAt" DESC
+      LIMIT ${opts.limit}
+      OFFSET ${opts.offset}
+    `);
+
+    const totalRow = await this.prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
+      SELECT COUNT(*)::bigint AS count
+      FROM "meetsy"."AnalysisRun" r
+      JOIN "meetsy"."Meeting" m ON m.id = r.meeting_id
+      WHERE r.workspace_id = ${workspaceId}
+        AND m.tsv @@ plainto_tsquery('english', ${q})
+        ${statusClause}
+    `);
+    const total = Number(totalRow[0]?.count ?? 0n);
+
+    // Same push-status derivation as listRuns — one query for the whole page.
+    const runIds = rows.map((r) => r.id);
+    const pushRows = runIds.length
+      ? await this.prisma.taskPush.findMany({
+          where: { runId: { in: runIds } },
+          select: { runId: true, status: true },
+        })
+      : [];
+    const byRun = new Map<string, { pushed: number; failed: number; skipped: number }>();
+    for (const p of pushRows) {
+      const acc = byRun.get(p.runId) ?? { pushed: 0, failed: 0, skipped: 0 };
+      if (p.status === "pushed") acc.pushed += 1;
+      else if (p.status === "failed") acc.failed += 1;
+      else acc.skipped += 1;
+      byRun.set(p.runId, acc);
+    }
+    const pushConfig = await this.prisma.workspacePushConfig.findUnique({
+      where: { workspaceId },
+      select: { workspaceId: true },
+    });
+
+    const items: RunListItem[] = rows.map((r) => {
+      const taskCount = extractTaskCount(r.result);
+      const pushStatus = derivePushStatus({
+        completed: r.status === "completed",
+        taskCount,
+        pushCounts: byRun.get(r.id) ?? null,
+        hasPushConfig: !!pushConfig,
+      });
+      return {
+        id: r.id,
+        meetingId: r.meeting_id,
+        meetingTitle: r.meeting_title,
+        meetingDate: r.meeting_date ? r.meeting_date.toISOString() : null,
+        status: r.status,
+        pushStatus,
+        taskCount,
+        createdAt: r.created_at.toISOString(),
+      };
+    });
+
+    return { items, total, limit: opts.limit, offset: opts.offset };
+  }
+
   /** GET /runs/:id — current status + result. */
   async getRun(orgId: string, runId: string, workspaceIdParam?: string): Promise<RunResponse> {
     const workspaceId = await this.workspaces.resolve(orgId, workspaceIdParam);

@@ -1,23 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import type { AuthPrincipal } from "@/lib/auth";
 import { UserProvider } from "@/lib/user-context";
 import {
   WorkspaceProvider,
-  WorkspaceSwitcher,
   useWorkspace,
 } from "@/lib/workspace-context";
 import { Spinner } from "@/app/ui";
 import { Toaster } from "@/components/ui/sonner";
+import { Sidebar } from "@/components/nav/sidebar";
 
 /**
  * Client shell rendered inside the (server) root layout. Owns:
- *  - the header chrome (brand + signed-in user)
  *  - the client-side auth gate
+ *  - the persistent left sidebar (v2 Phase 1)
  *
  * The gate calls `GET /auth/me` once on mount. On success the principal is
  * exposed and children render. On 401 the request layer redirects the browser
@@ -52,8 +51,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   // The auth gate is strictly outermost: children (and the WorkspaceProvider)
   // stay UNMOUNTED until `me()` resolves. Once signed in, a single
-  // WorkspaceProvider wraps BOTH the header's signed-in chrome (so the switcher
-  // can read context) and the page subtree — see SignedInShell.
+  // WorkspaceProvider wraps BOTH the sidebar (so the switcher can read context)
+  // and the page subtree — see SignedInShell.
   if (checked && user) {
     return (
       <WorkspaceProvider>
@@ -63,42 +62,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <>
-      <Brand />
-      <main className="mx-auto max-w-5xl px-6 py-8">
-        <div className="flex justify-center py-20">
-          <Spinner label="Loading…" />
-        </div>
-      </main>
-    </>
-  );
-}
-
-/** Brand row in the header (always present). */
-function Brand({ children }: { children?: React.ReactNode }) {
-  return (
-    <header className="border-b border-zinc-200 bg-white">
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-        <Link href="/" className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-900 text-sm font-bold text-white">
-            M
-          </span>
-          <span className="text-lg font-semibold tracking-tight text-zinc-900">
-            Meeting Analyzer
-          </span>
-        </Link>
-        {children}
-      </div>
-    </header>
+    <div className="flex min-h-screen items-center justify-center">
+      <Spinner label="Loading…" />
+    </div>
   );
 }
 
 /**
  * The signed-in shell. Lives INSIDE the WorkspaceProvider so it can read the
- * active workspace id for the remount key. The header chrome (incl. the
- * WorkspaceSwitcher) stays mounted; only the page `{children}` is keyed by the
- * active workspace so switching remounts the page subtree and re-runs its
- * client-effect fetches.
+ * active workspace id for the remount key. The sidebar stays mounted; only the
+ * page `{children}` is keyed by the active workspace so switching remounts the
+ * page subtree and re-runs its client-effect fetches.
  */
 function SignedInShell({
   user,
@@ -109,47 +83,26 @@ function SignedInShell({
 }) {
   const { activeWorkspaceId } = useWorkspace();
   return (
-    <>
+    <div className="flex min-h-screen flex-col md:flex-row">
       {/* Toast host — sonner's Toaster reads the current next-themes theme so
           toasts match dark/light. Existing inline ErrorBanner callers stay
           untouched; Phase 1 will migrate the noisy ones to toast() calls. */}
       <Toaster richColors closeButton />
-      <Brand>
-        <div className="flex items-center gap-4">
-          <WorkspaceSwitcher />
-          {/* Push settings — Owner/Admin only (mirrors the backend @Roles gate). */}
-          {(user.role === "OWNER" || user.role === "ADMIN") && (
-            <Link
-              href="/settings/push"
-              className="text-sm font-medium text-zinc-600 hover:text-zinc-900"
-            >
-              Push settings
-            </Link>
-          )}
-          {/* KB settings — Owner/Admin only (same gate as Push settings). */}
-          {(user.role === "OWNER" || user.role === "ADMIN") && (
-            <Link
-              href="/settings/kb"
-              className="text-sm font-medium text-zinc-600 hover:text-zinc-900"
-            >
-              KB settings
-            </Link>
-          )}
-          <span className="text-sm font-medium text-zinc-700">
-            {user.email ?? "Signed in"}
-          </span>
+
+      <Sidebar user={user} />
+
+      <main className="flex-1 min-w-0">
+        <div className="mx-auto max-w-5xl px-6 py-8">
+          <UserProvider user={user}>
+            {/* Keyed by the active workspace so a switch remounts the page subtree
+                (and KbGate re-runs its status check) — see WorkspaceProvider. */}
+            <div key={activeWorkspaceId ?? "none"}>
+              <KbGate>{children}</KbGate>
+            </div>
+          </UserProvider>
         </div>
-      </Brand>
-      <main className="mx-auto max-w-5xl px-6 py-8">
-        <UserProvider user={user}>
-          {/* Keyed by the active workspace so a switch remounts the page subtree
-              (and KbGate re-runs its status check) — see WorkspaceProvider. */}
-          <div key={activeWorkspaceId ?? "none"}>
-            <KbGate>{children}</KbGate>
-          </div>
-        </UserProvider>
       </main>
-    </>
+    </div>
   );
 }
 
@@ -163,8 +116,8 @@ function SignedInShell({
  *  - No redirect loop: `/onboarding` is always allowed through (no fetch there).
  *  - `activeWorkspaceId` null (before listWorkspaces validates) → Spinner, no fetch.
  *  - Re-check on pathname change: the status fetch deps include `pathname`, so
- *    when the wizard finishes and routes back to `/`, the gate re-fetches, sees
- *    `ready`, and renders — instead of redirecting back with a stale `idle`.
+ *    when the wizard finishes and routes back to `/home`, the gate re-fetches,
+ *    sees `ready`, and renders — instead of redirecting back with a stale `idle`.
  *  - Fail-open on non-401 errors (render children); 401 already redirects in request().
  *  - The redirect happens in an effect, never during render.
  */
