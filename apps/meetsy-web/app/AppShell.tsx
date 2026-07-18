@@ -12,6 +12,7 @@ import {
   useWorkspace,
 } from "@/lib/workspace-context";
 import { Spinner } from "@/app/ui";
+import { Toaster } from "@/components/ui/sonner";
 
 /**
  * Client shell rendered inside the (server) root layout. Owns:
@@ -109,6 +110,10 @@ function SignedInShell({
   const { activeWorkspaceId } = useWorkspace();
   return (
     <>
+      {/* Toast host — sonner's Toaster reads the current next-themes theme so
+          toasts match dark/light. Existing inline ErrorBanner callers stay
+          untouched; Phase 1 will migrate the noisy ones to toast() calls. */}
+      <Toaster richColors closeButton />
       <Brand>
         <div className="flex items-center gap-4">
           <WorkspaceSwitcher />

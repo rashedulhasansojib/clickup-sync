@@ -632,3 +632,66 @@ Landed the two new Meetsy-schema tables + the two new read endpoints the later p
 
 **Next:** PR-C — design-system foundations (shadcn/ui primitives, lucide-react, next-themes, sonner toast, ThemeProvider, transitional re-export shim in `app/ui.tsx`).
 
+---
+
+## 2026-07-18 · v2 Phase 0 · PR-C (design-system foundations)
+
+Third and final PR of Phase 0. Installs the shadcn/ui + lucide-react + next-themes + sonner stack in `apps/meetsy-web`, wires the theme provider + toast host, and refactors `app/ui.tsx` into a transitional shim so every existing caller keeps working unchanged.
+
+**Packages added (`apps/meetsy-web/package.json`):**
+- `class-variance-authority`, `clsx`, `tailwind-merge` — shadcn's variant + `cn()` toolkit.
+- `@radix-ui/react-{checkbox,dialog,dropdown-menu,label,radio-group,select,separator,slot,tabs,tooltip}` — headless primitives shadcn wraps.
+- `lucide-react` — the icon set used throughout shadcn primitives.
+- `next-themes` — theme provider + `useTheme()` hook.
+- `sonner` — the toast library shadcn defaults to.
+- `cmdk` — command-menu primitive (installed now so Phase 4's ⌘K palette doesn't need another package add).
+- `tw-animate-css` — provides `animate-in` / `animate-out` / `fade-in-0` / `zoom-in-95` etc. utility classes that Radix primitives depend on for their enter/exit transitions (Tailwind v3 shipped these via `tailwindcss-animate`; Tailwind v4 needs `tw-animate-css`, which we `@import` in `globals.css`).
+
+**Primitives installed (`apps/meetsy-web/components/ui/`):**
+button, card, dialog, sheet, tabs, dropdown-menu, command, tooltip, skeleton, sonner (Toaster + `toast()` re-export), input, select, label, checkbox, radio-group, separator — 16 files, following the standard shadcn source verbatim (no local drift).
+
+**New helpers:**
+- `apps/meetsy-web/lib/utils.ts` — `cn(...inputs)` using `clsx` + `tailwind-merge`. Every primitive imports it as `@/lib/utils`.
+- `apps/meetsy-web/components/theme-provider.tsx` — thin `"use client"` wrapper around `next-themes/ThemeProvider` so the server root layout can mount it without becoming a client component.
+
+**globals.css (Tailwind v4 + shadcn tokens):**
+- `@import "tw-animate-css";` for the animate-in / animate-out class family.
+- `@custom-variant dark (&:where(.dark, .dark *));` — Tailwind v4's way to enable class-based dark mode (`next-themes` toggles `.dark` on `<html>`).
+- `:root` + `.dark` blocks define the full shadcn oklch token palette (background/foreground/card/popover/primary/secondary/muted/accent/destructive/border/input/ring + `--radius`).
+- `@theme inline { --color-<name>: var(--<name>); }` maps those CSS variables into Tailwind utility class names (bg-background, text-muted-foreground, border-input, …) so the primitives work unchanged from a Tailwind v3 shadcn project.
+
+**Theme provider + toast wiring:**
+- `apps/meetsy-web/app/layout.tsx` — wraps `<AppShell>` in `<ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>`. Adds `suppressHydrationWarning` on `<html>` (next-themes writes the theme class pre-hydration; the existing `<body suppressHydrationWarning>` for Grammarly stays).
+- `apps/meetsy-web/app/AppShell.tsx` — `SignedInShell` mounts `<Toaster richColors closeButton />` above the `<Brand>` header. `Toaster` reads the current `next-themes` theme so toasts match dark/light automatically. No theme-toggle UI in Phase 0 — Phase 6 adds a header switch; today the system preference drives it.
+
+**`app/ui.tsx` refactor:**
+- Original implementations of `Button`, `Card`, `ErrorBanner`, `Spinner`, `PriorityBadge`, `Tag` moved verbatim to `app/ui-legacy.tsx`.
+- `app/ui.tsx` becomes a one-line shim: `export { Button, Card, ErrorBanner, Spinner, PriorityBadge, Tag } from "./ui-legacy";`.
+- Deviates from the spec §4.3 example (which routed `Button` + `Card` through the new shadcn primitives): we route ALL six through legacy in Phase 0 so existing `variant="primary"` etc. keep their exact type + look. Phase 1 flips a page's imports to `@/components/ui/*` and its look in one commit — no cross-phase visual drift.
+- No caller of `@/app/ui` needed a change. All 8 files that import it (page.tsx, AppShell.tsx, settings/kb, settings/push, meetings/[id]/roster, runs/[runId]/{page,components}, onboarding/{page,steps}) work unchanged.
+
+**Verify (all green):**
+| # | Target | Command | Result |
+|---|---|---|---|
+| a | `@ma/shared` build | `pnpm --filter @ma/shared build` | PASS |
+| b | Meetsy API typecheck | `pnpm --filter @ma/api typecheck` | PASS |
+| c | Meetsy web typecheck | `pnpm --filter @ma/web typecheck` | PASS |
+| d | Meetsy web lint | `pnpm --filter @ma/web lint` | PASS (0 warnings, 0 errors) |
+| e | Meetsy API tests | `pnpm --filter @ma/api test` | PASS — 41 suites / 235 tests (no regression) |
+| f | Clicksy backend tests | `pnpm test` (root) | PASS — 108 suites / 824 tests (no regression) |
+
+`next build` was intentionally skipped per the `meetsy-web-next-build-dev-footgun` memory (running `next build` against a live `next dev` server's shared `.next` state breaks every route in dev). typecheck + lint are the sanctioned verification path here. No `next dev` was running at verify time either — this is policy, not accommodation.
+
+**What's now unblocked for Phase 1+:**
+- New pages can `import { Button } from "@/components/ui/button"` etc. and use the full shadcn variant surface (default / destructive / outline / secondary / ghost / link × default / sm / lg / icon).
+- `toast()` calls from anywhere pop into the mounted `<Toaster />`.
+- Adding a `.dark` class to `<html>` (or letting `next-themes` do it from the system preference) recolors every primitive via the tokens.
+- `ui-legacy.tsx` deletes itself when the last caller migrates — no forever debt.
+
+**Deferred (later phases):**
+- Header theme toggle (Phase 6).
+- Migrating existing `app/ui` callers to shadcn primitives (per-phase, opt-in).
+- Data-table, calendar, form primitives (later phases pull as needed).
+
+**Phase 0 status:** DONE. All three PRs (A/B/C) landed on `feat/meetsy-phase0`. Ready for Phase 1 (Sidebar + Home + History).
+

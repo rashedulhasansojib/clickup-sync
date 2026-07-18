@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import AppShell from "./AppShell";
+import { ThemeProvider } from "@/components/theme-provider";
 
 export const metadata: Metadata = {
   title: "Meeting Analyzer",
@@ -13,13 +14,21 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    // suppressHydrationWarning: browser extensions (e.g. Grammarly) inject
-    // attributes like `data-gr-ext-installed` onto <body> before React hydrates,
-    // which otherwise logs a benign hydration-mismatch warning. This suppresses
-    // only that one-level attribute diff on <body>, nothing else.
-    <html lang="en">
+    // suppressHydrationWarning on <html> is required by next-themes (which
+    // writes the theme class onto <html> before hydration). suppressHydrationWarning
+    // on <body> continues to swallow the Grammarly `data-gr-ext-installed`
+    // attribute diff (browser extensions inject attributes onto <body> before
+    // React hydrates). Both are one-level attribute diffs only, not tree diffs.
+    <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen" suppressHydrationWarning>
-        <AppShell>{children}</AppShell>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <AppShell>{children}</AppShell>
+        </ThemeProvider>
       </body>
     </html>
   );
