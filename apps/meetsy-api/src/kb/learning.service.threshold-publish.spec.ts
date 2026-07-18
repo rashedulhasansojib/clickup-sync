@@ -37,7 +37,14 @@ describe("LearningService — maybePublishThreshold", () => {
     } as never;
     const publish = jest.fn().mockResolvedValue(undefined);
     const stream = { publish, subscribe: jest.fn() } as never;
-    return { service: new LearningService(prisma, cache, stream), publish };
+    // v2 Phase 5 — maybePublishThreshold now resolves minCorrections from MlConfigService.
+    const mlConfig = {
+      forWorkspace: jest.fn().mockResolvedValue({
+        tunables: { minCorrections: 3, minAgreement: 0.6 },
+        models: {},
+      }),
+    } as never;
+    return { service: new LearningService(prisma, cache, stream, mlConfig), publish };
   }
 
   it("fires 'near-gate' when the fresh count reaches 2 (one shy of gate)", async () => {

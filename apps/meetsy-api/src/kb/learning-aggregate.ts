@@ -89,7 +89,18 @@ export function decodePatternKey(
   return { field: parts[0], predicted: parts[1], confirmed: parts[2] };
 }
 
-export function aggregateField(field: string, records: FieldRecord[]): FieldAggregate {
+/** v2 Phase 5 — per-workspace gate overrides. Defaults match the module
+ * constants so pre-Phase-5 callers get the same behavior. */
+export interface AggregateGate {
+  minCorrections: number;
+  minAgreement: number;
+}
+
+export function aggregateField(
+  field: string,
+  records: FieldRecord[],
+  gate: AggregateGate = { minCorrections: MIN_CORRECTIONS, minAgreement: MIN_AGREEMENT },
+): FieldAggregate {
   let rawSample = 0;
   let rawOverrides = 0;
   let nudgeSample = 0;
@@ -129,7 +140,7 @@ export function aggregateField(field: string, records: FieldRecord[]): FieldAggr
         confirmed,
         count,
         agreement,
-        gatePassed: count >= MIN_CORRECTIONS && agreement >= MIN_AGREEMENT,
+        gatePassed: count >= gate.minCorrections && agreement >= gate.minAgreement,
       });
     }
   }

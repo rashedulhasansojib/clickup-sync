@@ -10,6 +10,7 @@ import {
   Menu,
   Plus,
   Send,
+  Sliders,
   Sparkles,
 } from "lucide-react";
 import type { AuthPrincipal } from "@/lib/auth";
@@ -52,6 +53,9 @@ const PRIMARY: NavItem[] = [
 
 const SETTINGS: NavItem[] = [
   { href: "/settings/push", label: "Push settings", icon: Send, ownerAdminOnly: true },
+  // v2 Phase 5 — Owner/Admin-visible entry. Members can navigate directly and
+  // see a read-only view; hiding the nav keeps their surface uncluttered.
+  { href: "/tuning", label: "Tuning", icon: Sliders, ownerAdminOnly: true },
 ];
 
 function isActive(pathname: string, href: string): boolean {

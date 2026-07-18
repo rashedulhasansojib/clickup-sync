@@ -26,18 +26,31 @@ export interface DuplicateHit {
   band: DupBand;
 }
 
+/**
+ * v2 Phase 5 — per-call band overrides. When omitted, falls back to the
+ * module-level constants above so existing callers keep working. The Phase-5
+ * pipeline call-site (FieldPredictionService) reads `WorkspaceMlConfig.tunables`
+ * and passes `{ dupFlag, dupSuggest }` here; the /tuning preview endpoint
+ * passes candidate bands to compute deltas.
+ */
+export interface DuplicateBands {
+  dupFlag: number;
+  dupSuggest: number;
+}
+
 /** Classify the nearest existing tasks into flag/suggest; drop the rest. */
 export function classifyDuplicates(
   neighbours: Array<{ taskId: string; sim: number }>,
+  bands: DuplicateBands = { dupFlag: DUP_FLAG, dupSuggest: DUP_SUGGEST },
   max = 3,
 ): DuplicateHit[] {
   return neighbours
-    .filter((n) => n.sim >= DUP_SUGGEST)
+    .filter((n) => n.sim >= bands.dupSuggest)
     .sort((a, b) => b.sim - a.sim)
     .slice(0, max)
     .map((n) => ({
       taskId: n.taskId,
       score: Math.round(n.sim * 1000) / 1000,
-      band: n.sim >= DUP_FLAG ? "flag" : "suggest",
+      band: n.sim >= bands.dupFlag ? "flag" : "suggest",
     }));
 }

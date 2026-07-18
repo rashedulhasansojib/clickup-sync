@@ -33,8 +33,16 @@ describe("LearningService — meSummary", () => {
       publish: jest.fn().mockResolvedValue(undefined),
       subscribe: jest.fn(),
     } as never;
+    // v2 Phase 5 — constructor gained MlConfigService; meSummary doesn't read it,
+    // but the DI signature still needs a stub here.
+    const mlConfig = {
+      forWorkspace: jest.fn().mockResolvedValue({
+        tunables: { minCorrections: 3, minAgreement: 0.6 },
+        models: {},
+      }),
+    } as never;
     return {
-      service: new LearningService(prisma as never, cache, stream),
+      service: new LearningService(prisma as never, cache, stream, mlConfig),
       queryRaw,
     };
   }

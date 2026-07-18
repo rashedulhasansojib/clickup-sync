@@ -25,7 +25,16 @@ function makeService(overrides: Array<{ predicted: unknown; confirmed: unknown; 
     publish: jest.fn().mockResolvedValue(undefined),
     subscribe: jest.fn(),
   } as never;
-  return new LearningService(prisma, cache, stream);
+  // v2 Phase 5 — LearningService reads workspace tunables via MlConfigService.
+  // A stub returning the hardcoded defaults keeps existing gate-value tests
+  // untouched (they were tuned against MIN_CORRECTIONS=3, MIN_AGREEMENT=0.6).
+  const mlConfig = {
+    forWorkspace: jest.fn().mockResolvedValue({
+      tunables: { minCorrections: 3, minAgreement: 0.6 },
+      models: {},
+    }),
+  } as never;
+  return new LearningService(prisma, cache, stream, mlConfig);
 }
 
 const ov = (memberId: string) => ({

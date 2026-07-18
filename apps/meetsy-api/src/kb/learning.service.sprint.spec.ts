@@ -35,7 +35,14 @@ describe("LearningService — sprint learning", () => {
       publish: jest.fn().mockResolvedValue(undefined),
       subscribe: jest.fn(),
     } as never;
-    return new LearningService(prisma, cache, stream);
+    // v2 Phase 5 — snapshot() reads workspace tunables; stub the defaults.
+    const mlConfig = {
+      forWorkspace: jest.fn().mockResolvedValue({
+        tunables: { minCorrections: 3, minAgreement: 0.6 },
+        models: {},
+      }),
+    } as never;
+    return new LearningService(prisma, cache, stream, mlConfig);
   }
 
   const ov = (confirmedListId: string) => ({

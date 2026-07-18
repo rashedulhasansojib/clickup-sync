@@ -10,6 +10,9 @@ import type {
   SubmitFeedbackResponse,
   ChatHistoryResponse,
   SendChatResponse,
+  RunSnapshotPayload,
+  WorkspaceModels,
+  WorkspaceTunables,
 } from "@ma/shared";
 import {
   getCsrfToken,
@@ -990,6 +993,68 @@ export const api = {
       deduped: boolean;
     };
   },
+
+  // ── v2 Phase 5: /tuning (per-workspace ML config) ──────────────────────
+  /** GET /workspaces/:id/ml-config — reads current tunables + models (any authed). */
+  mlConfigGet(ws: string): Promise<WorkspaceMlConfigView> {
+    return request<WorkspaceMlConfigView>(
+      `/workspaces/${encodeURIComponent(ws)}/ml-config`,
+    );
+  },
+
+  /** PUT /workspaces/:id/ml-config — persists Owner-supplied tunables + models. */
+  mlConfigPut(
+    ws: string,
+    body: RunSnapshotPayload,
+  ): Promise<WorkspaceMlConfigView> {
+    return request<WorkspaceMlConfigView>(
+      `/workspaces/${encodeURIComponent(ws)}/ml-config`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  /** POST /workspaces/:id/ml-config/preview — replay last N runs against candidate. */
+  mlConfigPreview(
+    ws: string,
+    body: RunSnapshotPayload,
+    limit?: number,
+  ): Promise<MlConfigPreviewView> {
+    const qs = limit !== undefined ? `?limit=${limit}` : "";
+    return request<MlConfigPreviewView>(
+      `/workspaces/${encodeURIComponent(ws)}/ml-config/preview${qs}`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
 };
+
+// ── v2 Phase 5 view types (mirror apps/meetsy-api/src/tuning/*.ts) ────────
+export interface WorkspaceMlConfigView {
+  tunables: WorkspaceTunables;
+  models: WorkspaceModels;
+  updatedBy: string | null;
+  updatedAt: string | null;
+  isDefault: boolean;
+}
+
+export interface MlConfigPreviewRun {
+  runId: string;
+  meetingTitle: string | null;
+  meetingDate: string | null;
+  taskCount: number;
+  duplicates: {
+    baseline: { flag: number; suggest: number };
+    candidate: { flag: number; suggest: number };
+    changed: number;
+  } | null;
+}
+
+export interface MlConfigPreviewView {
+  runs: MlConfigPreviewRun[];
+  gate: {
+    baseline: { patternsGating: number; patternsNearGate: number };
+    candidate: { patternsGating: number; patternsNearGate: number };
+  };
+  skipped: Array<{ field: string; reason: string }>;
+}
 
 export { ApiError };

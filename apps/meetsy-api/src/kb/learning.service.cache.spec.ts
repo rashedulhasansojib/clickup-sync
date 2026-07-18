@@ -33,8 +33,16 @@ describe("LearningService — snapshot cache", () => {
       publish: jest.fn().mockResolvedValue(undefined),
       subscribe: jest.fn(),
     } as never;
+    // v2 Phase 5 — snapshot() now reads per-workspace tunables via MlConfigService.
+    // Stub returns hardcoded defaults so the cache-behavior assertions remain focused.
+    const mlConfig = {
+      forWorkspace: jest.fn().mockResolvedValue({
+        tunables: { minCorrections: 3, minAgreement: 0.6 },
+        models: {},
+      }),
+    } as never;
     return {
-      service: new LearningService(prisma, cache as never, stream),
+      service: new LearningService(prisma, cache as never, stream, mlConfig),
       cache,
       findMany,
     };

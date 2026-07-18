@@ -994,3 +994,70 @@ Design goal (spec §1): the KB is real (`/kb/search`, `/kb/documents`, `/kb/summ
 - Result-snippet highlighting: the API returns the snippet, but neither the Search tab nor the palette bolds the matched span.
 
 **Phase 4 status:** DONE. All four PRs (P/Q/R/S) landed on `feat/meetsy-phase0`. Ready for Phase 5 (`/tuning` — per-workspace ML tunables with preview replay).
+
+
+---
+
+## Phase 5 (v2) — `/tuning` per-workspace ML tunables
+
+Spec: `docs/superpowers/specs/2026-07-18-meetsy-v2-phase5-tuning-design.md`
+Branch: `feat/meetsy-phase0`
+
+Design goal (spec §1): Phase 0 landed the `WorkspaceMlConfig` + `AnalysisRunSnapshot` tables and a `MlConfigService.forWorkspace(...)` accessor, but nothing in the runtime actually read those tunables — the analysis pipeline still used compile-time constants (`DUP_FLAG` / `DUP_SUGGEST` in `duplicate-bands.ts`, `MIN_CORRECTIONS` / `MIN_AGREEMENT` in `learning-aggregate.ts`). Phase 5 closes that gap for the two tunable groups whose consumers are already isolated behind pure functions (dup bands + learning gate), ships an Owner-visible `/tuning` page to edit them, and adds a preview endpoint that replays the last N `AnalysisRun` snapshots against a candidate config so an Owner sees the delta before hitting Save. The remaining tunables (simFloor / minQualifying / closedWeight / rrfK / novelMaxSimCutoff / linkMinSim / embedBatch / model-routing) are stored today but not yet consumed by runtime code — the UI flags them with a "Not applied yet" chip so an Owner isn't misled.
+
+### 2026-07-18 — PR-T: `MlConfigService.upsert` + `GET | PUT /workspaces/:id/ml-config` — DONE / GREEN
+
+- **`apps/meetsy-api/src/kb/ml-config.service.ts`** — `MlConfigService` grew a second constructor dep (`LearningCacheService`) and two methods. `viewForWorkspace(workspaceId)` returns `{ tunables, models, updatedBy, updatedAt, isDefault }` — `isDefault=true` when the row is absent so the UI can show a "workspace hasn't customised this" chip. `upsert(workspaceId, orgId, updatedBy, payload)` defensively re-parses through `RunSnapshotPayloadSchema` (belt-and-braces after the controller's `ZodValidationPipe`), does a single `prisma.workspaceMlConfig.upsert({...})`, then calls `this.cache.invalidate(workspaceId)` so the learning-snapshot cache doesn't return a stale value keyed off the pre-edit gate constants.
+- **`apps/meetsy-api/src/tuning/tuning.controller.ts`** — new `@Controller("workspaces/:id/ml-config")`. `@Get()` returns the view (any authed user; workspace-scoped via `WorkspaceResolver`). `@Put()` `@Roles("OWNER")` accepts a `RunSnapshotPayload` through `ZodValidationPipe`, resolves the org via `WorkspaceResolver`, and returns the fresh view. `@Post("preview")` `@Roles("OWNER")` delegates to `MlConfigPreviewService.run(...)` (see PR-V) — Owner-only because preview reads every `AnalysisRun` in the workspace, which we treat as sensitive.
+- **`apps/meetsy-api/src/tuning/tuning.module.ts`** — imports `KbModule` (for `MlConfigService` + `LearningCacheService`) and `AnalysisModule` (for the `AnalysisRun` + `AnalysisRunSnapshot` prisma models via `PrismaService`); providers add `MlConfigPreviewService` and `WorkspaceResolver`.
+- **`apps/meetsy-api/src/app.module.ts`** — imports `TuningModule`.
+- **Specs**: `ml-config.service.upsert.spec.ts` (5 tests, new) — persist + cache invalidate; both `create` + `update` variants of the upsert; malformed payload rejected via defensive re-parse; `viewForWorkspace` marks `isDefault=true` when row absent; surfaces `updatedBy`/`updatedAt` from the persisted row. `ml-config.service.spec.ts` (existing) updated to pass a `{invalidate: jest.fn()}` cache stub to `makeService`.
+
+### 2026-07-18 — PR-U: runtime consumption of dup bands + learning gate — DONE / GREEN
+
+The runtime paths that already had a clean pure-function seam get wired through `MlConfigService`; every other tunable stays as its compile-time default (see the deferred list below). This is the honest minimum for Phase 5 — the rest is a Phase 6+ refactor of `retrieval.service.ts` and `kb.queue.ts`.
+
+- **`apps/meetsy-api/src/kb/duplicate-bands.ts`** — `classifyDuplicates(neighbours, bands?: DuplicateBands, max = 3)` extended signature. `bands` defaults to `{dupFlag: DUP_FLAG, dupSuggest: DUP_SUGGEST}` so callers that don't pass one get compile-time constants. Exported `DuplicateBands` interface consumed by the preview service.
+- **`apps/meetsy-api/src/kb/field-prediction.service.ts`** — `analyze(workspaceId, tasks, meetingDateISO, tunables?: WorkspaceTunables)` — optional so unit tests that don't need bands can keep calling the 3-arg form. When passed, plumbs `{dupFlag, dupSuggest}` through to `classifyDuplicates`.
+- **`apps/meetsy-api/src/analysis/queue/analysis.processor.ts`** — loads `const mlSnapshot = await this.mlConfig.forWorkspace(workspaceId)` up front, passes `mlSnapshot.tunables` to `fieldPrediction.analyze`, and REUSES the same snapshot for the `AnalysisRunSnapshot` write (previously did a second round-trip). One less query per analysis run.
+- **`apps/meetsy-api/src/kb/learning-aggregate.ts`** — `aggregateField(field, records, gate?: AggregateGate)` optional gate defaulting to `{minCorrections: MIN_CORRECTIONS, minAgreement: MIN_AGREEMENT}`. `gatePassed` derives from `gate.*` so a workspace with `minCorrections=5` genuinely needs 5 (not the module constant's 3) before nudges fire.
+- **`apps/meetsy-api/src/kb/learning.service.ts`** — constructor grew a `MlConfigService` dep. `gate(workspaceId)` is now async and reads `{minCorrections, minAgreement, nearGateThreshold}` from `mlConfig.forWorkspace(...)` (nearGateThreshold = `max(minCorrections - 1, 0)` so a workspace tuned to `minCorrections=1` doesn't have a "near-gate" state). `snapshot(workspaceId)` reads tunables and passes `{minCorrections, minAgreement}` to every `aggregateField` call. `maybePublishThreshold(...)` reads `minCorrections` via a `Promise.all` alongside the snapshot re-fetch and passes it to `classifyThreshold`.
+- **`apps/meetsy-api/src/kb/learning-stream.service.ts`** — `classifyThreshold(count, minCorrections = MIN_CORRECTIONS)` — same near-gate derivation as `LearningService.gate`.
+- **Specs updated**: 7 `learning.service.*.spec.ts` files — each `new LearningService(prisma, cache, stream)` call updated to `new LearningService(prisma, cache, stream, mlConfig)` where `mlConfig` is a stub returning `{tunables: {minCorrections: 3, minAgreement: 0.6}, models: {}}`. `learning.service.gate.spec.ts` made async and gained a per-workspace override test (asserts `minCorrections=5` propagates end-to-end). `duplicate-bands.spec.ts` two existing calls shifted from `classifyDuplicates(neighbours, 10 | 2)` to `classifyDuplicates(neighbours, undefined, 10 | 2)` for the new signature; a new test verifies per-call band overrides.
+
+### 2026-07-18 — PR-V: `POST /workspaces/:id/ml-config/preview` replay endpoint — DONE / GREEN
+
+- **`apps/meetsy-api/src/tuning/ml-config-preview.service.ts`** — `MlConfigPreviewService.run(workspaceId, candidate, opts)` synchronously replays the workspace's last N completed `AnalysisRun` rows against a candidate config. Loads runs LEFT-joined to `AnalysisRunSnapshot` (so a legacy run without a snapshot uses the current workspace default as its baseline) + `meeting` (title, meetingDate for the UI). For each run: extracts `neighboursByTask` from `run.result` via a permissive `safeParseResult` helper that only requires `taskId` (string) + `sim` (number) on each neighbour hit — the rest of the `NeighbourHit` shape isn't needed for classification and legacy runs may have stored a narrower shape. Reclassifies via `classifyDuplicates(raw, baselineBands)` and `classifyDuplicates(raw, candidateBands)`; counts `flag`, `suggest`, `changed`. Gate delta is workspace-wide (not per-run): one `countGate(snap, baseline)` + one `countGate(snap, candidate)` against the current snapshot. `skippedFields()` returns the fixed list of non-replayable tunables + reasons for the UI's "these fields aren't in preview" note. Legacy runs without `neighboursByTask` return `duplicates: null` so the UI can visibly say "this run pre-dates neighbour storage".
+- **BullMQ queue explicitly NOT added.** The spec's `meetsy-ml-preview` queue is documented as deferred (§5); preview compute is cheap synchronous JSON math (a few kB of neighbour data per run × 10 runs). Wiring stays available if preview grows heavier — e.g. running a candidate model through re-embedding for the sim-floor tunables — but Phase 5's compute doesn't earn a worker.
+- **`limit`** clamps to `[1, 20]` (default 10). Owner is the only role that can call preview (see PR-T) so the read amplification is bounded to a workspace's Owner set.
+- **Specs**: `ml-config-preview.service.spec.ts` (6 tests, new) — counts baseline vs candidate duplicates; legacy runs missing `neighboursByTask` return `duplicates: null`; uses `AnalysisRunSnapshot.tunables` as baseline when present, workspace default otherwise; reports non-replayable fields in `skipped`; gate summary counts baseline+candidate patterns from the workspace-wide snapshot; clamps `limit` to [1, 20].
+
+### 2026-07-18 — PR-W: `/tuning` web page — DONE / GREEN
+
+- **`apps/meetsy-web/app/tuning/page.tsx`** — client route. Reads `useCurrentUser()` + `useWorkspace()`; fetches `api.mlConfigGet(ws)` on workspace change. Owner-writable / Member-read-only (backend enforces via `@Roles("OWNER")`; the UI hides Save + Preview for Members and disables numeric inputs). Every `WorkspaceTunables` field renders as `<Input type="number">` bound to metadata in `tunable-meta.ts` (min/max/step come from the Zod schema's constraints — comment in the meta file flags that they MUST stay in sync). Fields where `consumed=false` show a "Not applied yet" chip so an Owner sees which knobs are stored-but-not-yet-live. Model routing renders as a read-only table (routing changes are a Phase 6 refactor of the callers). **Preview** button posts to `api.mlConfigPreview(ws, body, 10)` and opens a `PreviewSheet` showing per-run duplicate deltas + the workspace-wide gate delta + the skipped-fields note. **Save** button posts to `api.mlConfigPut(ws, body)` and fires a `sonner` toast on success/failure.
+- **`apps/meetsy-web/app/tuning/tunable-meta.ts`** — form metadata for every `WorkspaceTunables` field: `label`, `description`, `min`, `max`, `step`, `section` (`duplicates | similarity | gate | novelty | kb`), `consumed`. `SECTIONS` + `SECTION_TITLES` drive the grouped layout so the page reads Duplicate detection → Similarity → Gate → Novelty → KB.
+- **`apps/meetsy-web/components/nav/sidebar.tsx`** — `SETTINGS` gains a `/tuning` entry (`Sliders` icon, `ownerAdminOnly: true`). Members can still navigate directly (they get a read-only view); hiding the sidebar entry keeps their surface uncluttered.
+- **`apps/meetsy-web/lib/api.ts`** — types (`WorkspaceMlConfigView`, `MlConfigPreviewRun`, `MlConfigPreviewView`); helpers (`api.mlConfigGet(ws)`, `api.mlConfigPut(ws, body)`, `api.mlConfigPreview(ws, body, limit?)`). Re-imports `RunSnapshotPayload`, `WorkspaceModels`, `WorkspaceTunables` from `@ma/shared` so the client + server share the Zod-derived types.
+
+### 2026-07-18 — Phase 5 verify (all GREEN)
+
+| # | Target | Command | Result |
+|---|---|---|---|
+| a | `@ma/shared` build | not needed — no shared-package changes in Phase 5 | SKIP |
+| b | Meetsy API typecheck | `pnpm --filter @ma/api typecheck` (via `tsc --noEmit`) | PASS |
+| c | Meetsy web typecheck | `pnpm --filter @ma/web typecheck` (via `tsc --noEmit`) | PASS |
+| d | Meetsy web lint | `next lint` | PASS — 0 warnings, 0 errors |
+| e | Meetsy API tests | `npx jest` (in `apps/meetsy-api`) | PASS — **56 suites / 313 tests** (was 54/300 after Phase 4; +2 suites, +13 tests: `ml-config-preview.service` + `ml-config.service.upsert`) |
+
+`next build` intentionally skipped per the `meetsy-web-next-build-dev-footgun` memory. typecheck + lint are the sanctioned verification path.
+
+**Migration status:** no new migrations in Phase 5 — Phase 0 already shipped `WorkspaceMlConfig` + `AnalysisRunSnapshot`. The three prior unapplied migrations (`20260718150000_meetsy_v2_phase1_run_search`, `20260718200000_meetsy_v2_phase2_push_dead_letter`, and Phase 0's `WorkspaceMlConfig`/`AnalysisRunSnapshot` migration) still ride `prisma migrate deploy` on the next deploy.
+
+**Deferred (later phases):**
+- `meetsy-ml-preview` BullMQ queue — preview compute is cheap synchronous JSON math today; queue wiring stays available for later.
+- Runtime consumption of the remaining tunables: `simFloor`, `minQualifying`, `closedWeight` (currently constants in `retrieval.service.ts` / `field-prediction.service.ts`); `rrfK`, `embedBatch` (`kb.queue.ts` / `kb-embed.service.ts`); `novelMaxSimCutoff`, `linkMinSim` (novelty analyzer, doc↔task linker). Each requires a small refactor of its caller to accept an optional band/gate arg, mirroring PR-U's pattern on `classifyDuplicates`.
+- Model routing consumption — `WorkspaceMlConfig.models.{summarizer,duplicateEmbeddings,gpt5NanoRoutes}` is stored but every AI call still resolves the model from `AI_ROUTES` / env config. Phase 6+ will inject the model per-workspace at the `AzureOpenAiClient` call sites.
+- Preview coverage for the non-replayable fields — sim-floor / rrfK / model changes would need a re-run against the raw ClickUp task corpus (not the frozen `AnalysisRun.result`); if that becomes valuable, the `meetsy-ml-preview` queue is the natural home.
+- Per-workspace override history / audit — every `WorkspaceMlConfig.upsert` sets `updatedBy` + `updatedAt`, but there's no time-series view. If tunable churn becomes real, a small `WorkspaceMlConfigHistory` table + a "diff since last save" view would slot in without changing the current shape.
+
+**Phase 5 status:** DONE. All four PRs (T/U/V/W) landed on `feat/meetsy-phase0`.

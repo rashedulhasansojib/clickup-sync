@@ -13,6 +13,7 @@ import {
 } from "./learning-aggregate";
 import { LearningCacheService } from "./learning-cache.service";
 import { LearningStreamService, classifyThreshold } from "./learning-stream.service";
+import { MlConfigService } from "./ml-config.service";
 
 /** v2 Phase 3 — the learnable fields. Client left the learning loop (a
  * meeting-level value the user sets at upload, never predicted). Assignee
@@ -122,16 +123,19 @@ export class LearningService {
     private readonly prisma: PrismaService,
     private readonly cache: LearningCacheService,
     private readonly stream: LearningStreamService,
+    private readonly mlConfig: MlConfigService,
   ) {}
 
-  /** v2 Phase 3 — expose the loop's thresholds. Workspace-independent today;
-   * Phase 5's /tuning UI will read from WorkspaceMlConfig once the model
-   * lands write-side. Signature stays stable across that migration. */
-  gate(_workspaceId: string): LearningGateView {
+  /** v2 Phase 3 — expose the loop's thresholds. v2 Phase 5 — reads
+   * per-workspace values from `WorkspaceMlConfig` (falling back to hardcoded
+   * defaults via MlConfigService). `nearGateThreshold` is derived from
+   * `minCorrections - 1` so it moves with the gate. */
+  async gate(workspaceId: string): Promise<LearningGateView> {
+    const cfg = await this.mlConfig.forWorkspace(workspaceId);
     return {
-      minCorrections: MIN_CORRECTIONS,
-      minAgreement: MIN_AGREEMENT,
-      nearGateThreshold: NEAR_GATE_THRESHOLD,
+      minCorrections: cfg.tunables.minCorrections,
+      minAgreement: cfg.tunables.minAgreement,
+      nearGateThreshold: Math.max(cfg.tunables.minCorrections - 1, 0),
       fields: [...FIELDS],
     };
   }
@@ -168,7 +172,11 @@ export class LearningService {
       const predicted = (row.predicted as PredictionBundle | null) ?? {};
       const confirmed = (row.confirmed as ConfirmedBundle) ?? {};
       const adj = (row.adjustments as AdjustmentsBundle | null) ?? {};
-      const snap = await this.snapshot(workspaceId);
+      const [snap, mlCfg] = await Promise.all([
+        this.snapshot(workspaceId),
+        this.mlConfig.forWorkspace(workspaceId),
+      ]);
+      const minCorrections = mlCfg.tunables.minCorrections;
 
       // Same resolvers `snapshot()` uses (they must match — an event whose
       // pattern isn't findable in the snapshot would confuse the UI).
@@ -219,7 +227,7 @@ export class LearningService {
           (c) => c.predicted === predValue && c.confirmed === confValue,
         );
         if (!stat) continue;
-        const kind = classifyThreshold(stat.count);
+        const kind = classifyThreshold(stat.count, minCorrections);
         if (!kind) continue;
         await this.stream.publish({
           workspaceId,
@@ -297,9 +305,14 @@ export class LearningService {
       );
     }
 
+    const cfg = await this.mlConfig.forWorkspace(workspaceId);
+    const gate = {
+      minCorrections: cfg.tunables.minCorrections,
+      minAgreement: cfg.tunables.minAgreement,
+    };
     const snap: LearningSnapshot = {
-      assignee: aggregateField("assignee", records.assignee),
-      sprint: aggregateField("sprint", records.sprint),
+      assignee: aggregateField("assignee", records.assignee, gate),
+      sprint: aggregateField("sprint", records.sprint, gate),
     };
     // Write-back (best-effort — a cache failure only affects the next read).
     await this.cache.write(workspaceId, snap);

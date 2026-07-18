@@ -16,7 +16,10 @@ describe("MlConfigService", () => {
     const prisma = {
       workspaceMlConfig: { findUnique },
     };
-    const service = new MlConfigService(prisma as never);
+    // Phase 5 added a LearningCacheService dep — forWorkspace never touches it,
+    // so a bare stub satisfies the type.
+    const cache = { invalidate: jest.fn() };
+    const service = new MlConfigService(prisma as never, cache as never);
     return { service, findUnique };
   }
 

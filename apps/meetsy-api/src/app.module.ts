@@ -7,6 +7,7 @@ import { AzureModule } from "./azure/azure.module";
 import { AnalysisModule } from "./analysis/analysis.module";
 import { ClickUpModule } from "./clickup/clickup.module";
 import { KbModule } from "./kb/kb.module";
+import { TuningModule } from "./tuning/tuning.module";
 import { AuthModule } from "./auth/auth.module";
 import { AuthGuard } from "./auth/auth.guard";
 import { RolesGuard } from "./auth/roles.guard";
@@ -28,6 +29,7 @@ import { HealthController } from "./health/health.controller";
     AnalysisModule,
     ClickUpModule,
     KbModule,
+    TuningModule,
   ],
   controllers: [HealthController],
   providers: [

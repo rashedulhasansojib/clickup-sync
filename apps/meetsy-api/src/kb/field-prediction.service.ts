@@ -18,6 +18,7 @@ import {
   type PriorCandidate,
 } from "./prediction-prior";
 import { classifyDuplicates, type DuplicateHit } from "./duplicate-bands";
+import type { WorkspaceTunables } from "@ma/shared";
 
 /**
  * Phase 2c.2 — weak, abstain-first field prediction + duplicate flags for each
@@ -94,16 +95,29 @@ export class FieldPredictionService {
   ) {}
 
   /** Predict fields + duplicate flags for a run's tasks. Best-effort: any failure
-   * leaves a task without predictions (the pipeline result is otherwise unchanged). */
-  async analyze(workspaceId: string, tasks: Task[], meetingDateISO: string): Promise<TaskAnalysis> {
+   * leaves a task without predictions (the pipeline result is otherwise unchanged).
+   *
+   * v2 Phase 5 — `tunables` is optional; when omitted (or when `dupFlag`/`dupSuggest`
+   * aren't present) the classifier uses its module-level defaults. The analysis
+   * processor passes the workspace's saved config, so a `/tuning` edit to the
+   * bands takes effect on the very next run. */
+  async analyze(
+    workspaceId: string,
+    tasks: Task[],
+    meetingDateISO: string,
+    tunables?: WorkspaceTunables,
+  ): Promise<TaskAnalysis> {
     const predictions: Record<string, TaskPrediction> = {};
     const duplicates: Record<string, DuplicateHit[]> = {};
     const neighboursByTask: Record<string, Neighbour[]> = {};
+    const bands = tunables
+      ? { dupFlag: tunables.dupFlag, dupSuggest: tunables.dupSuggest }
+      : undefined;
     for (const task of tasks) {
       try {
         const { neighbours, raw } = await this.neighbours(workspaceId, task);
         neighboursByTask[task.id] = neighbours;
-        duplicates[task.id] = classifyDuplicates(raw);
+        duplicates[task.id] = classifyDuplicates(raw, bands);
         predictions[task.id] = await this.predictForTask(task, neighbours, meetingDateISO);
       } catch (err) {
         this.logger.warn(`Prediction skipped for task ${task.id}: ${(err as Error).message}`);

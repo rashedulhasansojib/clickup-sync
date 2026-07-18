@@ -35,10 +35,18 @@ export const learningChannel = (workspaceId: string): string =>
 
 /** Post-write threshold decision. Kept pure so `push.service` can call the
  * publisher only when the write actually crossed a threshold. Returns `null`
- * when the pattern isn't newly-interesting (count outside {2, 3}). */
-export function classifyThreshold(count: number): LearningEvent["kind"] | null {
-  if (count === NEAR_GATE_THRESHOLD) return "near-gate";
-  if (count === MIN_CORRECTIONS) return "gate-passed";
+ * when the pattern isn't newly-interesting (count outside {near, gate}).
+ *
+ * v2 Phase 5 — `minCorrections` is optional; defaults to the module constant
+ * so existing tests + callers keep working. The near-gate threshold is derived
+ * as `minCorrections - 1` (matches `LearningService.gate(...)`). */
+export function classifyThreshold(
+  count: number,
+  minCorrections: number = MIN_CORRECTIONS,
+): LearningEvent["kind"] | null {
+  const near = Math.max(minCorrections - 1, 0);
+  if (count === near) return "near-gate";
+  if (count === minCorrections) return "gate-passed";
   return null;
 }
 

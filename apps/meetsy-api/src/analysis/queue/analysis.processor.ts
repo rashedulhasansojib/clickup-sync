@@ -158,6 +158,13 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
     // Phase 3.2 — support-gated learning nudges per task id ("adjusted from N…").
     let adjustments: Record<string, TaskAdjustments> = {};
 
+    // v2 Phase 5 — load the workspace's ML config ONCE up front so both the
+    // runtime pipeline (dup bands into `fieldPrediction.analyze`) and the
+    // AnalysisRunSnapshot writer at run completion use the same values. If the
+    // read fails (row absent or DB blip), MlConfigService falls back to
+    // hardcoded defaults — snapshot writer already tolerates that.
+    const mlSnapshot = await this.mlConfig.forWorkspace(workspaceId);
+
     try {
       await this.prisma.analysisRun.update({
         where: { id: runId },
@@ -211,7 +218,12 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
         // ── Phase 2c.2: weak field predictions + duplicate flags ───────────
         // Best-effort: a KB miss / embeddings-unconfigured leaves predictions empty.
         try {
-          taskAnalysis = await this.fieldPrediction.analyze(workspaceId, tasks, meetingDateISO);
+          taskAnalysis = await this.fieldPrediction.analyze(
+            workspaceId,
+            tasks,
+            meetingDateISO,
+            mlSnapshot.tunables,
+          );
           // ── Phase 3.1: rank owner recommendations (reuses the kNN neighbours;
           // conditioned on the MEETING-LEVEL client set at upload to beat the
           // base-rate echo). ──
@@ -264,17 +276,15 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
       // v2 Phase 0 — freeze the workspace's ML config on run completion so
       // Phase 5's preview replay can reproduce the run's parameters exactly.
       // Best-effort: a snapshot failure NEVER blocks run completion (the run
-      // is already `completed` on the row above). Wraps a fresh read of the
-      // workspace's tunables + models (falls back to hardcoded defaults when
-      // no row exists yet — see MlConfigService).
+      // is already `completed` on the row above). We reuse `mlSnapshot` from
+      // the top of `handle()` — the same values the pipeline consumed.
       try {
-        const snapshot = await this.mlConfig.forWorkspace(workspaceId);
         await this.prisma.analysisRunSnapshot.create({
           data: {
             runId,
             workspaceId,
-            tunables: snapshot.tunables as unknown as Prisma.InputJsonValue,
-            models: snapshot.models as unknown as Prisma.InputJsonValue,
+            tunables: mlSnapshot.tunables as unknown as Prisma.InputJsonValue,
+            models: mlSnapshot.models as unknown as Prisma.InputJsonValue,
           },
         });
       } catch (err) {
