@@ -776,3 +776,84 @@ Frontend-only; wraps the existing sections in shadcn Tabs so ICs stop scrolling 
 
 **Phase 1 status:** DONE. All four PRs (D/E/F/G) landed on `feat/meetsy-phase0`. Ready for Phase 2 (evidence-first review).
 
+
+---
+
+## Phase 2 (v2) — Evidence-first review + push retry
+
+Spec: `docs/superpowers/specs/2026-07-18-meetsy-v2-phase2-evidence-review-design.md`
+Branch: `feat/meetsy-phase0` (still owns v2 work until it lands on `main`)
+
+### 2026-07-18 — PR-H: top-5 kNN neighbours attached to `run.result` — DONE / GREEN
+
+The kNN neighbours per task were already computed by `FieldPredictionService` (`apps/meetsy-api/src/kb/field-prediction.service.ts:112`) and threaded through the processor (`analysis.processor.ts:154, :218, :220`) for owner ranking — then dropped on the floor at the persist step. Phase 2 attaches the top-5 to `run.result.neighboursByTask` so the review UI can show "why did the pipeline think of this task as similar?" without re-embedding.
+
+- **Shared schema:** `NeighbourHitSchema` added to `packages/shared/src/review-result.ts` — mirrors the `Neighbour` interface at `kb/prediction-prior.ts:14` but with `createdDate`/`closedDate` as `z.string().datetime().nullable()` (Prisma serializes Date via `Date.prototype.toJSON` on JSON write).
+- **`ReviewResultSchema.neighboursByTask`** added as an optional `Record<string, NeighbourHit[]>`; `ReviewSignals` picked type gains `neighboursByTask` so `mergeSignals()` preserves it through feedback + chat writes (same failure mode Phase 0 R2 fixed for the other signal keys).
+- **`sliceNeighbours(byTask, n)`** — pure local helper in `analysis.processor.ts` that copies the top-N per task. Source arrays already sorted DESC by cosine (pgvector `ORDER BY <=>` in `field-prediction.service.ts:139`) so it's just a slice.
+- **Persist:** the `result: { ... }` write at `analysis.processor.ts:243` gains `neighboursByTask: sliceNeighbours(taskAnalysis.neighboursByTask, 5)`.
+- **`mergeSignals()`** at `analysis.service.ts:717` gains `neighboursByTask: source.neighboursByTask` so feedback + chat mutations don't strip evidence.
+- **Bounds:** top-5 × ~20 tasks × ~100 bytes ≈ 10 KB/run — trivial vs. transcript-sized fields already on `run.result`.
+- **Specs:** `analysis.processor.slice-neighbours.spec.ts` (4 tests — top-N truncation, shorter-arrays pass-through, empty map, non-mutation of source); `analysis.service.signal-roundtrip.spec.ts` extended to seed + assert `neighboursByTask` round-trip across feedback + chat writes (3 additional assertions).
+
+### 2026-07-18 — PR-I: push retry queue + dead-letter — DONE / GREEN
+
+Failed pushes (`push.service.ts:249-266`) previously just sat with `status="failed"` — no queue, no retry endpoint, no dead-letter. Users could only click Push again (which re-ran everything, idempotent-skipped the `pushed` rows, and retried the `failed` ones — noisy and slow).
+
+- **Migration:** `apps/meetsy-api/prisma/migrations/20260718200000_meetsy_v2_phase2_push_dead_letter/migration.sql` — HAND-AUTHORED. Creates `meetsy."PushDeadLetter"` (`{id, runId, meetsyTaskId, workspaceId, jobId, payload, errorMessage, errorStack, attemptsMade, failedAt, retriedAt, resolvedAt, resolvedBy}`) + 2 indexes (`workspaceId`, `runId`). Mirrors Clicksy's root `DeadLetterJob` shape but in `meetsy` schema.
+- **Schema:** `PushDeadLetter` model appended in `apps/meetsy-api/prisma/schema.prisma` right after `TaskPush`, using the same meetsy-schema convention (camelCase, no `@map`).
+- **Queue + worker:** `apps/meetsy-api/src/clickup/push-retry/`:
+  - `redis.ts` — queue name `meetsy-push-retry`.
+  - `push-retry.queue.ts` — producer. Job id `${runId}:${meetsyTaskId}:${nonce}` (nonce is `Date.now().toString(36)` — intentionally per-enqueue so a retry after a retry actually runs; the DB row on `TaskPush` is the idempotency key). Options: `attempts: 4`, `backoff: { type: "exponential", delay: 2000 }`, `removeOnComplete/Fail: 100`.
+  - `push-retry.processor.ts` — worker. Reads `TaskPush` by `(runId, meetsyTaskId)`, no-ops if already `pushed`, otherwise re-plays the stored ClickUp payload against the workspace's CURRENT `targetListId` (per-task listId overrides at original push time are not re-derivable; explicit design tradeoff). On success upserts `TaskPush(status:"pushed",clickupTaskId,clickupUrl,error:null)`. On BullMQ's final `failed` event (attempts exhausted), writes a `PushDeadLetter` row — `TaskPush.status` stays `failed` (dead-lettered ≠ lost). FieldOverride is INTENTIONALLY NOT re-logged on retry — the original push-time request context isn't recoverable from the stored payload; a retried push has the same audit shape as a never-failed one.
+- **Retry endpoint:** `POST /runs/:id/push/retry` on new `PushRetryController` (co-located with `PushController`). Body `{ taskIds?: string[] }`; empty/absent = retry every failed row. Response `{ enqueued: string[], skipped: [{ meetsyTaskId, reason }] }`. Reasons: `not_found` (a filter id had no `TaskPush` row) · `not_failed:<status>` · `enqueue_failed:<msg>`. Auth: any authenticated user (same as `PushController`), CSRF via global AuthGuard.
+- **Dead-letter admin:** `PushDeadLetterController` at `/workspaces/:id/push/dead-letter` — `@Roles("OWNER","ADMIN")` class-level; `GET` lists unresolved by default (`?includeResolved=true` opts in), `POST /:deadLetterId/resolve` hand-marks with `resolvedBy = user.userId`. No re-enqueue path (Phase 4 polish).
+- **Module wiring:** `ClickUpModule` adds `PushRetryController`, `PushDeadLetterController`, and the 4 new providers (`PushRetryQueue`, `PushRetryProcessor`, `PushRetryService`, `PushDeadLetterService`). Analysis-queue pattern preserved (worker + producer on separate Redis connections).
+- **Specs:** `push-retry.service.spec.ts` (6 tests — fan-out over failed rows, `taskIds` filter with `not_found` reporting, non-failed rows as `not_failed:<status>`, cross-org NotFoundException, missing-run NotFoundException, enqueue-failure reporting) and `push-dead-letter.service.spec.ts` (6 tests — unresolved-by-default filter, `includeResolved`, ISO serialization + total, cross-workspace 404, missing-row 404, `resolvedBy` write path).
+
+### 2026-07-18 — PR-J: evidence panels expanded by default (web) — DONE / GREEN
+
+`apps/meetsy-web/app/runs/[runId]/signals.tsx` rewritten from the ground up. The old file rendered four shallow rows (duplicates → 3 pred chips → optional nudge → owner name-only) with the `assignment.ranked[]`, `FieldPrediction.candidates[]`, and `evidenceTaskIds` from the pipeline never rendered.
+
+- **Sections rendered per task card, top-to-bottom** (each short-circuits when its signal is absent):
+  1. **Duplicates** — every `d.taskId` renders as a `TaskChip` (red/amber by band).
+  2. **Suggested fields** — Sprint / Due / Estimate chips as before, PLUS a sub-strip of the sim-weighted candidates behind each prediction (`from A · 42% · B · 25% …`), the picked value styled distinct. A `clamp` badge appears when `isModal === false` (LLM overrode the modal top).
+  3. **Owner** — top-3 ranked candidates with score bars (`ownershipScore`), closed/open/tracked-hours line, plus every `evidenceTaskIds` (up to 5) as clickable `TaskChip`s. "Show N more" expands to the full ranking; recommended candidate highlighted green.
+  4. **Learning nudge** — `assignee` AND `sprint` (Phase 3 will populate the sprint side of `TaskAdjustments`; the code path is ready).
+  5. **Similar (neighboursByTask)** — top-3 neighbours as `TaskChip`s with the cosine %. Hover shows assignee/sprint/client provenance.
+- **No collapsible container.** Everything is expanded by default per the audience decision (spec §2). The `KbContextBanner` at the run level keeps its `<details>` since only some viewers care about workspace-wide grounding.
+- **`workspaceId` prop plumbed** from `ResultView` → `PersonSection` → `TaskCard` → `TaskSignals` → each section, sourced from `useWorkspace()`. A `null` workspaceId falls back to non-interactive `<span>` chips (defensive — chip must not crash when no workspace context exists).
+
+### 2026-07-18 — PR-K: clickable task-id chips → side sheet + retry-failed button — DONE / GREEN
+
+- **`TaskSheetProvider`** (`apps/meetsy-web/components/tasks/task-sheet-context.tsx`) — a single side-sheet slot per view; any chip in the subtree calls `openTaskSheet(taskId)`. Scoped to `runs/[runId]/page.tsx` (spec §8; hoisting to `AppShell` is Phase 4).
+- **`TaskChip`** (`apps/meetsy-web/components/tasks/task-chip.tsx`) — a `<button>` (not `<span>` — chips are interactive), 6 tone variants, focus ring for keyboard traversal (Phase 6 wires j/k later). Falls back to no-op when no provider is mounted.
+- **`TaskDetailSheet`** (`apps/meetsy-web/components/tasks/task-detail-sheet.tsx`) — right-side `Sheet` (shadcn), re-fetches on each open via `api.getClickupTask(workspaceId, taskId)`. Three legit states: loading (spinner + skeleton) · loaded (title, status, assignee, updatedAt, "Open in ClickUp ↗" external link) · null (task predates KB — legitimate; message reassures the chip is still trustworthy).
+- **`api.getClickupTask`** — thin wrapper over `GET /workspaces/:id/clickup/tasks/:taskId` (the Phase 0 endpoint at `tasks-lookup.controller.ts`); returns `ClickUpTaskLookupView | null`.
+- **`api.retryFailedPushes`** — thin wrapper over `POST /runs/:id/push/retry`.
+- **Chip wire-up sites** (all in the new `signals.tsx`): DuplicatesSection, RankedRow.evidenceTaskIds, NeighboursSection, KbContextBanner (for `sourceType === "clickup_task"` hits only).
+- **Retry-failed button in `PushSection`:** the header button row (`components.tsx:947`) gains a `variant="secondary"` "Retry failed (N)" button that fires `api.retryFailedPushes(runId)` and reloads after 3s (the worker's typical wall time is < 2s per row). Only rendered when `failedCount > 0`. Enqueue success surfaces a green status message; enqueue failure surfaces an `ErrorBanner`.
+- **Insights tab** rewritten from "coming in Phase 2" placeholder to a note pointing users to the Overview tab's inline evidence (the point of PR-J was to make a separate Insights view unnecessary).
+
+### 2026-07-18 — Phase 2 verify (all GREEN)
+
+| # | Target | Command | Result |
+|---|---|---|---|
+| a | `@ma/shared` build | `pnpm --filter @ma/shared build` | PASS |
+| b | Meetsy API typecheck | `pnpm --filter @ma/api typecheck` (via `tsc --noEmit`) | PASS |
+| c | Meetsy web typecheck | `pnpm --filter @ma/web typecheck` (via `tsc --noEmit`) | PASS |
+| d | Meetsy web lint | `next lint` | PASS — 0 warnings, 0 errors |
+| e | Meetsy API tests | `pnpm --filter @ma/api test` | PASS — **46 suites / 262 tests** (was 43/246 after Phase 1; +3 suites, +16 tests: `analysis.processor.slice-neighbours` + `push-retry.service` + `push-dead-letter.service`; existing `analysis.service.signal-roundtrip` extended to cover `neighboursByTask` in 3 test cases) |
+| f | Prisma generate | `prisma generate` | PASS — new `PushDeadLetter` model + `neighboursByTask` shared type available in Prisma client |
+
+`next build` intentionally skipped per the `meetsy-web-next-build-dev-footgun` memory. typecheck + lint are the sanctioned verification path.
+
+**Migration status:** `20260718200000_meetsy_v2_phase2_push_dead_letter` is UNAPPLIED (same footing as Phase 1's tsv migration — Docker not running at commit time). The orchestrator applies via `prisma migrate deploy` on next deploy.
+
+**Deferred (later phases):**
+- Dead-letter UI (endpoints ship; visible surface is Phase 4 KB consolidation, which touches the same admin nav).
+- Per-row retry button on `TaskPushRow` (bulk retry covers the common case; per-row would be noise).
+- Neighbours as a standalone "cross-run similarity" view (evidence-strip on the task card is enough for IC engineers checking one task at a time).
+- FieldOverride re-log on retried pushes (original request-time context isn't recoverable from stored payload; documented tradeoff in `push-retry.processor.ts`).
+
+**Phase 2 status:** DONE. All four PRs (H/I/J/K) landed on `feat/meetsy-phase0`. Ready for Phase 3 (learning trust).

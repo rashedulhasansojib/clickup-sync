@@ -5,8 +5,11 @@ import { useParams, useRouter } from "next/navigation";
 import type { ReviewResult, RunStatus } from "@ma/shared";
 import { api, ApiError } from "@/lib/api";
 import { useRunStream } from "@/lib/useRunStream";
+import { useWorkspace } from "@/lib/workspace-context";
 import { Button, Card, ErrorBanner, Spinner } from "@/app/ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TaskSheetProvider } from "@/components/tasks/task-sheet-context";
+import { TaskDetailSheet } from "@/components/tasks/task-detail-sheet";
 import {
   ChatPanel,
   PipelineStepper,
@@ -27,6 +30,7 @@ export default function RunPage() {
   const router = useRouter();
   const params = useParams<{ runId: string }>();
   const runId = params.runId;
+  const { activeWorkspaceId } = useWorkspace();
 
   const { events, latest, done, streamError } = useRunStream(runId);
 
@@ -121,7 +125,9 @@ export default function RunPage() {
   const isWorking = !settledRef.current && status !== "failed";
 
   return (
-    <div className="space-y-8">
+    <TaskSheetProvider>
+      <TaskDetailSheet workspaceId={activeWorkspaceId} />
+      <div className="space-y-8">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
@@ -222,13 +228,16 @@ export default function RunPage() {
                 forceMount
                 className="data-[state=inactive]:hidden"
               >
-                <Card className="p-8 text-center">
+                <Card className="p-6 text-sm text-zinc-600">
                   <h3 className="text-base font-medium text-zinc-900">
-                    Insights coming in Phase 2
+                    Where&apos;s the evidence?
                   </h3>
-                  <p className="mt-1 text-sm text-zinc-500">
-                    Evidence panels (owner ranking, precedent tasks,
-                    kbContext) + learning-loop nudges will surface here.
+                  <p className="mt-1">
+                    Since v2 Phase 2, task cards on the Overview tab render
+                    the full ownership ranking, kNN candidates, similar
+                    tasks, and clickable ClickUp task chips inline. Open a
+                    task card to see the evidence panel — no separate view
+                    needed.
                   </p>
                 </Card>
               </TabsContent>
@@ -236,7 +245,8 @@ export default function RunPage() {
           )}
         </>
       )}
-    </div>
+      </div>
+    </TaskSheetProvider>
   );
 }
 

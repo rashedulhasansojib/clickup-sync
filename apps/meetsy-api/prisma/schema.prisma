@@ -247,6 +247,39 @@ model TaskPush {
   @@schema("meetsy")
 }
 
+// v2 Phase 2 — permanently-failed push jobs. Written by the meetsy-push-retry
+// BullMQ worker when a job exhausts its BullMQ `attempts` (see
+// push-retry.processor.ts). The matching `TaskPush` row stays at
+// `status="failed"` — dead-lettered ≠ lost, it's marked permanent. Resolution is
+// via the Owner/Admin-only POST /workspaces/:id/push/dead-letter/:id/resolve
+// endpoint (no re-enqueue path yet — Phase 4 polish).
+//
+// Mirrors Clicksy's root `DeadLetterJob` shape, but in `meetsy` schema and
+// scoped to task push (so a workspace can quickly find "which pushes need
+// operator attention").
+model PushDeadLetter {
+  id           String    @id @default(cuid())
+  runId        String
+  meetsyTaskId String
+  workspaceId  String
+  // BullMQ jobId of the FINAL attempt (idempotent bookkeeping — a new retry
+  // creates a fresh row, not an update). Kept as a text soft-ref.
+  jobId        String
+  // The last ClickUp create payload attempted (from TaskPush.payload).
+  payload      Json
+  errorMessage String?
+  errorStack   String?   @db.Text
+  attemptsMade Int       @default(0)
+  failedAt     DateTime  @default(now())
+  retriedAt    DateTime?
+  resolvedAt   DateTime?
+  resolvedBy   String?
+
+  @@index([workspaceId])
+  @@index([runId])
+  @@schema("meetsy")
+}
+
 // One embedded chunk of the per-workspace RAG knowledge base. Phase 2a embeds
 // one "card" per ClickUp task (chunkIndex 0); the schema reserves multi-chunk
 // (long tasks) + transcript/document sources for later.

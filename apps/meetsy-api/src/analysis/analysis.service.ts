@@ -703,15 +703,18 @@ function flattenTasks(result: AnalysisResult): Task[] {
 }
 
 /**
- * Re-attach the five Phase-2c/3 signal keys onto a freshly-assembled AnalysisResult.
- * Called after `assemble()` in feedback + chat writes so evidence (kbContext /
- * fieldPredictions / duplicates / assignment / adjustments) survives the mutation
- * — assemble() itself is intentionally signal-agnostic (parses to strict
- * AnalysisResultSchema on output).
+ * Re-attach the Phase-2c/3 + v2 Phase 2 signal keys onto a freshly-assembled
+ * AnalysisResult. Called after `assemble()` in feedback + chat writes so
+ * evidence (kbContext / fieldPredictions / duplicates / assignment /
+ * adjustments / neighboursByTask) survives the mutation — assemble() itself
+ * is intentionally signal-agnostic (parses to strict AnalysisResultSchema
+ * on output).
  *
  * The signals are OPTIONAL — a run whose pipeline abstained on all fields will
- * legitimately have no `fieldPredictions`, and older v1 runs may have none at all.
- * We copy whichever keys are present on `source`; missing keys stay missing.
+ * legitimately have no `fieldPredictions`, and older v1 runs may have none at
+ * all. We copy whichever keys are present on `source`; missing keys stay
+ * missing. v2 Phase 2 adds `neighboursByTask` — same optionality rule (legacy
+ * runs completed pre-Phase-2 have no neighbours attached).
  */
 function mergeSignals(base: AnalysisResult, source: ReviewResult): ReviewResult {
   const signals: ReviewSignals = {
@@ -720,6 +723,7 @@ function mergeSignals(base: AnalysisResult, source: ReviewResult): ReviewResult 
     duplicates: source.duplicates,
     assignment: source.assignment,
     adjustments: source.adjustments,
+    neighboursByTask: source.neighboursByTask,
   };
   return { ...base, ...signals };
 }

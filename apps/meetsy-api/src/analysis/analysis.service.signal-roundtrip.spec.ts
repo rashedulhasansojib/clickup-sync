@@ -132,6 +132,22 @@ describe("AnalysisService — signal round-trip (v2 Phase 0)", () => {
       assignee: { from: "Rashedul", to: "Alice", count: 3, agreement: 0.75 },
     },
   };
+  // v2 Phase 2 — top-5 kNN neighbours per task. Persisted with ISO date strings
+  // (Prisma.InputJsonValue calls Date.prototype.toJSON on write).
+  const neighboursByTask = {
+    t1: [
+      {
+        taskId: "CU-01H8QX",
+        sim: 0.91,
+        client: "Acme",
+        sprint: "Sprint-24",
+        assignee: "Alice",
+        estimation: "4",
+        createdDate: "2026-06-01T00:00:00.000Z",
+        closedDate: "2026-06-15T00:00:00.000Z",
+      },
+    ],
+  };
 
   function seededRunRow() {
     return {
@@ -152,6 +168,7 @@ describe("AnalysisService — signal round-trip (v2 Phase 0)", () => {
         duplicates,
         assignment,
         adjustments,
+        neighboursByTask,
       },
     };
   }
@@ -250,6 +267,7 @@ describe("AnalysisService — signal round-trip (v2 Phase 0)", () => {
     expect(res.result.duplicates).toEqual(duplicates);
     expect(res.result.assignment).toEqual(assignment);
     expect(res.result.adjustments).toEqual(adjustments);
+    expect(res.result.neighboursByTask).toEqual(neighboursByTask);
 
     // …and so does the persisted row (this is the real bug being guarded).
     const persisted = getPersistedResult() as Record<string, unknown>;
@@ -259,6 +277,7 @@ describe("AnalysisService — signal round-trip (v2 Phase 0)", () => {
     expect(persisted.duplicates).toEqual(duplicates);
     expect(persisted.assignment).toEqual(assignment);
     expect(persisted.adjustments).toEqual(adjustments);
+    expect(persisted.neighboursByTask).toEqual(neighboursByTask);
   });
 
   it("submitFeedback: signal keys survive when there is a real remove (task in result)", async () => {
@@ -280,9 +299,11 @@ describe("AnalysisService — signal round-trip (v2 Phase 0)", () => {
     expect(persisted.duplicates).toEqual(duplicates);
     expect(persisted.assignment).toEqual(assignment);
     expect(persisted.adjustments).toEqual(adjustments);
+    expect(persisted.neighboursByTask).toEqual(neighboursByTask);
     // And on the response too.
     expect(res.result.kbContext).toEqual(kbContext);
     expect(res.result.fieldPredictions).toEqual(fieldPredictions);
+    expect(res.result.neighboursByTask).toEqual(neighboursByTask);
   });
 
   it("sendChat: signal keys survive when the chat adds a task (newTasks.length > 0)", async () => {
@@ -298,6 +319,7 @@ describe("AnalysisService — signal round-trip (v2 Phase 0)", () => {
     expect(res.result!.duplicates).toEqual(duplicates);
     expect(res.result!.assignment).toEqual(assignment);
     expect(res.result!.adjustments).toEqual(adjustments);
+    expect(res.result!.neighboursByTask).toEqual(neighboursByTask);
 
     // And the persisted row does too — this is the write path that previously
     // stripped everything when a new task got added.
@@ -308,6 +330,7 @@ describe("AnalysisService — signal round-trip (v2 Phase 0)", () => {
     expect(persisted.duplicates).toEqual(duplicates);
     expect(persisted.assignment).toEqual(assignment);
     expect(persisted.adjustments).toEqual(adjustments);
+    expect(persisted.neighboursByTask).toEqual(neighboursByTask);
   });
 
   it("sendChat: does NOT write when newTasks is empty (unchanged branch)", async () => {

@@ -16,6 +16,7 @@ import { FieldPredictionService, type TaskAnalysis } from "../../kb/field-predic
 import { AssignmentService, type TaskAssignment } from "../../kb/assignment.service";
 import { LearningService, type TaskAdjustments } from "../../kb/learning.service";
 import { MlConfigService } from "../../kb/ml-config.service";
+import type { Neighbour } from "../../kb/prediction-prior";
 import type { AssignableMember } from "../../clickup/clickup.types";
 import { buildContextQuery, formatContextForPrompt } from "../pipeline-context";
 
@@ -239,7 +240,8 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
         data: {
           status: "completed",
           // Attach KB provenance (2c.1) + weak field predictions/dupe flags (2c.2)
-          // so the grounding is inspectable on the run, keyed by task id.
+          // + v2 Phase 2 top-5 kNN neighbours per task so the grounding is
+          // inspectable on the run, keyed by task id.
           result: {
             ...(result as object),
             kbContext,
@@ -247,6 +249,7 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
             duplicates: taskAnalysis.duplicates,
             assignment,
             adjustments,
+            neighboursByTask: sliceNeighbours(taskAnalysis.neighboursByTask, 5),
           } as unknown as Prisma.InputJsonValue,
           error: null,
           promptTokens: usage.promptTokens,
@@ -297,4 +300,21 @@ export class AnalysisProcessor implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     await this.worker?.close();
   }
+}
+
+/**
+ * v2 Phase 2 — take the top-N per task from the kNN neighbours map. The source
+ * arrays come from an `ORDER BY embedding <=> query` pgvector search
+ * (`field-prediction.service.ts:139`) so they're already sorted DESC by cosine;
+ * we just slice. Kept pure + local so it's trivially unit-testable.
+ */
+export function sliceNeighbours(
+  byTask: Record<string, Neighbour[]>,
+  n: number,
+): Record<string, Neighbour[]> {
+  const out: Record<string, Neighbour[]> = {};
+  for (const [taskId, neighbours] of Object.entries(byTask)) {
+    out[taskId] = neighbours.slice(0, n);
+  }
+  return out;
 }

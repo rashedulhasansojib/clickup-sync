@@ -28,6 +28,7 @@ import {
   type PushTaskInput,
   type RunPushStatus,
 } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace-context";
 import { Button, Card, ErrorBanner, PriorityBadge, Spinner, Tag } from "@/app/ui";
 import {
   type ReviewResult,
@@ -277,6 +278,7 @@ export function ResultsSection({
 // ── Result rendering ──────────────────────────────────────────────────
 export function ResultView({ result }: { result: ReviewResult }) {
   const rr = result;
+  const { activeWorkspaceId } = useWorkspace();
   return (
     <div className="space-y-8">
       <section>
@@ -289,7 +291,7 @@ export function ResultView({ result }: { result: ReviewResult }) {
           </p>
         </Card>
         <div className="mt-3">
-          <KbContextBanner hits={rr.kbContext} />
+          <KbContextBanner hits={rr.kbContext} workspaceId={activeWorkspaceId} />
         </div>
       </section>
 
@@ -301,7 +303,12 @@ export function ResultView({ result }: { result: ReviewResult }) {
           <p className="text-sm text-zinc-400">No assigned tasks.</p>
         )}
         {result.people.map((pt) => (
-          <PersonSection key={pt.participant.id} personTasks={pt} result={rr} />
+          <PersonSection
+            key={pt.participant.id}
+            personTasks={pt}
+            result={rr}
+            workspaceId={activeWorkspaceId}
+          />
         ))}
       </section>
 
@@ -315,7 +322,12 @@ export function ResultView({ result }: { result: ReviewResult }) {
           </p>
           <div className="space-y-3">
             {result.unassignedTasks.map((t) => (
-              <TaskCard key={t.id} task={t} signals={signalsForTask(rr, t.id)} />
+              <TaskCard
+                key={t.id}
+                task={t}
+                signals={signalsForTask(rr, t.id)}
+                workspaceId={activeWorkspaceId}
+              />
             ))}
           </div>
         </section>
@@ -324,7 +336,15 @@ export function ResultView({ result }: { result: ReviewResult }) {
   );
 }
 
-function PersonSection({ personTasks, result }: { personTasks: PersonTasks; result: ReviewResult }) {
+function PersonSection({
+  personTasks,
+  result,
+  workspaceId,
+}: {
+  personTasks: PersonTasks;
+  result: ReviewResult;
+  workspaceId: string | null;
+}) {
   const { participant, tasks } = personTasks;
   return (
     <div className="space-y-3">
@@ -343,14 +363,29 @@ function PersonSection({ personTasks, result }: { personTasks: PersonTasks; resu
         {tasks.length === 0 ? (
           <p className="text-sm text-zinc-400">No tasks.</p>
         ) : (
-          tasks.map((t) => <TaskCard key={t.id} task={t} signals={signalsForTask(result, t.id)} />)
+          tasks.map((t) => (
+            <TaskCard
+              key={t.id}
+              task={t}
+              signals={signalsForTask(result, t.id)}
+              workspaceId={workspaceId}
+            />
+          ))
         )}
       </div>
     </div>
   );
 }
 
-function TaskCard({ task, signals }: { task: Task; signals?: TaskSignalData }) {
+function TaskCard({
+  task,
+  signals,
+  workspaceId,
+}: {
+  task: Task;
+  signals?: TaskSignalData;
+  workspaceId: string | null;
+}) {
   return (
     <Card className="p-4">
       <div className="flex items-start justify-between gap-3">
@@ -358,7 +393,7 @@ function TaskCard({ task, signals }: { task: Task; signals?: TaskSignalData }) {
         <PriorityBadge priority={task.priority} />
       </div>
 
-      {signals && <TaskSignals signals={signals} />}
+      {signals && <TaskSignals signals={signals} workspaceId={workspaceId} />}
 
       {task.description && (
         <p className="mt-1.5 text-sm leading-relaxed text-zinc-600">
@@ -721,6 +756,8 @@ export function PushSection({
   const [pushing, setPushing] = useState(false);
   const [pushError, setPushError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [retryStatus, setRetryStatus] = useState<string | null>(null);
   /** Per-task result of the most recent push (taskId → outcome). */
   const [results, setResults] = useState<Record<string, PushResult>>({});
 
@@ -930,6 +967,33 @@ export function PushSection({
     }
   };
 
+  // v2 Phase 2 (PR-K) — bulk retry the run's failed pushes. The endpoint fans
+  // out one BullMQ job per failed row (see PushRetryService); status will
+  // reflect the retries after the workers process them, so we schedule a
+  // gentle reload a couple of seconds later to catch the post-retry state.
+  const failedCount = status.pushes.filter((p) => p.status === "failed").length;
+  const handleRetryFailed = async () => {
+    if (failedCount === 0) return;
+    setRetrying(true);
+    setPushError(null);
+    setRetryStatus(null);
+    try {
+      const res = await api.retryFailedPushes(runId);
+      setRetryStatus(
+        `Retry queued for ${res.enqueued.length} push${res.enqueued.length === 1 ? "" : "es"}. Refreshing…`,
+      );
+      // Poll once after a short delay so post-retry outcomes surface without
+      // requiring a page reload. The worker's typical wall time is < 2s per row.
+      setTimeout(() => {
+        void load();
+      }, 3000);
+    } catch (err) {
+      setPushError(err instanceof ApiError ? err.message : "Could not enqueue retries.");
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   return (
     <Card className="space-y-4 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -948,6 +1012,16 @@ export function PushSection({
           <Button variant="secondary" onClick={handleRefreshFields} disabled={refreshing || pushing}>
             {refreshing ? <Spinner label="Refreshing…" /> : "Refresh ClickUp fields"}
           </Button>
+          {failedCount > 0 && (
+            <Button
+              variant="secondary"
+              onClick={handleRetryFailed}
+              disabled={retrying || pushing}
+              title="Enqueue a retry for every failed push on this run"
+            >
+              {retrying ? <Spinner label="Retrying…" /> : `Retry failed (${failedCount})`}
+            </Button>
+          )}
           <Button onClick={handlePush} disabled={pushing || eligible.length === 0}>
             {pushing ? (
               <Spinner label="Pushing…" />
@@ -959,6 +1033,9 @@ export function PushSection({
       </div>
 
       {pushError && <ErrorBanner message={pushError} />}
+      {retryStatus && !pushError && (
+        <p className="text-xs font-medium text-green-700">{retryStatus}</p>
+      )}
 
       <div className="space-y-2">
         {tasks.map((t) => (

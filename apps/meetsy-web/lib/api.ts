@@ -1,4 +1,5 @@
 import type {
+  ClickUpTaskLookupView,
   CreateMeetingRequest,
   CreateMeetingResponse,
   ConfirmRosterRequest,
@@ -664,6 +665,43 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ tasks }),
       },
+    );
+  },
+
+  /**
+   * POST /runs/:id/push/retry — v2 Phase 2. Enqueue a retry for every `failed`
+   * TaskPush row on this run (optionally filtered by task ids). Returns the
+   * BullMQ job ids that were enqueued and, per-task, why anything was skipped
+   * (`not_found` / `not_failed:<status>` / `enqueue_failed:<msg>`).
+   */
+  retryFailedPushes(
+    runId: string,
+    taskIds?: string[],
+  ): Promise<{
+    enqueued: string[];
+    skipped: Array<{ meetsyTaskId: string; reason: string }>;
+  }> {
+    return request<{
+      enqueued: string[];
+      skipped: Array<{ meetsyTaskId: string; reason: string }>;
+    }>(`/runs/${encodeURIComponent(runId)}/push/retry`, {
+      method: "POST",
+      body: JSON.stringify({ taskIds: taskIds ?? [] }),
+    });
+  },
+
+  /**
+   * GET /workspaces/:id/clickup/tasks/:taskId — resolve a ClickUp task id to
+   * its title/status/assignee/url. Returns null (200) when the task isn't in
+   * the workspace's read-only KB mirror — chips pointing at task ids that
+   * predate onboarding legitimately return no metadata.
+   */
+  getClickupTask(
+    workspaceId: string,
+    taskId: string,
+  ): Promise<ClickUpTaskLookupView | null> {
+    return request<ClickUpTaskLookupView | null>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/clickup/tasks/${encodeURIComponent(taskId)}`,
     );
   },
 

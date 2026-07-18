@@ -122,10 +122,33 @@ export const TaskAdjustmentsSchema = z.object({
 });
 export type TaskAdjustments = z.infer<typeof TaskAdjustmentsSchema>;
 
+// ── v2 Phase 2 — top-K kNN neighbours per task ─────────────────────────────
+/**
+ * A single kNN neighbour attached to a task's evidence. The DB layer holds
+ * `createdDate`/`closedDate` as Date | null (`kb/prediction-prior.ts:Neighbour`);
+ * `Prisma.InputJsonValue` serializes those via `Date.prototype.toJSON` to ISO
+ * strings, so the persisted shape is `z.string().datetime()` on the wire.
+ *
+ * v2 Phase 2 attaches this per task at `run.result.neighboursByTask` (up to
+ * top-5 by cosine); historical runs will lack the key entirely — that's why
+ * the map on ReviewResult is optional.
+ */
+export const NeighbourHitSchema = z.object({
+  taskId: z.string(),
+  sim: z.number(),
+  client: z.string().nullable(),
+  sprint: z.string().nullable(),
+  assignee: z.string().nullable(),
+  estimation: z.string().nullable(),
+  createdDate: z.string().datetime().nullable(),
+  closedDate: z.string().datetime().nullable(),
+});
+export type NeighbourHit = z.infer<typeof NeighbourHitSchema>;
+
 // ── The full review-result contract ────────────────────────────────────────
 /**
  * The persisted shape of `AnalysisRun.result` when a run has completed with the
- * v2c/3 pipeline. Extends AnalysisResult with the five signal keys; every key
+ * v2c/3 pipeline. Extends AnalysisResult with the six signal keys; every key
  * is optional so historical runs (or runs whose stages abstained) still parse.
  */
 export const ReviewResultSchema = AnalysisResultSchema.extend({
@@ -134,14 +157,20 @@ export const ReviewResultSchema = AnalysisResultSchema.extend({
   duplicates: z.record(z.string(), z.array(DuplicateHitSchema)).optional(),
   assignment: z.record(z.string(), TaskAssignmentSchema).optional(),
   adjustments: z.record(z.string(), TaskAdjustmentsSchema).optional(),
+  neighboursByTask: z.record(z.string(), z.array(NeighbourHitSchema)).optional(),
 });
 export type ReviewResult = z.infer<typeof ReviewResultSchema>;
 
 /**
- * The five signal keys as a picked type — used by mergeSignals() in the API
- * layer to re-attach evidence after a strict AnalysisResult re-assembly.
+ * The signal keys as a picked type — used by mergeSignals() in the API layer to
+ * re-attach evidence after a strict AnalysisResult re-assembly.
  */
 export type ReviewSignals = Pick<
   ReviewResult,
-  "kbContext" | "fieldPredictions" | "duplicates" | "assignment" | "adjustments"
+  | "kbContext"
+  | "fieldPredictions"
+  | "duplicates"
+  | "assignment"
+  | "adjustments"
+  | "neighboursByTask"
 >;
