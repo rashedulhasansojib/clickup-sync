@@ -50,8 +50,11 @@ function setup(opts: {
     get: jest.fn().mockResolvedValue(opts.config === undefined ? CONFIG : opts.config),
   } as unknown as PushConfigService;
   const learning = {
-    snapshot: jest.fn().mockResolvedValue({ client: {}, assignee: {} }),
+    snapshot: jest.fn().mockResolvedValue({ client: {}, assignee: {}, sprint: {} }),
     applyNudges: jest.fn().mockReturnValue({}),
+    // v2 Phase 3 — new no-op branches on the FieldOverride write path.
+    invalidateCache: jest.fn().mockResolvedValue(undefined),
+    maybePublishThreshold: jest.fn().mockResolvedValue(undefined),
   } as unknown as import("../kb/learning.service").LearningService;
   const svc = new PushService(
     prisma,

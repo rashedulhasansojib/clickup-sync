@@ -15,14 +15,28 @@ describe("LearningService — meSummary", () => {
   }) {
     const queryRaw = jest.fn().mockResolvedValue(opts.rows);
     const workspacePushConfigFindUnique = jest.fn().mockResolvedValue(
-      opts.members ? { assignableMembers: opts.members } : null,
+      opts.members ? { assignableMembers: opts.members, sprintLists: [] } : null,
     );
     const prisma = {
       $queryRaw: queryRaw,
       workspacePushConfig: { findUnique: workspacePushConfigFindUnique },
       fieldOverride: { count: jest.fn(), findMany: jest.fn() },
     };
-    return { service: new LearningService(prisma as never), queryRaw };
+    // v2 Phase 3 — cache + stream are constructor deps but meSummary doesn't
+    // use either (it hits the tsvector-shaped $queryRaw path, not snapshot).
+    const cache = {
+      read: jest.fn().mockResolvedValue(null),
+      write: jest.fn().mockResolvedValue(undefined),
+      invalidate: jest.fn().mockResolvedValue(undefined),
+    } as never;
+    const stream = {
+      publish: jest.fn().mockResolvedValue(undefined),
+      subscribe: jest.fn(),
+    } as never;
+    return {
+      service: new LearningService(prisma as never, cache, stream),
+      queryRaw,
+    };
   }
 
   it("zero-pads to 6 weeks (oldest first) when there are no overrides", async () => {

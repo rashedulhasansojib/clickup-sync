@@ -115,7 +115,7 @@ export function LearningDigestCard({ workspaceId }: { workspaceId: string }) {
           {data.totalOverrides === 1 ? "" : "s"} total
         </span>
         <Link
-          href="/settings/kb"
+          href="/learning"
           className="font-medium text-zinc-700 hover:text-zinc-900"
         >
           See patterns →

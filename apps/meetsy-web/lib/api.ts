@@ -183,7 +183,13 @@ export interface PushTaskInput {
 }
 
 /** GET /workspaces/:id/learning — the learning loop's "what we've learned". */
+export type LearnField = "assignee" | "sprint";
+
 export interface LearningCorrection {
+  /** v2 Phase 3 — the field this pattern applies to. */
+  field: LearnField;
+  /** v2 Phase 3 — stable slug used on `/learning/patterns/:key/history`. */
+  key: string;
   predicted: string;
   confirmed: string;
   count: number;
@@ -191,7 +197,7 @@ export interface LearningCorrection {
   gatePassed: boolean;
 }
 export interface LearningFieldSummary {
-  field: "assignee";
+  field: LearnField;
   corrections: LearningCorrection[];
   rawOverrideRate: number | null;
   rawSample: number;
@@ -202,6 +208,43 @@ export interface LearningFieldSummary {
 export interface LearningSummary {
   totalOverrides: number;
   fields: LearningFieldSummary[];
+}
+
+/** v2 Phase 3 — GET /workspaces/:id/learning/gate — the loop's thresholds. */
+export interface LearningGateView {
+  minCorrections: number;
+  minAgreement: number;
+  nearGateThreshold: number;
+  fields: LearnField[];
+}
+
+/** v2 Phase 3 — GET /workspaces/:id/learning/patterns/:key/history — one pattern's timeline. */
+export interface LearningPatternHistoryEntry {
+  runId: string;
+  meetsyTaskId: string;
+  createdAt: string;
+  nudgeShown: boolean;
+}
+export interface LearningPatternHistoryView {
+  key: string;
+  field: LearnField;
+  predicted: string;
+  confirmed: string;
+  count: number;
+  agreement: number;
+  gatePassed: boolean;
+  entries: LearningPatternHistoryEntry[];
+}
+
+/** v2 Phase 3 — one message on the near-gate SSE channel. */
+export interface LearningStreamEvent {
+  workspaceId: string;
+  field: LearnField;
+  predicted: string;
+  confirmed: string;
+  count: number;
+  at: number;
+  kind: "near-gate" | "gate-passed";
 }
 
 /** v2 Phase 1 — GET /workspaces/:id/learning/me — per-user weekly digest. */
@@ -718,6 +761,40 @@ export const api = {
     return request<LearningSummary>(
       `/workspaces/${encodeURIComponent(workspaceId)}/learning?workspaceId=${encodeURIComponent(workspaceId)}`,
     );
+  },
+
+  /** GET /workspaces/:id/learning/gate — the loop's thresholds (v2 Phase 3). */
+  getLearningGate(workspaceId: string): Promise<LearningGateView> {
+    return request<LearningGateView>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/learning/gate`,
+    );
+  },
+
+  /**
+   * GET /workspaces/:id/learning/patterns/:key/history — one pattern's timeline
+   * (v2 Phase 3). `key` is the base64url-encoded slug the summary returned;
+   * clients never construct it.
+   */
+  getLearningPatternHistory(
+    workspaceId: string,
+    key: string,
+    opts: { limit?: number } = {},
+  ): Promise<LearningPatternHistoryView> {
+    const qs = new URLSearchParams();
+    if (opts.limit != null) qs.set("limit", String(opts.limit));
+    const q = qs.toString();
+    return request<LearningPatternHistoryView>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/learning/patterns/${encodeURIComponent(key)}/history${q ? `?${q}` : ""}`,
+    );
+  },
+
+  /**
+   * Absolute URL for the near-gate SSE stream (v2 Phase 3). Consumed by
+   * EventSource with `{ withCredentials: true }` inside `useLearningStream`.
+   * Path-scoped to `/workspaces/:id/learning/stream` — no `?workspaceId=` query.
+   */
+  learningStreamUrl(workspaceId: string): string {
+    return `${API_URL}/workspaces/${encodeURIComponent(workspaceId)}/learning/stream`;
   },
 
   /**

@@ -32,9 +32,13 @@ function makeService(fieldPredictions: Record<string, unknown>) {
     }),
   } as unknown as PushConfigService;
   // Learning stub: empty snapshot, no nudges → adjustments stay null (existing assertions hold).
+  // v2 Phase 3 — PushService now calls invalidateCache + maybePublishThreshold
+  // on every FieldOverride write; stub both as best-effort no-ops.
   const learning = {
-    snapshot: jest.fn().mockResolvedValue({ assignee: {} }),
+    snapshot: jest.fn().mockResolvedValue({ assignee: {}, sprint: {} }),
     applyNudges: jest.fn().mockReturnValue({}),
+    invalidateCache: jest.fn().mockResolvedValue(undefined),
+    maybePublishThreshold: jest.fn().mockResolvedValue(undefined),
   } as unknown as LearningService;
   const svc = new PushService(prisma, client, new TaskMapperService(), pushConfig, {} as AssigneeResolverService, learning);
   return { svc, created, prisma };

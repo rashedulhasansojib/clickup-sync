@@ -237,7 +237,7 @@ export class PushService {
           run.workspaceId,
           predicted,
           { listId, clientOptionId: effectiveClientOptionId, points: task.points ?? null, clickupUserId },
-          this.computeAdjustments(learningSnap, predicted, clickupUserId, config),
+          this.computeAdjustments(learningSnap, predicted, clickupUserId, listId, config),
         );
         results.push({
           meetsyTaskId: task.meetsyTaskId,
@@ -334,6 +334,17 @@ export class PushService {
             : Prisma.JsonNull),
         },
       });
+      // v2 Phase 3 — the row changed the aggregate; drop the cached snapshot
+      // so the next read (analysis pipeline / /learning page / SSE toast
+      // pipeline) sees the fresh count. Best-effort — never blocks the push.
+      await this.learning.invalidateCache(workspaceId);
+      // v2 Phase 3 (PR-N) — publish a near-gate / gate-passed event when the
+      // fresh count crossed a threshold. Also best-effort; never blocks.
+      await this.learning.maybePublishThreshold(workspaceId, {
+        predicted,
+        confirmed,
+        adjustments,
+      });
     } catch (err) {
       this.logger.warn(`FieldOverride log failed for ${task.meetsyTaskId}: ${(err as Error).message}`);
     }
@@ -345,11 +356,18 @@ export class PushService {
    * makes loop-effectiveness measurable (vs the raw override rate) AND lets the
    * gate count only organic (no-nudge) corrections. `accepted` = the user's
    * confirmed value (resolved id → name) equals the nudge's suggestion.
+   *
+   * v2 Phase 3 — expanded to record the sprint branch symmetrically. Sprint's
+   * confirmed side is the pushed `listId`, resolved to its display name via
+   * the workspace's `sprintLists` config (same resolver `LearningService`
+   * uses for the snapshot). A rotated/renamed sprint list means the row
+   * reads as `unresolved`, not `accepted` — see spec §3.1.
    */
   private computeAdjustments(
     snap: LearningSnapshot | null,
     predicted: unknown,
     confirmedClickupUserId: string | null,
+    confirmedListId: string,
     config: PushConfigView,
   ): Record<string, { shown: string; accepted: boolean }> | null {
     if (!snap || predicted == null) return null;
@@ -358,6 +376,11 @@ export class PushService {
     if (nudges.assignee) {
       const confirmedName = config.assignableMembers.find((m) => m.clickupUserId === confirmedClickupUserId)?.name ?? null;
       out.assignee = { shown: nudges.assignee.to, accepted: confirmedName === nudges.assignee.to };
+    }
+    if (nudges.sprint) {
+      const confirmedSprintName =
+        (config.sprintLists ?? []).find((s) => s.listId === confirmedListId)?.name ?? null;
+      out.sprint = { shown: nudges.sprint.to, accepted: confirmedSprintName === nudges.sprint.to };
     }
     return out;
   }

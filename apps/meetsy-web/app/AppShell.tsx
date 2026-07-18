@@ -9,6 +9,7 @@ import {
   WorkspaceProvider,
   useWorkspace,
 } from "@/lib/workspace-context";
+import { useLearningStream } from "@/lib/useLearningStream";
 import { Spinner } from "@/app/ui";
 import { Toaster } from "@/components/ui/sonner";
 import { Sidebar } from "@/components/nav/sidebar";
@@ -82,6 +83,11 @@ function SignedInShell({
   children: React.ReactNode;
 }) {
   const { activeWorkspaceId } = useWorkspace();
+  // v2 Phase 3 (PR-N) — subscribe workspace-wide to near-gate / gate-passed
+  // events. Mounted here (not inside a page) so a toast can land while the
+  // user is pushing — the moment when the threshold actually crosses. The
+  // hook auto-cleans when the workspace switches or the shell unmounts.
+  useLearningStream(activeWorkspaceId);
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       {/* Toast host — sonner's Toaster reads the current next-themes theme so

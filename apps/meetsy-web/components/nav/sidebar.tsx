@@ -10,6 +10,7 @@ import {
   Menu,
   Plus,
   Send,
+  Sparkles,
 } from "lucide-react";
 import type { AuthPrincipal } from "@/lib/auth";
 import { WorkspaceSwitcher } from "@/lib/workspace-context";
@@ -43,6 +44,7 @@ const PRIMARY: NavItem[] = [
   { href: "/home", label: "Home", icon: Home },
   { href: "/new", label: "New meeting", icon: Plus },
   { href: "/meetings", label: "Meetings", icon: ListChecks },
+  { href: "/learning", label: "Learning", icon: Sparkles },
 ];
 
 const SETTINGS: NavItem[] = [

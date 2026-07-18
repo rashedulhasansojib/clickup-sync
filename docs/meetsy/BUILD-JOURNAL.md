@@ -857,3 +857,74 @@ Failed pushes (`push.service.ts:249-266`) previously just sat with `status="fail
 - FieldOverride re-log on retried pushes (original request-time context isn't recoverable from stored payload; documented tradeoff in `push-retry.processor.ts`).
 
 **Phase 2 status:** DONE. All four PRs (H/I/J/K) landed on `feat/meetsy-phase0`. Ready for Phase 3 (learning trust).
+
+
+---
+
+## Phase 3 (v2) — Learning trust
+
+Spec: `docs/superpowers/specs/2026-07-18-meetsy-v2-phase3-learning-trust-design.md`
+Branch: `feat/meetsy-phase0` (still owns v2 work until it lands on `main`)
+
+Design goal (spec §1): make the learning loop legible and trustable. Before Phase 3, the loop's state was hidden in a single settings-page panel; users saw a nudge or didn't, with no signal that they were "one correction away" from teaching the loop something new. Phase 3 gives the loop a first-class surface (`/learning`), expands what it learns beyond `assignee` (now `assignee | sprint`), publishes near-gate / gate-passed toasts as they happen, and caches the aggregate to keep the push path fast even at 10k+ overrides.
+
+### 2026-07-18 — PR-L: FIELDS = ["assignee", "sprint"] expansion — DONE / GREEN
+
+Before Phase 3, `LearningService` was hardcoded to a single field (`assignee`) — the `snapshot` type was `{ assignee: FieldAggregate }`, `TaskAdjustments` was `{ assignee?: … }`, and the push flow's `computeAdjustments` only branched on the assignee prediction. PR-L widens the loop to a second learnable field (`sprint`) with the discipline that adding a THIRD field in a future phase is a five-line change (documented in `learning.service.ts:17-22`).
+
+- **`learning-aggregate.ts`** — `CorrectionStat` gains `field: string` (which learnable field this correction belongs to) and `key: string` (a stable, URL-safe base64url of `field|predicted|confirmed`, used as a path segment on `/learning/patterns/:key/history`). `aggregateField` signature changes from `(records)` to `(field, records)` so every correction it emits carries the pair. New exports: `NEAR_GATE_THRESHOLD` (`MIN_CORRECTIONS - 1`), `patternKey(field, predicted, confirmed)`, and `decodePatternKey(key)` (throws on malformed input so a bad URL 400s in the controller).
+- **`learning.service.ts`** — `FIELDS: LearnField[] = ["assignee", "sprint"]`, `LearningSnapshot = Record<LearnField, FieldAggregate>`, `TaskAdjustments = Partial<Record<LearnField, {from,to,count,agreement}>>`. `PredictionBundle` gains `sprint`; `ConfirmedBundle` gains `listId` (the ClickUp list id the task was pushed to — resolved to a sprint name via `WorkspacePushConfig.sprintLists[]`, the asymmetry with assignee's `clickupUserId → name` documented in the spec §3.1 and the code). `snapshot()` builds sprint records via the sprintLists resolver; `applyNudges()` emits both `.assignee` and `.sprint`; `adjustForTasks()` returns a row when EITHER field's nudge fires; `meSummary()` counts `[adj.assignee, adj.sprint].filter(Boolean)` toward nudgesShown/Accepted so the /home digest honestly reflects the loop as it expands.
+- **`push.service.computeAdjustments`** — now accepts `confirmedListId` and adds a sprint branch. Resolves via `config.sprintLists.find(s => s.listId === confirmedListId)?.name`, parallel to the assignee's `memberName` map.
+- **Specs updated**: `learning-aggregate.spec.ts` (all `aggregateField(...)` calls now pass `"assignee"` first arg); `learning.service.spec.ts` + `learning.service.me-summary.spec.ts` — `workspacePushConfig.findUnique` returns `sprintLists: []` (the snapshot now selects it) and the constructor takes three args (see PR-M).
+- **New spec**: `learning-aggregate.pattern-key.spec.ts` (6 tests) — round-trips ascii/spaces/slashes/unicode through `patternKey`/`decodePatternKey`, rejects malformed keys. `learning.service.sprint.spec.ts` (4 tests) — end-to-end sprint learning path: sprint override records feed the aggregate, gate the same way as assignee, drive `applyNudges().sprint`, and stay independent of assignee counts.
+
+### 2026-07-18 — PR-M: Redis snapshot cache + gate constants endpoint + pattern history — DONE / GREEN
+
+Three moves on the API surface, all in service of the `/learning` page:
+
+- **`LearningCacheService`** (`apps/meetsy-api/src/kb/learning-cache.service.ts`) — Redis KV cache for `LearningService.snapshot()`. Key `meetsy:learning:snapshot:v1:{workspaceId}`, `SETEX` 3600. `read/write/invalidate` all catch errors and return null/log so a Redis outage transparently degrades to Phase-2 always-DB behavior. The `v1` guards a future snapshot-shape change from reading a stale value written by an older server. `LearningService.snapshot()` becomes read-through-cached: a hit returns the stored value; a miss falls through to the DB scan then writes back. `LearningService.invalidateCache(workspaceId)` is called from `push.service.logFieldOverride` after every FieldOverride write. Bounded staleness (1h) means a failed DEL is still safe — nudges only get worse if stale, they don't break.
+- **`GET /workspaces/:id/learning/gate`** — returns `{ minCorrections, minAgreement, nearGateThreshold, fields }`. Workspace-independent today; Phase 5's `/tuning` UI will make this per-workspace by reading from `WorkspaceMlConfig`, and the return shape stays stable across that migration.
+- **`GET /workspaces/:id/learning/patterns/:key/history`** — one pattern's timeline. Decodes the base64url key (400 on malformed / unknown field), consults the resolved snapshot for the pattern's stats (404 if the pattern isn't in the workspace's snapshot), then scans up to 500 newest FieldOverride rows and filters to those matching the pattern's `(predicted, confirmed)` after name resolution (same resolvers as `snapshot()` — no drift between summary and drilldown). `?limit=` default 50, capped 200. `nudgeShown` per entry so the UI can badge nudge-influenced rows.
+- **Specs**: `learning.service.cache.spec.ts` (3 tests — miss+writeback, hit skips DB, `invalidateCache` delegates); `learning.service.gate.spec.ts` (2 tests — shape + constants match the aggregate module); `learning.service.history.spec.ts` (5 tests — chronological newest-first, `nudgeShown` flag on nudge-influenced rows, 400 on malformed key, 400 on unknown field in key, 404 on unknown pattern).
+
+### 2026-07-18 — PR-N: near-gate SSE toast — DONE / GREEN
+
+- **`LearningStreamService`** (`apps/meetsy-api/src/kb/learning-stream.service.ts`) — Redis pub/sub for workspace-scoped `near-gate | gate-passed` events. Mirrors `kbChannel` (`kb.queue.ts:11`) + `KbController.stream` (`kb.controller.ts:99`): dedicated publisher connection, per-subscription subscriber connection, teardown on client disconnect. Exports `learningChannel(workspaceId)` and `classifyThreshold(count)` — pure decision, `NEAR_GATE_THRESHOLD → "near-gate"`, `MIN_CORRECTIONS → "gate-passed"`, else null. `LearningEvent` shape: `{ workspaceId, field, predicted, confirmed, count, at, kind }`.
+- **`LearningService.maybePublishThreshold(workspaceId, {predicted, confirmed, adjustments})`** — called from `push.service.logFieldOverride` AFTER the DB write + cache invalidation. Consults the POST-write snapshot (already fresh because we invalidated first) for the just-written `(field, predicted, confirmed)`; if the aggregate's `count === NEAR_GATE_THRESHOLD` publishes `near-gate`, if `count === MIN_CORRECTIONS` publishes `gate-passed`. Skips: agreement rows (predicted === confirmed), abstain/unresolved (no value on one side), and — critically — nudge-influenced writes (they don't count toward the organic aggregate per `learning-aggregate.ts:73-78`, so their count never changes; the guard here is belt-and-braces). Best-effort throughout: a publish miss only loses a toast, and the next `/learning` page load re-derives from the summary.
+- **`GET /workspaces/:id/learning/stream`** (`@Sse`) — Observable returned SYNCHRONOUSLY with async workspace resolution inside (mirrors `KbController.stream`; Nest's SSE handler subscribes to the return value and does not unwrap a Promise).
+- **Web wire-up**: `apps/meetsy-web/lib/useLearningStream.ts` — `EventSource` with `withCredentials: true`; parses each `LearningStreamEvent` and renders a Sonner toast: `near-gate` as `toast()` info ("One more correction and X → Y will start nudging"), `gate-passed` as `toast.success()`. Mounted inside `SignedInShell` in `AppShell.tsx` so toasts fire workspace-wide, regardless of whether the user is on `/learning` at the moment.
+- **Specs**: `learning-stream.service.spec.ts` (5 tests — `classifyThreshold` at 0/1/2/3/4); `learning.service.threshold-publish.spec.ts` (6 tests — near-gate at count=2, gate-passed at count=3, quiet at count=1, quiet at count=4, never fires when the write was nudge-influenced, never fires on agreement rows).
+- **Push spec hygiene**: `push.fieldoverride.spec.ts` + `push.service.spec.ts` `LearningService` mocks gained `invalidateCache` + `maybePublishThreshold` no-op stubs (the pushed-flow catch was hiding "not a function" warnings that made test output noisy — assertions were already passing).
+
+### 2026-07-18 — PR-O: `/learning` workspace page (Active / Building / Coverage) — DONE / GREEN
+
+- **`apps/meetsy-web/app/learning/page.tsx`** — three stacked sections:
+  1. **Active** — patterns the loop currently gates (`gatePassed === true`). Per row: `predicted → confirmed`, correction count, consistency %.
+  2. **Building up** — near-gate patterns (`!gatePassed && count >= 1`). Per row: progress bar `count / minCorrections`, `N of 3` label. Clicking any row opens the pattern-history sheet.
+  3. **Coverage** — per-field: predictions seen, "Predictions you changed" (formerly `rawOverrideRate` in the panel), "Suggestions shown" (nudgeSample), "Suggestions accepted" (formerly `nudgeAcceptanceRate`), and — when > 0 — Unresolved (amber, so a resolution bug looks like a resolution bug, not "sparse data").
+- **Metric renaming happens ONLY at this UI layer.** The API still returns `rawOverrideRate` / `nudgeAcceptanceRate`; the existing `LearningPanel` in `runs/[runId]/components.tsx` keeps working.
+- **`PatternHistorySheet`** — right-side `Sheet`, re-fetches `getLearningPatternHistory(workspaceId, patternKey)` on open. Shows the pattern's aggregate stats + a chronological entry list (run id · timestamp · nudge-shown badge when applicable). Empty state ("no matching entries in the last 500 rows") tells the truth about the scan bound.
+- **Navigation**: `apps/meetsy-web/components/nav/sidebar.tsx` gains a "Learning" entry (Sparkles icon), routed to `/learning`. The old "See patterns →" link on `LearningDigestCard` (home) now points to `/learning` instead of `/settings/kb`.
+- **API additions**: `apps/meetsy-web/lib/api.ts` — `LearningGateView`, `LearningPatternHistoryEntry/View`, `LearningStreamEvent` types; `LearningCorrection` gains `field` + `key`; `api.getLearningGate(workspaceId)`, `api.getLearningPatternHistory(workspaceId, key, opts?)`, `api.learningStreamUrl(workspaceId)` helpers.
+
+### 2026-07-18 — Phase 3 verify (all GREEN)
+
+| # | Target | Command | Result |
+|---|---|---|---|
+| a | `@ma/shared` build | not needed — no shared-package changes in Phase 3 | SKIP |
+| b | Meetsy API typecheck | `pnpm --filter @ma/api typecheck` (via `tsc --noEmit`) | PASS |
+| c | Meetsy web typecheck | `pnpm --filter @ma/web typecheck` (via `tsc --noEmit`) | PASS |
+| d | Meetsy web lint | `next lint` | PASS — 0 warnings, 0 errors |
+| e | Meetsy API tests | `npx jest` (in `apps/meetsy-api`) | PASS — **53 suites / 293 tests** (was 46/262 after Phase 2; +7 suites, +31 tests: `learning-aggregate.pattern-key` · `learning-stream.service` · `learning.service.gate` · `learning.service.cache` · `learning.service.history` · `learning.service.sprint` · `learning.service.threshold-publish`) |
+
+`next build` intentionally skipped per the `meetsy-web-next-build-dev-footgun` memory. typecheck + lint are the sanctioned verification path.
+
+**Migration status:** no new migrations in Phase 3 — the loop grew but the Postgres shape didn't. `WorkspacePushConfig.sprintLists` and `FieldOverride.{predicted,confirmed,adjustments}` (Json) were already present from Phase 0/2. The two prior unapplied migrations (`20260718150000_meetsy_v2_phase1_run_search` from Phase 1 and `20260718200000_meetsy_v2_phase2_push_dead_letter` from Phase 2) still ride `prisma migrate deploy` on the next deploy.
+
+**Deferred (later phases):**
+- Storing the resolved sprint NAME on `FieldOverride.confirmed.sprintName` at push time (parallel to assignee's clickupUserId→name resolution happening at aggregate time). The listId-based lookup is correct today but rotates if the workspace renames a list; Phase 5-ish will backfill.
+- Per-workspace tuning of `MIN_CORRECTIONS` / `MIN_AGREEMENT` via `WorkspaceMlConfig` — Phase 5's `/tuning` UI. The `/gate` endpoint shape is already stable across that migration.
+- SSE reconnect UX (right now `EventSource` reconnects silently; a "reconnected" banner during long sessions would be a Phase 6 polish).
+- Threshold events for the `client` field IF/when it re-joins the learning loop (currently a meeting-level value the user sets at upload, per the FIELDS comment).
+
+**Phase 3 status:** DONE. All four PRs (L/M/N/O) landed on `feat/meetsy-phase0`. Ready for Phase 4 (KB consolidation) — a single admin surface for workspace KB, push config, sprint lists, dead-letter admin, and now the `/learning` page.

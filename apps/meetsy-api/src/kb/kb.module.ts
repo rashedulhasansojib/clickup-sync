@@ -22,6 +22,8 @@ import { AssignmentService } from "./assignment.service";
 import { AssigneeResolverService } from "../clickup/assignee-resolver.service";
 import { LearningService } from "./learning.service";
 import { LearningController } from "./learning.controller";
+import { LearningCacheService } from "./learning-cache.service";
+import { LearningStreamService } from "./learning-stream.service";
 import { MlConfigService } from "./ml-config.service";
 
 /**
@@ -53,6 +55,8 @@ import { MlConfigService } from "./ml-config.service";
     AssignmentService,
     AssigneeResolverService,
     LearningService,
+    LearningCacheService,
+    LearningStreamService,
     MlConfigService,
     WorkspaceResolver,
   ],

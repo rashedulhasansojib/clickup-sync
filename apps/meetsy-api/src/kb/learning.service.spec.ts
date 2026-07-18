@@ -10,10 +10,22 @@ function makeService(overrides: Array<{ predicted: unknown; confirmed: unknown; 
     workspacePushConfig: {
       findUnique: jest.fn().mockResolvedValue({
         assignableMembers: [{ clickupUserId: "u-ahmad", name: "Ahmad" }],
+        sprintLists: [],
       }),
     },
   } as unknown as PrismaService;
-  return new LearningService(prisma);
+  // v2 Phase 3 — LearningService now takes a cache + stream. Both are best-
+  // effort: a null read + noop write/publish keep the fallback path clean.
+  const cache = {
+    read: jest.fn().mockResolvedValue(null),
+    write: jest.fn().mockResolvedValue(undefined),
+    invalidate: jest.fn().mockResolvedValue(undefined),
+  } as never;
+  const stream = {
+    publish: jest.fn().mockResolvedValue(undefined),
+    subscribe: jest.fn(),
+  } as never;
+  return new LearningService(prisma, cache, stream);
 }
 
 const ov = (memberId: string) => ({
