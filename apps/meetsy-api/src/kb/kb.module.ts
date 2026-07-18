@@ -4,6 +4,7 @@ import { WorkspaceResolver } from "../analysis/workspace.resolver";
 import { KbController } from "./kb.controller";
 import { KbOnboardingService } from "./kb-onboarding.service";
 import { KbSearchService } from "./kb-search.service";
+import { KbTasksService } from "./kb-tasks.service";
 import { SummaryFactsService } from "./summary-facts.service";
 import { NarrativeService } from "./narrative.service";
 import { SummaryService } from "./summary.service";
@@ -39,6 +40,7 @@ import { MlConfigService } from "./ml-config.service";
   providers: [
     KbOnboardingService,
     KbSearchService,
+    KbTasksService,
     SummaryFactsService,
     NarrativeService,
     SummaryService,

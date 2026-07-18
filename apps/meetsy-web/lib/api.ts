@@ -278,6 +278,38 @@ export interface PushResult {
 /** How far back the KB embeds mirrored tasks. */
 export type KbRange = "3m" | "6m" | "12m" | "24m" | "36m" | "all";
 
+/** GET /workspaces/:id/kb/tasks — one row per embedded ClickUp task (v2 Phase 4). */
+export interface KbTaskRow {
+  taskId: string;
+  taskName: string;
+  url: string | null;
+  status: string | null;
+  client: string | null;
+  assigneesNames: string | null;
+  updatedDate: string | null;
+  chunkCount: number;
+}
+export interface KbTasksPage {
+  tasks: KbTaskRow[];
+  nextCursor: string | null;
+  total: number;
+}
+
+/** GET /workspaces/:id/kb/search — one hit per matching KbChunk (hybrid RRF). */
+export interface KbSearchHit {
+  sourceId: string;
+  score: number;
+  snippet: string;
+  metadata: {
+    status: string | null;
+    assignee: string | null;
+    component: string | null;
+    client: string | null;
+    department: string | null;
+    taskUpdatedAt: string | null;
+  };
+}
+
 /** GET /workspaces/:id/kb/status — current onboarding/embedding state. */
 export interface KbStatusView {
   status: "idle" | "onboarding" | "ready" | "error";
@@ -831,6 +863,36 @@ export const api = {
    */
   kbStatusStreamUrl(ws: string): string {
     return `${API_URL}/workspaces/${encodeURIComponent(ws)}/kb/status/stream`;
+  },
+
+  /**
+   * GET /workspaces/:id/kb/tasks — paginated embedded-task list (v2 Phase 4).
+   * `cursor` opaque, `filter` narrows on task name / client / assignee (ILIKE).
+   */
+  kbTasks(
+    ws: string,
+    opts: { cursor?: string; filter?: string; limit?: number } = {},
+  ): Promise<KbTasksPage> {
+    const qs = new URLSearchParams();
+    if (opts.cursor) qs.set("cursor", opts.cursor);
+    if (opts.filter) qs.set("filter", opts.filter);
+    if (opts.limit !== undefined) qs.set("limit", String(opts.limit));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<KbTasksPage>(
+      `/workspaces/${encodeURIComponent(ws)}/kb/tasks${suffix}`,
+    );
+  },
+
+  /**
+   * GET /workspaces/:id/kb/search?q=…&k=… — hybrid (vector + FTS) search over
+   * `clickup_task` chunks (any authed).
+   */
+  kbSearch(ws: string, q: string, k = 10): Promise<KbSearchHit[]> {
+    const qs = new URLSearchParams({ q });
+    if (k !== 10) qs.set("k", String(k));
+    return request<KbSearchHit[]>(
+      `/workspaces/${encodeURIComponent(ws)}/kb/search?${qs.toString()}`,
+    );
   },
 
   /** GET /workspaces/:id/kb/summary — distilled facts + narrative (any authed). */

@@ -928,3 +928,69 @@ Three moves on the API surface, all in service of the `/learning` page:
 - Threshold events for the `client` field IF/when it re-joins the learning loop (currently a meeting-level value the user sets at upload, per the FIELDS comment).
 
 **Phase 3 status:** DONE. All four PRs (L/M/N/O) landed on `feat/meetsy-phase0`. Ready for Phase 4 (KB consolidation) — a single admin surface for workspace KB, push config, sprint lists, dead-letter admin, and now the `/learning` page.
+
+
+---
+
+## Phase 4 (v2) — `/kb` consolidation
+
+Spec: `docs/superpowers/specs/2026-07-18-meetsy-v2-phase4-kb-consolidation-design.md`
+Branch: `feat/meetsy-phase0`
+
+Design goal (spec §1): the KB is real (`/kb/search`, `/kb/documents`, `/kb/summary`, `/kb/status`) but never surfaced together. Before Phase 4, users saw the KB exactly once — during the seven-step `/onboarding` wizard — and could only re-embed from the deeply-buried `/settings/kb`. Phase 4 replaces both with a single canonical `/kb` route (Overview / Tasks / Documents / Search / Rebuild), retires the `/onboarding` full-page redirect in favor of an in-page banner, and adds a global ⌘K palette so search + navigation reach the user from anywhere.
+
+### 2026-07-18 — PR-P: `GET /kb/tasks` paginated task list — DONE / GREEN
+
+- **`KbTasksService`** (`apps/meetsy-api/src/kb/kb-tasks.service.ts`) — joins `KbChunk` (meetsy) with `public.clickup_tasks` and returns the distinct set of embedded ClickUp tasks, keyset-paged on `(updated_date DESC NULLS LAST, task_id DESC)`. `?filter=<q>` narrows via a case-insensitive `ILIKE` against `task_name`, `client`, and `assignees_names`; `?limit` defaults to 50 (capped 100). Cursor is `base64url(JSON.stringify({u: iso|null, t: taskId}))` — malformed → 400. Runs via `prisma.$queryRaw` (Prisma's `groupBy` doesn't compose keyset paging + a distinct chunk count in one round-trip); all params bound through the tagged template.
+- **`GET /workspaces/:id/kb/tasks`** — wired on `KbController` (`kb.controller.ts:159`). Any authed user; workspace-scoped via `WorkspaceResolver`. Response: `{ tasks: KbTaskRow[], nextCursor: string | null, total: number }`.
+- **Specs**: `kb-tasks.service.spec.ts` (7 tests) — first page + nextCursor, last page returns null cursor, limit clamps (0 → 1, 1000 → 100), null `updated_date` returns null ISO, malformed cursor 400s, shape-wrong cursor 400s, decoded nextCursor round-trips to the last-returned row's `(updated, taskId)`.
+
+### 2026-07-18 — PR-Q: `/kb` shell + Overview / Documents / Search / Rebuild tabs — DONE / GREEN
+
+- **`apps/meetsy-web/app/kb/page.tsx`** — client route, shadcn `<Tabs>` keyed off `?tab=<name>` (defaults to overview). Owner/Admin sees the Rebuild tab; Members see the other four. Status card + idle banner render ABOVE the tabs so a not-ready KB is visible without a redirect (see PR-R). The page provides `TaskSheetProvider` + mounts `TaskDetailSheet` so both the Tasks and Search tabs can open a ClickUp side-sheet on click.
+- **`app/kb/overview-tab.tsx`** — `StatusCard` + "What we learned" (narrative + `FactsSummary`). Renders only when status is `ready`; otherwise a "waiting on the build" note replaces the body.
+- **`app/kb/documents-tab.tsx`** — extract of the wizard's `DocumentsStep`; upload/list/delete against `api.kbListDocuments|kbUploadDocument|kbDeleteDocument`. Read-only for Members (backend already 403s writes; the button is hidden to reduce error noise).
+- **`app/kb/search-tab.tsx`** — plain `Input` with 300ms debounce → `api.kbSearch(ws, q, 20)`. Hits render as clickable cards; clicking opens the shared `TaskDetailSheet`. `?q=` is echoed back into the URL so browser back is honest and the ⌘K palette can deep-link.
+- **`app/kb/rebuild-tab.tsx`** — extract of the old `KbSettings` body; the `KbBuildPanel` + spaces/sub-scope/range form re-embed the KB with a different scope. On `onDone`, the parent page reloads status so Overview + Tasks show the fresh embed counts.
+- **`app/kb/facts-summary.tsx`** + **`app/kb/status-card.tsx`** — the shared extracts consumed by Overview and Rebuild; both were previously inline in the wizard and settings pages.
+- **API surface**: `apps/meetsy-web/lib/api.ts` — new `KbTaskRow`, `KbTasksPage`, `KbSearchHit` types; new `api.kbTasks(ws, opts)` + `api.kbSearch(ws, q, k?)` helpers.
+
+### 2026-07-18 — PR-R: retire `/onboarding` full-page redirect — DONE / GREEN
+
+- **`app/AppShell.tsx`** — `KbGate` is deleted (v1's redirect-to-`/onboarding` behaviour). `SignedInShell` now renders children directly; the `activeWorkspaceId` remount key stays for workspace switches. The auth gate remains outermost and is untouched.
+- **`app/onboarding/page.tsx`** — deleted.
+- **`app/onboarding/steps.tsx`** → **`app/kb/steps.tsx`** — moved via `git mv`; all three call sites (`kb/page.tsx`, `kb/rebuild-tab.tsx`, `kb/status-card.tsx`) updated. The `KbBuildPanel` inside remains the single onboard/re-embed code path.
+- **`app/settings/kb/page.tsx`** — rewritten as a Next.js server-side `redirect("/kb?tab=rebuild")`. External bookmarks resolve; new callers use `/kb` directly.
+- **`components/nav/sidebar.tsx`** — `SETTINGS` loses the `/settings/kb` entry; `PRIMARY` gains a "Knowledge base" entry (`BookOpen` icon) routed to `/kb`. Members see the entry; the Rebuild tab is Owner/Admin-only within the page itself.
+- **Idle-state UX on `/kb`** — when `kbStatus.status !== "ready"`, the page renders a banner above the tabs. Owner/Admin can flip the banner into a `KbBuildPanel` (range=3m default) directly; Members see a read-only "ask an Owner/Admin" note. `onboarding` and `error` statuses distinguish tone (amber vs red).
+
+### 2026-07-18 — PR-S: global ⌘K command palette — DONE / GREEN
+
+- **`components/nav/command-palette.tsx`** — shadcn `<CommandDialog>`; toggled by `⌘K` or `Ctrl+K` via a `window` keydown listener that debounces to the palette's own state. Two groups: **Go to** (Home, New meeting, Meetings, Learning, Knowledge base; Owner/Admin also sees Push settings) and **Search knowledge base** — a 250ms-debounced live search against `/kb/search` (`k=8`). Selecting a hit navigates to `/kb?tab=search&q=<query>` (the palette closes; the search tab renders the full hit list in context). `AbortController` cancels stale searches on query change.
+- **Mounted in `AppShell.tsx`** next to the `<Toaster>` — inside `SignedInShell` (so `useWorkspace` is safe) and outside `<main>` (so it overlays the whole app). Rides the workspace context reactively; a switch mid-open drops in-flight hits and re-searches against the new workspace.
+- **State hygiene**: closing the palette resets `q`, `hits`, and `searching` — reopening starts blank. The palette itself does not persist recent queries (deferred to Phase 6 polish).
+
+### 2026-07-18 — Phase 4 verify (all GREEN)
+
+| # | Target | Command | Result |
+|---|---|---|---|
+| a | `@ma/shared` build | not needed — no shared-package changes in Phase 4 | SKIP |
+| b | Meetsy API typecheck | `pnpm --filter @ma/api typecheck` (via `tsc --noEmit`) | PASS |
+| c | Meetsy web typecheck | `pnpm --filter @ma/web typecheck` (via `tsc --noEmit`) | PASS |
+| d | Meetsy web lint | `next lint` | PASS — 0 warnings, 0 errors |
+| e | Meetsy API tests | `npx jest` (in `apps/meetsy-api`) | PASS — **54 suites / 300 tests** (was 53/293 after Phase 3; +1 suite, +7 tests: `kb-tasks.service`) |
+
+`next build` intentionally skipped per the `meetsy-web-next-build-dev-footgun` memory. typecheck + lint are the sanctioned verification path.
+
+**Migration status:** no new migrations in Phase 4 — PR-P reads existing tables (`KbChunk` + `public.clickup_tasks`) via raw SQL. The two prior unapplied migrations (`20260718150000_meetsy_v2_phase1_run_search`, `20260718200000_meetsy_v2_phase2_push_dead_letter`) still ride `prisma migrate deploy` on the next deploy.
+
+**Deviations from spec:**
+- Spec §4.1 said the moved `steps.tsx` would live at `app/kb/steps.tsx` with `rebuild-tab.tsx` as the "single caller"; the actual code has three call sites in `app/kb/` (`page.tsx`, `rebuild-tab.tsx`, `status-card.tsx`) — all inside the `/kb` route, so the location is right, just not literally single-caller. No functional impact.
+
+**Deferred (later phases):**
+- KB search facets (`?sourceType=clickup_task|document`) — the `/kb/search` API supports it internally via `retrieveContext`, but the public search endpoint fixes `["clickup_task"]`.
+- Task drilldown → per-chunk embedding provenance (which chunk of the task matched a given query + its RRF branch scores).
+- Palette recent-search history (local-storage backed) — Phase 6 polish.
+- Result-snippet highlighting: the API returns the snippet, but neither the Search tab nor the palette bolds the matched span.
+
+**Phase 4 status:** DONE. All four PRs (P/Q/R/S) landed on `feat/meetsy-phase0`. Ready for Phase 5 (`/tuning` — per-workspace ML tunables with preview replay).

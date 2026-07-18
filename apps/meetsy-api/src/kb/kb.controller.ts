@@ -20,6 +20,7 @@ import {
   KbStatusView,
 } from "./kb-onboarding.service";
 import { KbSearchService, KbSearchHit } from "./kb-search.service";
+import { KbTasksService, KbTasksPage } from "./kb-tasks.service";
 import { SummaryService } from "./summary.service";
 import { KbSummaryView } from "./summary.types";
 import { KbProgressEvent } from "./kb.queue";
@@ -34,6 +35,7 @@ export class KbController {
   constructor(
     private readonly onboarding: KbOnboardingService,
     private readonly search: KbSearchService,
+    private readonly tasks: KbTasksService,
     private readonly summary: SummaryService,
     private readonly workspaces: WorkspaceResolver,
   ) {}
@@ -126,6 +128,31 @@ export class KbController {
     const workspaceId = await this.workspaces.resolve(user.orgId, id);
     const force = refresh !== undefined && refresh !== "" && refresh !== "0" && refresh !== "false";
     return this.summary.getOrGenerate(workspaceId, force);
+  }
+
+  /**
+   * v2 Phase 4 (PR-P) — paginated list of embedded ClickUp tasks in this KB.
+   * Keyset-paged on `(updated_date DESC NULLS LAST, task_id DESC)`. `?filter`
+   * narrows by task name / client / assignee (ILIKE). Any authenticated user.
+   */
+  @Get("tasks")
+  async listTasks(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id") id: string,
+    @Query("cursor") cursor?: string,
+    @Query("filter") filter?: string,
+    @Query("limit") limit?: string,
+  ): Promise<KbTasksPage> {
+    const workspaceId = await this.workspaces.resolve(user.orgId, id);
+    const parsedLimit =
+      limit !== undefined && limit !== ""
+        ? Number.parseInt(limit, 10) || undefined
+        : undefined;
+    return this.tasks.list(workspaceId, {
+      cursor: cursor?.trim() || undefined,
+      filter: filter?.trim() || undefined,
+      limit: parsedLimit,
+    });
   }
 
   /** Hybrid (vector + keyword, RRF) search. Any authenticated user. */

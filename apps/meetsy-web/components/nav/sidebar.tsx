@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
-  Database,
+  BookOpen,
   Home,
   ListChecks,
   Menu,
@@ -45,11 +45,13 @@ const PRIMARY: NavItem[] = [
   { href: "/new", label: "New meeting", icon: Plus },
   { href: "/meetings", label: "Meetings", icon: ListChecks },
   { href: "/learning", label: "Learning", icon: Sparkles },
+  // v2 Phase 4 — the consolidated `/kb` route. Replaces the buried `/settings/kb`
+  // link (still resolves via a redirect for external bookmarks).
+  { href: "/kb", label: "Knowledge base", icon: BookOpen },
 ];
 
 const SETTINGS: NavItem[] = [
   { href: "/settings/push", label: "Push settings", icon: Send, ownerAdminOnly: true },
-  { href: "/settings/kb", label: "KB settings", icon: Database, ownerAdminOnly: true },
 ];
 
 function isActive(pathname: string, href: string): boolean {

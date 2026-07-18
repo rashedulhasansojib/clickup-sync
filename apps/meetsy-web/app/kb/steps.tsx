@@ -14,15 +14,15 @@ import { useKbStatusStream } from "@/lib/useKbStatusStream";
 import { Button, Card, ErrorBanner, Spinner, Tag } from "@/app/ui";
 
 /**
- * Reusable onboarding step bodies, extracted from `app/onboarding/page.tsx` so
- * both the first-run wizard and the KB settings / re-onboard page
- * (`app/settings/kb/page.tsx`) share the SAME building blocks — most importantly
- * the onboard→stream→confirm logic in `KbBuildPanel`, which must never be
- * duplicated.
+ * Reusable KB onboarding building blocks — the space/scope/range pickers and
+ * the onboard→stream→confirm `KbBuildPanel`. Originally extracted from a
+ * seven-step `/onboarding` wizard; v2 Phase 4 retired that wizard and folded
+ * these pieces into the `/kb` tabs (`app/kb/rebuild-tab.tsx`,
+ * `app/kb/page.tsx`) + the idle-banner build panel on the main page.
  *
- * The JSX here is moved byte-identical from the wizard; the wizard's step
- * components are now thin wrappers that render these inside their `<Card>` +
- * `<StepActions>`.
+ * `KbBuildPanel` is the single onboard/re-embed code path — anything that
+ * starts a build MUST route through it so the SSE-stream + status-confirm
+ * dance stays in one place.
  */
 
 function messageOf(err: unknown, fallback: string): string {
