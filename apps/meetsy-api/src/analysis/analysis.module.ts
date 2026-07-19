@@ -7,6 +7,7 @@ import { AnalysisController } from "./analysis.controller";
 import { AnalysisService } from "./analysis.service";
 import { AnalysisQueue } from "./queue/analysis.queue";
 import { AnalysisProcessor } from "./queue/analysis.processor";
+import { RunNotificationService } from "./run-notification.service";
 import { WorkspaceResolver } from "./workspace.resolver";
 
 /**
@@ -19,6 +20,13 @@ import { WorkspaceResolver } from "./workspace.resolver";
 @Module({
   imports: [AzureModule, KbModule, ClickUpModule, RosterModule],
   controllers: [AnalysisController],
-  providers: [AnalysisService, AnalysisQueue, AnalysisProcessor, WorkspaceResolver],
+  providers: [
+    AnalysisService,
+    AnalysisQueue,
+    AnalysisProcessor,
+    RunNotificationService,
+    WorkspaceResolver,
+  ],
+  exports: [RunNotificationService, WorkspaceResolver],
 })
 export class AnalysisModule {}

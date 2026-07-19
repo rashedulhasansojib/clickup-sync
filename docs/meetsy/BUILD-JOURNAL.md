@@ -1250,3 +1250,77 @@ The prior PDF at `docs/meetsy/Meetsy-Implementation-Guide.pdf` (v1 Phases 0–3,
 - **Confidence score on the LLM tier** — the model returns `reasoning` but not a numeric confidence. The current design uses "picked id must be in allowlist" as the confidence signal; a future tier could add a self-score and threshold on it.
 
 **Phase 7 status:** DONE. All five PRs (A/B/C/D/E) landed on `feat/meetsy-phase0`. Live verification against the Nifty workspace + final commit-and-push queued for the next session.
+
+---
+
+## 2026-07-20 — SSE progress-polish (durable state · monotonic stepper · cancel/retry · cross-page toasts)
+
+**Design goal:** three user-reported UX bugs on `/runs/:id` all traced to the same root: nothing persisted mid-run, the stepper's stage ORDER didn't match execution, and the fallback poll gave up after 15s. Fixed together in one pass so the "watch a run" experience becomes trustworthy for the first time. Bonus items bundled per the user ask: SSE keep-alive, per-stage timers + typical-duration hints, cancel + retry buttons, queued-waiting affordance, cross-page "run ready" toast, failed-stage highlighting.
+
+### Bugs fixed
+
+1. **Hard reload during a run showed every step "pending"** until the next Redis event fired (could be tens of seconds mid-LLM-call). Root cause: `AnalysisQueue.publishProgress` uses Redis pub/sub (fire-and-forget, no history), `AnalysisRun` had no progress columns, and `streamRun`'s late-subscriber catch-up only replayed terminal states. — **Fix:** processor now persists `currentStage`/`progress`/`stageStartedAt` on every emit; `GET /runs/:id` returns them; `useRunStream.seed()` is called from `RunPage`'s initial `fetchRun` so the stepper renders correct state INSTANTLY on remount.
+2. **Finish-during-view required a full reload.** Root cause: `useRunStream.onerror` treated any transport blip as terminal → flipped `done` → started the 10×1500ms fallback poll → gave up at 15s while a real LLM run took much longer. — **Fix:** `es.onerror` no longer terminates (EventSource auto-reconnects; we just surface a soft `streamError` for a "reconnecting…" banner). The fallback poll is now unbounded-but-backing-off (1→2→4→8→15s cap) and only exits on a real terminal state or component unmount.
+3. **Steps flipped to done out of order** — the stepper listed `enrich` above `critic` but the processor runs critic BEFORE enrich, so on every run critic flashed done while enrich sat pending above it. The `assign` stage also never emitted (permanent "hole" in the sequence). — **Fix:** `STEPPER_STAGES` reordered to match execution (`normalize → comprehend → extract → critic → enrich → assign → assemble`); processor now emits `assign/started+completed` between enrich and assemble (best-effort branch still emits `completed` with "Assignment skipped" so the row never dead-ends); `stepStateFor` is monotonic — a stage is done when `highestProgress >= stage.complete` even if the individual `completed` event was dropped/coalesced.
+
+### Backend
+
+- **Schema (`20260720120000_meetsy_v2_run_progress_state`):** hand-authored, meetsy-schema-only (no `CREATE SCHEMA`, no public DDL). Adds `cancelled` to `RunStatus` enum + seven new columns on `AnalysisRun`: `current_stage TEXT?`, `progress DOUBLE PRECISION NOT NULL DEFAULT 0`, `stage_started_at TIMESTAMP?`, `started_at TIMESTAMP?`, `finished_at TIMESTAMP?`, `stage_durations JSONB?`, `cancel_requested_at TIMESTAMP?`. All safe defaults so existing rows migrate without backfill.
+- **`AnalysisProcessor.emit()`:** persists progress via `$executeRaw` (`GREATEST()` for monotonic bumps + `IS DISTINCT FROM` for stage-transition timestamps) BEFORE the Redis publish. Per-run `stageStartTimes`/`stageDurations` Maps written on first-see-stage and completion, dropped in a `finally` block. New `checkCancelled()` reads the row between stages; throws `CancelledRunError` (exported class with stable `name` so the outer catch's `instanceof` branch survives refactors). Cancel branch: `status=cancelled`, no rethrow (so BullMQ marks the job completed — no retry / dead-letter noise). Failure branch unchanged (`status=failed`, rethrown). Emits `assign/started+completed` inside the field-prediction try — always emits `completed` (best-effort) so the stepper never dead-ends.
+- **`AnalysisQueue.removeJob(runId)`:** BullMQ `getJob(...).remove()` wrapper, best-effort. Used by the cancel endpoint to strike a still-queued job.
+- **`AnalysisService.streamRun`:** 15s named `keepalive` event on a `setInterval` (cleared on teardown). Widened return type to `Observable<{ data: unknown; type?: string }>` so named events pass through without breaking `@Sse`. Cancel late-subscriber replay added.
+- **`AnalysisService.getRun`:** returns the seven new progress/timing fields (all optional in the shared schema for backward compat).
+- **`AnalysisService.cancelRun`:** queued → strike BullMQ + settle row + fire toast; running → set `cancelRequestedAt` only (processor writes the terminal); terminal → 400. `AnalysisService.retryRun`: only `failed`/`cancelled` → create fresh `AnalysisRun` for the same meeting + enqueue → return `{ runId: <new> }`. `AnalysisService.runStageTimings`: median seconds per stage across last N=10 completed runs (clamped to `[1, 50]`), skips malformed/negative values.
+- **`RunNotificationService`:** new file, mirrors `LearningStreamService`. Redis pub/sub channel `meetsy-runs:{workspaceId}`. Called from the processor's completion + failure + cancel branches (and from `cancelRun` for the queued short-circuit path). Registered as a provider on `AnalysisModule` + exported.
+- **New endpoints on `AnalysisController`:** `GET workspaces/:id/runs/stage-timings`, `POST runs/:id/cancel`, `POST runs/:id/retry`, `@Sse workspaces/:id/runs/stream`. All CSRF-gated + workspace-scoped via `WorkspaceResolver`.
+- **Shared package:** `RunStatus` gains `cancelled`; new `RunStageTimingsResponse`, `CancelRunResponse`, `RetryRunResponse` schemas; `RunResponse` extended with seven optional progress/timing fields.
+
+### Frontend
+
+- **`useRunStream`:** rewrite. Filters keepalive events, no longer terminates on `onerror` (surfaces `streamError` instead, clears on next message), exposes `highestProgress`/`latestStage` for monotonic derivation, and `seed()` for REST hydration on remount. Terminal detection unchanged.
+- **`PipelineStepper`:** reordered to match execution + monotonic `stepStateFor` that reads `highestProgress` instead of "did I see this specific event." New props for `stageStartedAt` / `startedAt` / `stageDurations` / `typicalByStage` / `failedStage`. Per-stage timer display (elapsed for active, recorded for done, "~4s" typical hint for pending). Total-elapsed timer in header via a `useTicker()` hook that runs only while the pipeline is in-flight. `transition-colors duration-300` on the step dots gives a soft cue when a stage advances.
+- **`RunPage`:** hydrates state from `GET /runs/:id` on mount (seeds `useRunStream` before SSE lands). Fetches `typicalByStage` from `GET runs/stage-timings` once on mount. Poll rewritten to backing-off unbounded (1→2→4→8→15s cap) — replaces the 15s hard cap that stranded the UI on slow snapshot writes. Cancel button while queued/running (calls `POST /runs/:id/cancel`). Retry button on failed/cancelled (calls `POST /runs/:id/retry` + `router.push(/runs/<new>)`). "Queued — waiting for a worker" pill when `status=queued` AND `progress=0`. `failedStage` prop painted onto stepper on failure. `cancelled` handled with its own quiet card.
+- **`useRunNotifyStream`:** new hook, mirrors `useLearningStream`. Mounted globally in `SignedInShell` (`AppShell.tsx`) so a Sonner toast fires the moment the processor emits a terminal state — regardless of the user's current route. Suppressed when the user is already on `/runs/<runId>` (the on-page stepper is a stronger signal). Toast carries a "View" action that `router.push`es to the run page. Completed → success toast, failed → error toast + message, cancelled → quiet toast.
+- **`StatusPill`:** `cancelled` styling added on both call sites (`runs/[runId]/page.tsx` + `components/runs/run-list.tsx`) — amber with `dark:` variants, deliberately not red so a user cancel doesn't read as an error.
+- **`api.ts`:** `runsNotifyStreamUrl`, `cancelRun`, `retryRun`, `getRunStageTimings`. `RunNotificationStreamEvent` interface.
+
+### Tests
+
+- **New specs:** `analysis.service.cancel-retry.spec.ts` (12 tests — cancel: 404 / 400×3 / queued happy / running happy; retry: 404 / 400×4 / failed happy / cancelled happy + spec.each over invalid statuses); `analysis.service.stage-timings.spec.ts` (6 tests — empty / odd median / even median / malformed drop / limit clamp / status filter); `run-notification.service.spec.ts` (2 tests — channel name contract); `queue/analysis.processor.cancel.spec.ts` (4 tests — CancelledRunError class shape).
+- **Updated:** all five existing `AnalysisService` specs pass the new `runNotify` constructor arg (`{ publish: jest.fn() } as never`).
+- **Total:** 63 suites / **391 tests** (was 59/366 after Phase 7; +4 suites, +25 tests). Full green.
+
+### Verify (all GREEN)
+
+| # | Target | Command | Result |
+|---|---|---|---|
+| a | `@ma/shared` build | `pnpm --filter @ma/shared build` | PASS |
+| b | Meetsy API typecheck | `pnpm --filter @ma/api typecheck` | PASS |
+| c | Meetsy API build | `pnpm --filter @ma/api build` | PASS |
+| d | Meetsy API tests | `npx jest` (in `apps/meetsy-api`) | PASS — 63 suites / **391 tests** |
+| e | Meetsy web typecheck | `pnpm --filter @ma/web typecheck` | PASS |
+| f | Meetsy web lint | `pnpm --filter @ma/web lint` | PASS — 0 warnings, 0 errors |
+| g | Clicksy build (drift check) | `pnpm build` | PASS |
+
+`next build` intentionally skipped per the `meetsy-web-next-build-dev-footgun` memory.
+
+### Post-review fixes (advisor)
+
+Two defects the static verify path couldn't catch, both fixed before wrapping:
+
+1. **`useRunStream` reconnect loop** — the effect had `[runId, streamError]` deps. Any transport blip → `onerror` → `setStreamError(true)` → effect re-runs → reset block wipes `events` + `highestProgress` → the exact bug the hook exists to prevent (stepper collapses to all-pending mid-run). Fix: deps back to `[runId]`; `onmessage` calls `setStreamError(false)` unconditionally (React no-ops on same-value). Verified: the effect no longer tears down on transport errors, so EventSource's own auto-reconnect handles blips without state loss.
+2. **Failing stage always attributed to `assemble`** — the outer catch called `emit(runId, "assemble", "failed", …, 1)`. `emit()` writes `current_stage=stage` + `progress=GREATEST(existing, 1)` → every failure had `current_stage="assemble"` and `progress=1`, so the new monotonic `stepStateFor` painted every prior stage green and only assemble red — regardless of where the run actually died. Fix: track `let activeStage: PipelineStage` at the top of `process()`, update before each stage's first emit, use it in the catch's `emit()` call. Progress in the failure emit is now `0` (GREATEST() keeps whatever was actually reached — no false "green everywhere"); the client's terminal detection is `status === "failed"`, so it doesn't need progress=1.
+
+Also cleaned up: `seed()` no longer injects a synthetic `{status:"completed"}` event (would false-flag the current stage as done when highestProgress < that stage's `complete` threshold); dead `activeStage`/`currentIdx` computations in `PipelineStepper` removed.
+
+**Runtime verification status:** all seven backend checks + web typecheck/lint/391 tests re-run post-fix — GREEN. However **this session is code-complete but runtime-unverified**: the migration is unapplied, so the new `getRun` columns / cancel endpoint / cross-page toast have not been exercised against a live DB + browser. The sanctioned way to verify is the CLAUDE.md daily-boot flow (§B): `npm run dev:deps` → `pnpm --filter @ma/api exec prisma migrate deploy` → `npm run dev:platform` → hard-reload a running `/runs/:id`, then trigger a failure and confirm the stepper attributes the failing stage correctly. Flagging for whoever picks this up next.
+
+**Migration status:** `20260720120000_meetsy_v2_run_progress_state` is unapplied — rides `prisma migrate deploy` on the next deploy alongside the still-pending Phase 1/2/7 migrations. Enum ADD VALUE is compatible with Postgres 12+ inside a single migration transaction.
+
+**Deferred:**
+- **Stage-timings caching** — `GET runs/stage-timings` scans the last 10 completed rows on every request. If the run page hydration cost becomes visible, cache in Redis with a short TTL (mirrors `LearningCacheService`).
+- **Runs sidebar badge** — a "1 in flight" indicator on the sidebar's Home entry. Nice-to-have; the notification stream already covers the terminal signal.
+- **`?` shortcut cheatsheet** to include the new `j`/`k`/Cancel/Retry actions — carried forward from Phase 6's deferred list.
+- **Live verification** — the migration hasn't been applied against a running DB yet; the sanctioned verify path is the CLAUDE.md daily-boot flow.
+
+**Session status:** DONE. Ready for commit + live verify. Fixes the three reported UX bugs plus all five polish items the user greenlit.

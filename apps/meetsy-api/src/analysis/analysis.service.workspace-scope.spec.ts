@@ -42,6 +42,7 @@ describe("AnalysisService — workspace scoping", () => {
       {} as never,
       {} as never,
       {} as never,
+      { publish: jest.fn() } as never,
     );
     return { service, findFirst, resolve, chatFindMany };
   }

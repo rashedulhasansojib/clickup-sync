@@ -118,5 +118,9 @@ export const AnalysisResultSchema = z.object({
 export type AnalysisResult = z.infer<typeof AnalysisResultSchema>;
 
 // ── Run lifecycle ──────────────────────────────────────────────────────
-export const RunStatus = z.enum(["queued", "running", "completed", "failed"]);
+// `cancelled` is a terminal state set by `POST /runs/:id/cancel` — the
+// processor checks `AnalysisRun.cancelRequestedAt` between stages and exits
+// with this status instead of `failed`. Distinguished in the UI so a
+// deliberate user cancel doesn't render as an error.
+export const RunStatus = z.enum(["queued", "running", "completed", "failed", "cancelled"]);
 export type RunStatus = z.infer<typeof RunStatus>;

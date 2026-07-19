@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import type { ReviewResult, RunStatus } from "@ma/shared";
+import type { PipelineStage, ReviewResult, RunStatus } from "@ma/shared";
+import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useRunStream } from "@/lib/useRunStream";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -33,7 +34,8 @@ export default function RunPage() {
   const runId = params.runId;
   const { activeWorkspaceId } = useWorkspace();
 
-  const { events, latest, done, streamError } = useRunStream(runId);
+  const { events, latest, done, streamError, highestProgress, seed } =
+    useRunStream(runId);
   // v2 Phase 6 (PR-BB) — j/k keyboard traversal between task anchors on the
   // review page. The hook self-guards against typing in inputs/textareas.
   useReviewKeys();
@@ -43,6 +45,21 @@ export default function RunPage() {
   const [error, setError] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
   const settledRef = useRef(false);
+
+  // Durable pipeline state persisted by the processor on every emit — read
+  // on mount so hard reload during a run shows the correct stepper state
+  // immediately, without waiting for the next Redis pub/sub event.
+  const [currentStage, setCurrentStage] = useState<PipelineStage | null>(null);
+  const [serverProgress, setServerProgress] = useState<number>(0);
+  const [stageStartedAt, setStageStartedAt] = useState<string | null>(null);
+  const [startedAt, setStartedAt] = useState<string | null>(null);
+  const [stageDurations, setStageDurations] = useState<Record<string, number> | null>(
+    null,
+  );
+  const [cancelRequestedAt, setCancelRequestedAt] = useState<string | null>(null);
+  const [typicalByStage, setTypicalByStage] = useState<Record<string, number>>({});
+  const [cancelling, setCancelling] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   // Which tab is active — synced with #hash so a shared link opens the right view.
   const [tab, setTab] = useState<TabKey>("overview");
@@ -65,14 +82,35 @@ export default function RunPage() {
     }
   }
 
-  // Authoritative status + result come from GET /runs/:id — the SSE stream
-  // never carries the result. We fetch on the stream's "done" signal, then
-  // poll briefly as a fallback in case the stream ends before the run settles.
+  // Authoritative status + result + durable progress state come from GET
+  // /runs/:id. On mount we seed the stream hook so the stepper hydrates
+  // instantly on hard reload; while running we re-fetch when the SSE stream
+  // reports done (and briefly poll after) to catch the DB-write delay
+  // between `emit(assemble/completed, 1)` and the `result:` column landing.
   const fetchRun = useCallback(async (): Promise<RunStatus | null> => {
     setFetching(true);
     try {
       const run = await api.getRun(runId);
       setStatus(run.status);
+      setCurrentStage((run.currentStage as PipelineStage | null | undefined) ?? null);
+      setServerProgress(run.progress ?? 0);
+      setStageStartedAt(run.stageStartedAt ?? null);
+      setStartedAt(run.startedAt ?? null);
+      setStageDurations(run.stageDurations ?? null);
+      setCancelRequestedAt(run.cancelRequestedAt ?? null);
+
+      // Seed the stream so the stepper renders correctly BEFORE the SSE
+      // hook receives its first live event. Monotonic — the seed only
+      // raises progress, never lowers it. `currentStage` is null on fresh
+      // runs (never emitted yet) — nothing to seed.
+      if (run.currentStage && typeof run.progress === "number") {
+        seed({
+          stage: run.currentStage as PipelineStage,
+          progress: run.progress,
+          message: `Resumed at ${run.currentStage}`,
+        });
+      }
+
       if (run.status === "completed" && run.result) {
         setResult(run.result);
         settledRef.current = true;
@@ -81,6 +119,10 @@ export default function RunPage() {
         setError(run.error ?? "The run failed.");
         settledRef.current = true;
       }
+      if (run.status === "cancelled") {
+        settledRef.current = true;
+      }
+      // Clear stale error banners once the row is no longer failed.
       setError((prev) => (run.status === "failed" ? prev : null));
       return run.status;
     } catch (err) {
@@ -93,46 +135,124 @@ export default function RunPage() {
     } finally {
       setFetching(false);
     }
-  }, [runId]);
+  }, [runId, seed]);
 
-  // Initial load — pick up runs that completed before we connected.
+  // Initial load — pick up runs that completed before we connected, and
+  // hydrate the stepper for runs in-flight when the page mounts.
   useEffect(() => {
     void fetchRun();
   }, [fetchRun]);
 
-  // When the stream signals completion, fetch the authoritative result and
-  // poll until the run actually settles (completed/failed), max ~10 attempts.
+  // Fetch the median stage-timing sample ONCE on mount for the stepper's
+  // "typical" duration hint. Best-effort: an error just hides the hints.
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    let cancelled = false;
+    void api
+      .getRunStageTimings(activeWorkspaceId, 10)
+      .then((r) => {
+        if (!cancelled) setTypicalByStage(r.medianByStage);
+      })
+      .catch(() => {
+        /* ignore — the hint is optional */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceId]);
+
+  // Unbounded (but backing-off) poll after the SSE stream reports done —
+  // replaces the old 10×1500ms hard cap that gave up at 15s and stranded
+  // the UI on slow snapshot writes / dropped terminal events. Only exits
+  // on a real terminal state or component unmount.
   useEffect(() => {
     if (!done || settledRef.current) return;
 
     let attempts = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let alive = true;
 
     const tick = async () => {
+      if (!alive) return;
       const s = await fetchRun();
       attempts += 1;
-      if (settledRef.current || attempts >= 10) return;
-      if (s === "completed" || s === "failed") return;
-      timer = setTimeout(tick, 1500);
+      if (!alive || settledRef.current) return;
+      if (s === "completed" || s === "failed" || s === "cancelled") return;
+      // 1s → 2s → 4s → 8s → 15s → 15s … (capped, no hard total limit)
+      const delay = Math.min(15_000, 1000 * 2 ** Math.min(attempts, 4));
+      timer = setTimeout(tick, delay);
     };
 
     void tick();
-    return () => clearTimeout(timer);
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
   }, [done, fetchRun]);
 
+  // Composite "highest progress" — the max of the SSE-observed value, the
+  // server-hydrated value, and the derived terminal marker. This is what
+  // powers the stepper's monotonic step-state derivation.
   const progress = result
     ? 1
     : status === "completed"
       ? 1
-      : (latest?.progress ?? 0);
+      : Math.max(highestProgress, serverProgress, latest?.progress ?? 0);
 
-  const isWorking = !settledRef.current && status !== "failed";
+  const isTerminal =
+    status === "completed" || status === "failed" || status === "cancelled";
+  const isWorking = !settledRef.current && !isTerminal;
+  const isQueuedWaiting = status === "queued" && progress === 0;
+
+  // The failing stage — for painting the stepper red at the right row on
+  // failure. The processor always emits terminal `assemble/failed` on error
+  // (see processor's outer catch), but a stage-specific failure earlier in
+  // the pipeline would surface in `currentStage`.
+  const failedStage: PipelineStage | null =
+    status === "failed" ? (currentStage ?? "assemble") : null;
+
+  async function handleCancel() {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      await api.cancelRun(runId);
+      toast("Cancelling…", {
+        description:
+          status === "queued"
+            ? "Removed from the queue."
+            : "The pipeline will stop at the next stage boundary.",
+      });
+      // Kick off a re-fetch so status flips promptly.
+      void fetchRun();
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Could not cancel the run.",
+      );
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function handleRetry() {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      const { runId: newRunId } = await api.retryRun(runId);
+      toast.success("Retrying — opening the new run.");
+      router.push(`/runs/${newRunId}`);
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Could not retry the run.",
+      );
+      setRetrying(false);
+    }
+  }
 
   return (
     <TaskSheetProvider>
       <TaskDetailSheet workspaceId={activeWorkspaceId} />
       <div className="space-y-8">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Analysis
@@ -142,33 +262,97 @@ export default function RunPage() {
             <StatusPill status={status} />
           </p>
         </div>
-        <Button variant="secondary" onClick={() => router.push("/new")}>
-          New analysis
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {isWorking && (
+            <Button
+              variant="ghost"
+              onClick={handleCancel}
+              disabled={cancelling || !!cancelRequestedAt}
+            >
+              {cancelRequestedAt
+                ? "Cancelling…"
+                : cancelling
+                  ? "Cancelling…"
+                  : "Cancel"}
+            </Button>
+          )}
+          {(status === "failed" || status === "cancelled") && (
+            <Button variant="secondary" onClick={handleRetry} disabled={retrying}>
+              {retrying ? "Retrying…" : "Retry"}
+            </Button>
+          )}
+          <Button variant="secondary" onClick={() => router.push("/new")}>
+            New analysis
+          </Button>
+        </div>
       </div>
 
+      {isQueuedWaiting && (
+        <Card className="flex items-center gap-3 p-4 text-sm text-muted-foreground">
+          <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+          Queued — waiting for a worker to pick this up. This usually takes a few seconds.
+        </Card>
+      )}
+
       {status === "failed" ? (
+        <>
+          <PipelineStepper
+            events={events}
+            progress={progress}
+            stageStartedAt={stageStartedAt}
+            startedAt={startedAt}
+            stageDurations={stageDurations}
+            typicalByStage={typicalByStage}
+            failedStage={failedStage}
+          />
+          <Card className="space-y-3 p-6">
+            <ErrorBanner message={error ?? "The run failed."} />
+            <div className="flex gap-2">
+              <Button variant="primary" onClick={handleRetry} disabled={retrying}>
+                {retrying ? "Retrying…" : "Retry this run"}
+              </Button>
+              <Button variant="secondary" onClick={() => router.push("/new")}>
+                Start over
+              </Button>
+            </div>
+          </Card>
+        </>
+      ) : status === "cancelled" ? (
         <Card className="space-y-3 p-6">
-          <ErrorBanner message={error ?? "The run failed."} />
-          <Button variant="secondary" onClick={() => router.push("/new")}>
-            Start over
-          </Button>
+          <p className="text-sm text-foreground">
+            This run was cancelled. You can retry it or start a new analysis.
+          </p>
+          <div className="flex gap-2">
+            <Button variant="primary" onClick={handleRetry} disabled={retrying}>
+              {retrying ? "Retrying…" : "Retry"}
+            </Button>
+            <Button variant="secondary" onClick={() => router.push("/new")}>
+              Start over
+            </Button>
+          </div>
         </Card>
       ) : (
         <>
           {/* Live pipeline view — hidden once we have the final result. */}
           {!result && (
-            <PipelineStepper events={events} progress={progress} />
+            <PipelineStepper
+              events={events}
+              progress={progress}
+              stageStartedAt={stageStartedAt}
+              startedAt={startedAt}
+              stageDurations={stageDurations}
+              typicalByStage={typicalByStage}
+            />
           )}
 
-          {/* Non-fatal stream error (we fall back to polling). */}
+          {/* Non-fatal transport error — the SSE will auto-reconnect. */}
           {streamError && !result && (
-            <ErrorBanner message="Lost the live connection — checking the run status directly…" />
+            <ErrorBanner message="Live connection lost — trying to reconnect…" />
           )}
 
           {error && !result && <ErrorBanner message={error} />}
 
-          {isWorking && !result && (
+          {isWorking && !result && !isQueuedWaiting && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner
                 label={
@@ -260,6 +444,9 @@ function StatusPill({ status }: { status: RunStatus }) {
     running: "bg-blue-100 text-blue-700",
     completed: "bg-green-100 text-green-700",
     failed: "bg-red-100 text-red-700",
+    // `cancelled` is a deliberate user action — muted (not red) to
+    // distinguish it from a pipeline failure at a glance.
+    cancelled: "bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300",
   };
   return (
     <span

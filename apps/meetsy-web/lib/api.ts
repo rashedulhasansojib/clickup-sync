@@ -1,10 +1,13 @@
 import type {
+  CancelRunResponse,
   ClickUpTaskLookupView,
   CreateMeetingRequest,
   CreateMeetingResponse,
   ConfirmRosterRequest,
+  RetryRunResponse,
   RunResponse,
   RunListView,
+  RunStageTimingsResponse,
   RunStatus,
   FeedbackItem,
   SubmitFeedbackResponse,
@@ -307,6 +310,22 @@ export interface LearningStreamEvent {
   count: number;
   at: number;
   kind: "near-gate" | "gate-passed";
+}
+
+/**
+ * v2 SSE progress-polish — one message on the workspace-scoped runs channel
+ * (mirrors LearningStreamEvent). Emitted by the processor on any terminal
+ * state; consumed by `useRunNotifyStream` to fire a Sonner toast so a user
+ * who navigated away from `/runs/:id` still learns the run finished.
+ */
+export interface RunNotificationStreamEvent {
+  workspaceId: string;
+  runId: string;
+  meetingTitle: string;
+  kind: "completed" | "failed" | "cancelled";
+  /** Only present when `kind === "failed"`. */
+  message?: string;
+  at: number;
 }
 
 /** v2 Phase 1 — GET /workspaces/:id/learning/me — per-user weekly digest. */
@@ -704,6 +723,39 @@ export const api = {
     return activeWorkspaceId
       ? `${base}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`
       : base;
+  },
+
+  /**
+   * Absolute URL for the workspace-scoped run-notification SSE — powers the
+   * cross-page "Analysis ready" toast from `useRunNotifyStream`. Mounted
+   * globally in `AppShell` alongside `useLearningStream`.
+   */
+  runsNotifyStreamUrl(workspaceId: string): string {
+    return `${API_URL}/workspaces/${encodeURIComponent(workspaceId)}/runs/stream`;
+  },
+
+  /** POST /runs/:id/cancel — 400 on terminal runs, otherwise settles or flags. */
+  cancelRun(runId: string): Promise<CancelRunResponse> {
+    return request<CancelRunResponse>(`/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: "POST",
+    });
+  },
+
+  /** POST /runs/:id/retry — enqueue a fresh run against the same meeting. */
+  retryRun(runId: string): Promise<RetryRunResponse> {
+    return request<RetryRunResponse>(`/runs/${encodeURIComponent(runId)}/retry`, {
+      method: "POST",
+    });
+  },
+
+  /** Rolling median seconds per pipeline stage — powers the stepper's hint. */
+  getRunStageTimings(
+    workspaceId: string,
+    limit = 10,
+  ): Promise<RunStageTimingsResponse> {
+    return request<RunStageTimingsResponse>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/runs/stage-timings?limit=${limit}`,
+    );
   },
 
   /** POST /runs/:id/feedback — submit per-task 👍/👎 (+ optional comments). */

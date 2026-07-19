@@ -46,14 +46,53 @@ export type ConfirmRosterRequest = z.infer<typeof ConfirmRosterRequestSchema>;
 // GET /runs/:id — poll run status + result. `result` carries the Phase-2c/3
 // signal keys (kbContext, fieldPredictions, duplicates, assignment, adjustments)
 // alongside the AnalysisResult base — see ReviewResultSchema.
+//
+// The progress/timing fields are added by the SSE progress-polish work: the
+// processor persists these on every emit so a client that (re)connects mid-run
+// can hydrate the pipeline stepper from a single REST call without waiting for
+// the next pub/sub event. Optional so legacy tests / older API responses parse.
 export const RunResponseSchema = z.object({
   runId: z.string(),
   meetingId: z.string(),
   status: RunStatus,
   result: ReviewResultSchema.nullable(),
   error: z.string().nullable().default(null),
+  currentStage: z.string().nullable().optional(),
+  progress: z.number().min(0).max(1).optional(),
+  stageStartedAt: z.string().nullable().optional(),
+  startedAt: z.string().nullable().optional(),
+  finishedAt: z.string().nullable().optional(),
+  /** Seconds per completed stage; written on any terminal transition. */
+  stageDurations: z.record(z.string(), z.number()).nullable().optional(),
+  cancelRequestedAt: z.string().nullable().optional(),
 });
 export type RunResponse = z.infer<typeof RunResponseSchema>;
+
+// GET /workspaces/:id/runs/stage-timings — median seconds per pipeline stage
+// across the last N completed runs. Powers the stepper's "typical duration"
+// hint so users have expectations for how long a run should take.
+export const RunStageTimingsResponseSchema = z.object({
+  medianByStage: z.record(z.string(), z.number()),
+  sampleSize: z.number().int().nonnegative(),
+});
+export type RunStageTimingsResponse = z.infer<typeof RunStageTimingsResponseSchema>;
+
+// POST /runs/:id/cancel — request cancellation. Processor honors it between
+// stages; if the job hadn't started yet it's removed from BullMQ immediately.
+export const CancelRunResponseSchema = z.object({
+  runId: z.string(),
+  status: RunStatus,
+});
+export type CancelRunResponse = z.infer<typeof CancelRunResponseSchema>;
+
+// POST /runs/:id/retry — enqueue a NEW AnalysisRun against the same Meeting
+// (roster already confirmed on the meeting). Mirrors the push-retry pattern:
+// retry = fresh work, not resume-from-failed-stage. Returns the new runId so
+// the client can navigate to `/runs/<new>`.
+export const RetryRunResponseSchema = z.object({
+  runId: z.string(),
+});
+export type RetryRunResponse = z.infer<typeof RetryRunResponseSchema>;
 
 // GET /workspaces/:id/clickup/tasks/:taskId — resolve a ClickUp task id to
 // human-readable metadata (title + status + assignee + url). Returns null (200)

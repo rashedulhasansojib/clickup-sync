@@ -9,6 +9,7 @@ import {
   useWorkspace,
 } from "@/lib/workspace-context";
 import { useLearningStream } from "@/lib/useLearningStream";
+import { useRunNotifyStream } from "@/lib/useRunNotifyStream";
 import { Spinner } from "@/app/ui";
 import { Toaster } from "@/components/ui/sonner";
 import { Sidebar } from "@/components/nav/sidebar";
@@ -92,6 +93,10 @@ function SignedInShell({
   // user is pushing — the moment when the threshold actually crosses. The
   // hook auto-cleans when the workspace switches or the shell unmounts.
   useLearningStream(activeWorkspaceId);
+  // v2 SSE progress-polish — subscribe workspace-wide to run terminal events
+  // so a user who navigated away from `/runs/:id` still gets a toast when
+  // their analysis finishes / fails / is cancelled. Same lifecycle rules.
+  useRunNotifyStream(activeWorkspaceId);
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       {/* v2 Phase 6 (PR-BB) — skip-to-main link. Hidden until focused via Tab;

@@ -51,6 +51,24 @@ export class AnalysisQueue implements OnModuleInit, OnModuleDestroy {
     await this.publisher.publish(runChannel(event.runId), JSON.stringify(event));
   }
 
+  /**
+   * Remove a queued job by run id. Used by `POST /runs/:id/cancel` to
+   * short-circuit runs the worker has not picked up yet. Returns true if a
+   * pending job was removed. Best-effort: a job already `active`/`completed`
+   * is a no-op (BullMQ throws — we swallow), and the processor's between-stage
+   * `cancelRequestedAt` check handles the running case.
+   */
+  async removeJob(runId: string): Promise<boolean> {
+    try {
+      const job = await this.queue.getJob(runId);
+      if (!job) return false;
+      await job.remove();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async onModuleDestroy(): Promise<void> {
     await this.queue?.close();
     this.publisher?.disconnect();

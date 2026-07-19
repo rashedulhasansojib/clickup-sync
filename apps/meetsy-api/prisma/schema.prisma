@@ -32,6 +32,7 @@ enum RunStatus {
   running
   completed
   failed
+  cancelled
 
   @@schema("meetsy")
 }
@@ -134,8 +135,25 @@ model AnalysisRun {
   promptTokens     Int       @default(0)
   completionTokens Int       @default(0)
   llmCalls         Int       @default(0)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  // Durable pipeline progress state. Persisted by the processor before each
+  // stage emit so a client that (re)connects mid-run — reload, page nav, dev
+  // HMR — can hydrate `GET /runs/:id` and render the correct stepper state
+  // WITHOUT waiting for the next Redis pub/sub event. `progress` is the
+  // highest normalized progress the pipeline has reached (monotonic).
+  // `stageDurations` is written on completion as { [stage]: seconds } for
+  // typical-duration hints and per-stage timers.
+  currentStage      String?   @map("current_stage")
+  progress          Float     @default(0)
+  stageStartedAt    DateTime? @map("stage_started_at")
+  startedAt         DateTime? @map("started_at")
+  finishedAt        DateTime? @map("finished_at")
+  stageDurations    Json?     @map("stage_durations")
+  // Set by POST /runs/:id/cancel. The processor checks this between stages
+  // and terminates the run with status=cancelled. If the job hasn't started
+  // yet, the cancel endpoint also removes it from BullMQ.
+  cancelRequestedAt DateTime? @map("cancel_requested_at")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   meeting      Meeting              @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   feedback     Feedback[]

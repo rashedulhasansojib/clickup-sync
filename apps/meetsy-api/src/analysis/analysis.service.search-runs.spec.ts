@@ -45,6 +45,7 @@ describe("AnalysisService — searchRuns", () => {
       {} as never,
       {} as never,
       {} as never,
+      { publish: jest.fn() } as never,
     );
     return { service, queryRaw, taskPushFindMany };
   }

@@ -57,6 +57,7 @@ describe("AnalysisService.createMeeting — ClickUp member suggestion", () => {
       resolver as never,
       rosterMemory as never,
       rosterLlm as never,
+      { publish: jest.fn() } as never,
     );
     return {
       service,

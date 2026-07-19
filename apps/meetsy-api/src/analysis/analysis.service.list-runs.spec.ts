@@ -44,6 +44,7 @@ describe("AnalysisService — listRuns", () => {
       {} as never,
       {} as never,
       {} as never,
+      { publish: jest.fn() } as never,
     );
     return { service, $transaction, taskPushFindMany, workspacePushConfigFindUnique };
   }

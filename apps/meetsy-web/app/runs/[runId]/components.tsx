@@ -39,46 +39,136 @@ import {
 } from "./signals";
 
 // ── Live pipeline stepper ─────────────────────────────────────────────
-// Canonical ordered list of the full Phase-2 pipeline. Stages that never
-// emit a ProgressEvent (e.g. `assign` may be folded into extract) simply
-// stay pending/neutral — see stepStateFor.
-const STEPPER_STAGES: { stage: PipelineStage; label: string }[] = [
-  { stage: "normalize", label: "Normalize" },
-  { stage: "comprehend", label: "Comprehend" },
-  { stage: "extract", label: "Extract" },
-  { stage: "assign", label: "Assign" },
-  { stage: "enrich", label: "Enrich" },
-  { stage: "critic", label: "Critic" },
-  { stage: "assemble", label: "Assemble" },
+//
+// Ordered to match ACTUAL execution in `analysis.processor.ts` — NOT the
+// original label reading order. Previously the stepper listed `assign` after
+// `extract` and `enrich` after `assign`, so on every run `critic` (which
+// executes BEFORE `enrich`) would flip to "done" while `enrich` sat pending
+// above it. The user reported this as "step 2 and 3 done but step 1 pending."
+//
+// Progress bands per stage come from the processor's `emit()` calls:
+//   normalize:  0.00 →  0.05
+//   comprehend: 0.10 →  0.40
+//   extract:    0.40 →  0.55
+//   critic:     0.60 →  0.75
+//   enrich:     0.78 →  0.90
+//   assign:     0.91 →  0.92
+//   assemble:   0.93 →  1.00
+//
+// `stepStateFor` derives state monotonically from the HIGHEST progress the
+// hook has ever observed — even if an individual event was dropped by the
+// SSE transport, the stepper still renders "everything up to the current
+// stage is done." This is what makes hard-reload work when combined with
+// `useRunStream.seed()` (called from RunPage after `GET /runs/:id`).
+const STEPPER_STAGES: {
+  stage: PipelineStage;
+  label: string;
+  start: number;
+  complete: number;
+}[] = [
+  { stage: "normalize", label: "Normalize", start: 0, complete: 0.05 },
+  { stage: "comprehend", label: "Comprehend", start: 0.1, complete: 0.4 },
+  { stage: "extract", label: "Extract", start: 0.4, complete: 0.55 },
+  { stage: "critic", label: "Critic", start: 0.6, complete: 0.75 },
+  { stage: "enrich", label: "Enrich", start: 0.78, complete: 0.9 },
+  { stage: "assign", label: "Assign", start: 0.91, complete: 0.92 },
+  { stage: "assemble", label: "Assemble", start: 0.93, complete: 1 },
 ];
 
 type StepState = "pending" | "active" | "done" | "failed";
 
+/**
+ * Monotonic step-state derivation.
+ *
+ * Priority order:
+ *  1. A `failed` event for this stage → failed (always wins).
+ *  2. `highestProgress >= complete` OR any `completed` event → done.
+ *  3. `highestProgress >= start` OR any event exists for this stage → active.
+ *  4. Otherwise → pending.
+ *
+ * The `highestProgress`-driven rule is what makes reload work: after seeding
+ * from `GET /runs/:id`, the stepper immediately shows every stage below the
+ * current one as done, even before any live event arrives.
+ */
 function stepStateFor(
-  stage: PipelineStage,
+  stage: { stage: PipelineStage; start: number; complete: number },
   events: PipelineProgressEvent[],
+  highestProgress: number,
 ): StepState {
-  const forStage = events.filter((e) => e.stage === stage);
-  if (forStage.length === 0) {
-    // No events for this stage yet (or it was skipped) — stay neutral.
-    return "pending";
-  }
+  const forStage = events.filter((e) => e.stage === stage.stage);
   if (forStage.some((e) => e.status === "failed")) return "failed";
-  if (forStage.some((e) => e.status === "completed")) return "done";
-  return "active";
+  if (
+    highestProgress >= stage.complete ||
+    forStage.some((e) => e.status === "completed")
+  )
+    return "done";
+  if (highestProgress >= stage.start || forStage.length > 0) return "active";
+  return "pending";
+}
+
+/** Formats seconds as either "45s" or "1m 20s"; below 10s uses one decimal. */
+function fmtSeconds(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return "";
+  if (sec < 10) return `${sec.toFixed(1)}s`;
+  if (sec < 60) return `${Math.round(sec)}s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec - m * 60);
+  return `${m}m ${s}s`;
+}
+
+/** Wall-clock timer that reruns every 500ms — used only by the active stage. */
+function useTicker(enabled: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    const t = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(t);
+  }, [enabled]);
+  return now;
 }
 
 export function PipelineStepper({
   events,
   progress,
+  stageStartedAt,
+  startedAt,
+  stageDurations,
+  typicalByStage,
+  failedStage,
 }: {
   events: PipelineProgressEvent[];
   progress: number;
+  /** ISO string — when the currently-active stage started. */
+  stageStartedAt?: string | null;
+  /** ISO string — when the worker picked up the job. */
+  startedAt?: string | null;
+  /** Seconds per stage from the RUN row (final on completion). */
+  stageDurations?: Record<string, number> | null;
+  /** Median seconds per stage across recent runs (typical-duration hint). */
+  typicalByStage?: Record<string, number>;
+  /** Present after failure — force this stage into the `failed` visual. */
+  failedStage?: PipelineStage | null;
 }) {
+  // Only tick while the pipeline is actively running — a completed/failed
+  // stepper has no live timer to update.
+  const isRunning = progress > 0 && progress < 1;
+  const now = useTicker(isRunning);
+
+  const totalElapsedSec = startedAt
+    ? (now - new Date(startedAt).getTime()) / 1000
+    : null;
+
   return (
     <Card className="p-6">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-foreground">Pipeline progress</h2>
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">Pipeline progress</h2>
+          {totalElapsedSec !== null && (
+            <p className="mt-0.5 text-xs text-muted-foreground/80">
+              Running for {fmtSeconds(totalElapsedSec)}
+            </p>
+          )}
+        </div>
         <span className="text-xs text-muted-foreground/70">
           {Math.round(progress * 100)}%
         </span>
@@ -93,31 +183,66 @@ export function PipelineStepper({
         className="mb-5 h-2 w-full overflow-hidden rounded-full bg-muted"
       >
         <div
-          className="h-full rounded-full bg-primary transition-all duration-500"
+          className="h-full rounded-full bg-primary transition-[width] duration-700 ease-out"
           style={{ width: `${Math.min(100, Math.round(progress * 100))}%` }}
         />
       </div>
 
       <ol className="space-y-3">
-        {STEPPER_STAGES.map(({ stage, label }) => {
-          const state = stepStateFor(stage, events);
+        {STEPPER_STAGES.map((step) => {
+          const { stage, label } = step;
+          const derived = stepStateFor(step, events, progress);
+          const state: StepState =
+            failedStage === stage ? "failed" : derived;
           const latestForStage = [...events]
             .reverse()
             .find((e) => e.stage === stage);
+
+          // Timer / duration display:
+          //  - done  → the recorded duration (or "" if we never saw it)
+          //  - active → live elapsed since `stageStartedAt`
+          //  - pending → the typical duration hint (if any)
+          let timerLabel: string | null = null;
+          const recorded = stageDurations?.[stage];
+          if (state === "done" && typeof recorded === "number") {
+            timerLabel = fmtSeconds(recorded);
+          } else if (state === "active" && stageStartedAt) {
+            timerLabel = fmtSeconds((now - new Date(stageStartedAt).getTime()) / 1000);
+          } else if (state === "pending") {
+            const typical = typicalByStage?.[stage];
+            if (typeof typical === "number" && typical > 0) {
+              timerLabel = `~${fmtSeconds(typical)}`;
+            }
+          }
+
           return (
             <li key={stage} className="flex items-start gap-3">
               <StepDot state={state} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span
-                    className={`text-sm font-medium ${
+                    className={`text-sm font-medium transition-colors duration-300 ${
                       state === "pending" ? "text-muted-foreground/70" : "text-foreground"
                     }`}
                   >
                     {label}
                   </span>
                   {state === "active" && (
-                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-input border-t-foreground" />
+                    <span
+                      aria-hidden
+                      className="h-3 w-3 animate-spin rounded-full border-2 border-input border-t-foreground"
+                    />
+                  )}
+                  {timerLabel && (
+                    <span
+                      className={`ml-auto shrink-0 text-[11px] tabular-nums ${
+                        state === "pending"
+                          ? "text-muted-foreground/60"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      {timerLabel}
+                    </span>
                   )}
                 </div>
                 {latestForStage && (
@@ -143,7 +268,7 @@ function StepDot({ state }: { state: StepState }) {
   };
   return (
     <span
-      className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] ${styles[state]}`}
+      className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] transition-colors duration-300 ${styles[state]}`}
       aria-hidden
     >
       {state === "done" ? "✓" : state === "failed" ? "!" : "•"}

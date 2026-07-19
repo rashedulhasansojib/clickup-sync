@@ -250,6 +250,7 @@ describe("AnalysisService — signal round-trip (v2 Phase 0)", () => {
       {} as never,
       {} as never,
       {} as never,
+      { publish: jest.fn() } as never,
     );
     return { service, prisma, azure, getPersistedResult: () => persistedResult };
   }

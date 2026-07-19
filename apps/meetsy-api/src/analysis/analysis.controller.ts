@@ -11,18 +11,21 @@ import {
 import { Observable } from "rxjs";
 import type { AuthPrincipal } from "@clicksy/shared";
 import type {
+  CancelRunResponse,
   ChatHistoryResponse,
   ConfirmRosterRequest,
   CreateMeetingRequest,
   CreateMeetingResponse,
-  ProgressEvent,
+  RetryRunResponse,
   RunListView,
   RunResponse,
+  RunStageTimingsResponse,
   SendChatRequest,
   SendChatResponse,
   SubmitFeedbackRequest,
   SubmitFeedbackResponse,
 } from "@ma/shared";
+import type { RunNotificationEvent } from "./run-notification.service";
 import {
   ConfirmRosterRequestSchema,
   CreateMeetingRequestSchema,
@@ -130,7 +133,7 @@ export class AnalysisController {
     return this.analysis.confirmRoster(user.orgId, user.userId, id, body, workspaceId);
   }
 
-  /** Poll a run's status + result. */
+  /** Poll a run's status + result + durable progress state. */
   @Get("runs/:id")
   getRun(
     @CurrentUser() user: AuthPrincipal,
@@ -138,6 +141,62 @@ export class AnalysisController {
     @Query("workspaceId") workspaceId?: string,
   ): Promise<RunResponse> {
     return this.analysis.getRun(user.orgId, id, workspaceId);
+  }
+
+  /**
+   * Median seconds per stage across the last N completed runs — powers the
+   * "typical duration" hint on the pipeline stepper. Declared BEFORE
+   * `GET /runs/:id` so `stage-timings` is not matched as a run id.
+   */
+  @Get("workspaces/:id/runs/stage-timings")
+  getRunStageTimings(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id") id: string,
+    @Query("limit") limitParam?: string,
+  ): Promise<RunStageTimingsResponse> {
+    const limit = Math.max(1, Math.min(Number.parseInt(limitParam ?? "10", 10) || 10, 50));
+    return this.analysis.runStageTimings(user.orgId, id, limit);
+  }
+
+  /**
+   * Cancel a queued/running run. Queued → removed from BullMQ + row settled
+   * immediately. Running → sets `cancelRequestedAt`; the processor terminates
+   * at the next between-stage boundary. Terminal states → 400.
+   */
+  @Post("runs/:id/cancel")
+  cancelRun(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id") id: string,
+    @Query("workspaceId") workspaceId?: string,
+  ): Promise<CancelRunResponse> {
+    return this.analysis.cancelRun(user.orgId, id, workspaceId);
+  }
+
+  /**
+   * Enqueue a fresh AnalysisRun for the same meeting (retry = new work, not
+   * resume-from-failed-stage). Only defined for failed/cancelled runs — the
+   * client navigates to `/runs/<new>`.
+   */
+  @Post("runs/:id/retry")
+  retryRun(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id") id: string,
+    @Query("workspaceId") workspaceId?: string,
+  ): Promise<RetryRunResponse> {
+    return this.analysis.retryRun(user.orgId, id, workspaceId);
+  }
+
+  /**
+   * Workspace-scoped run notifications SSE — mirrors `/learning/stream`.
+   * Emits on any terminal (completed/failed/cancelled) so a user who
+   * navigated away can be toasted the moment the run settles.
+   */
+  @Sse("workspaces/:id/runs/stream")
+  streamWorkspaceRuns(
+    @CurrentUser() user: AuthPrincipal,
+    @Param("id") id: string,
+  ): Observable<{ data: RunNotificationEvent }> {
+    return this.analysis.streamWorkspaceRuns(user.orgId, id);
   }
 
   /** Submit per-task feedback; triggers a targeted re-run. */
@@ -186,7 +245,7 @@ export class AnalysisController {
     @CurrentUser() user: AuthPrincipal,
     @Param("id") id: string,
     @Query("workspaceId") workspaceId?: string,
-  ): Observable<{ data: ProgressEvent }> {
+  ): Observable<{ data: unknown; type?: string }> {
     return this.analysis.streamRun(user.orgId, id, workspaceId);
   }
 }

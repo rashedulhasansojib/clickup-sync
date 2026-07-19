@@ -2,18 +2,21 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from "@nes
 import { Observable } from "rxjs";
 import type {
   AnalysisResult,
+  CancelRunResponse,
   ChatHistoryResponse,
   ConfirmRosterRequest,
   CreateMeetingRequest,
   CreateMeetingResponse,
   Participant,
   ProgressEvent,
+  RetryRunResponse,
   ReviewResult,
   ReviewSignals,
   RunListItem,
   RunListPushStatus,
   RunListView,
   RunResponse,
+  RunStageTimingsResponse,
   RunStatus,
   SendChatResponse,
   SubmitFeedbackRequest,
@@ -39,6 +42,7 @@ import {
 } from "./pipeline";
 import { AnalysisQueue } from "./queue/analysis.queue";
 import { createRedis, runChannel } from "./queue/redis";
+import { RunNotificationService, type RunNotificationEvent } from "./run-notification.service";
 import { WorkspaceResolver } from "./workspace.resolver";
 import { ClickUpClient } from "../clickup/clickup.client";
 import { AssigneeResolverService } from "../clickup/assignee-resolver.service";
@@ -69,7 +73,31 @@ export class AnalysisService {
     private readonly assigneeResolver: AssigneeResolverService,
     private readonly rosterMemory: RosterMemoryService,
     private readonly rosterLlm: RosterLlmService,
+    private readonly runNotify: RunNotificationService,
   ) {}
+
+  /** Observable feed of run notifications for a workspace — cross-page toasts. */
+  streamWorkspaceRuns(
+    orgId: string,
+    workspaceIdParam?: string,
+  ): Observable<{ data: RunNotificationEvent }> {
+    return new Observable<{ data: RunNotificationEvent }>((subscriber) => {
+      // Resolve workspace THEN attach: an unauthorized subscriber never gets
+      // events, and a bad workspace fails fast with the resolver's 404.
+      void this.workspaces
+        .resolve(orgId, workspaceIdParam)
+        .then((workspaceId) => {
+          const inner = this.runNotify.subscribe(workspaceId).subscribe({
+            next: (e) => subscriber.next(e),
+            error: (err) => subscriber.error(err),
+            complete: () => subscriber.complete(),
+          });
+          // Teardown when the outer subscriber unsubscribes.
+          return () => inner.unsubscribe();
+        })
+        .catch((err) => subscriber.error(err));
+    });
+  }
 
   /**
    * POST /meetings — create the meeting, extract the roster (Stage 0) so the
@@ -486,7 +514,13 @@ export class AnalysisService {
     return { items, total, limit: opts.limit, offset: opts.offset };
   }
 
-  /** GET /runs/:id — current status + result. */
+  /** GET /runs/:id — current status + result + durable progress state.
+   *
+   * The progress/timing fields are what makes hard-reload work: on remount
+   * the client seeds the pipeline stepper from this response BEFORE attaching
+   * SSE, so the correct stage/progress renders immediately instead of showing
+   * every step as pending until the next Redis event fires.
+   */
   async getRun(orgId: string, runId: string, workspaceIdParam?: string): Promise<RunResponse> {
     const workspaceId = await this.workspaces.resolve(orgId, workspaceIdParam);
     const run = await this.prisma.analysisRun.findFirst({
@@ -505,7 +539,183 @@ export class AnalysisService {
       // end-to-end with real Zod validation, not `.passthrough()` widening.
       result: run.result ? ReviewResultSchema.parse(run.result) : null,
       error: run.error ?? null,
+      currentStage: run.currentStage,
+      progress: run.progress,
+      stageStartedAt: run.stageStartedAt?.toISOString() ?? null,
+      startedAt: run.startedAt?.toISOString() ?? null,
+      finishedAt: run.finishedAt?.toISOString() ?? null,
+      stageDurations: (run.stageDurations as Record<string, number> | null) ?? null,
+      cancelRequestedAt: run.cancelRequestedAt?.toISOString() ?? null,
     };
+  }
+
+  /**
+   * POST /runs/:id/cancel — request cancellation of a queued/running run.
+   *
+   * Queued case: strike the BullMQ job immediately + mark the row cancelled
+   * so the worker never picks it up.
+   *
+   * Running case: set `cancelRequestedAt`; the processor's between-stage
+   * `checkCancelled()` throws `CancelledRunError` at the next boundary and
+   * finishes with `status="cancelled"`. Worst-case wait is the current LLM
+   * call (typical: seconds; upper bound: tens of seconds).
+   *
+   * Terminal case (completed / failed / cancelled): 409 — no-op.
+   */
+  async cancelRun(
+    orgId: string,
+    runId: string,
+    workspaceIdParam?: string,
+  ): Promise<CancelRunResponse> {
+    const workspaceId = await this.workspaces.resolve(orgId, workspaceIdParam);
+    const run = await this.prisma.analysisRun.findFirst({
+      where: { id: runId, orgId, workspaceId },
+      include: { meeting: { select: { title: true } } },
+    });
+    if (!run) throw new NotFoundException(`Run ${runId} not found`);
+
+    if (
+      run.status === "completed" ||
+      run.status === "failed" ||
+      run.status === "cancelled"
+    ) {
+      throw new BadRequestException(`Run ${runId} is already ${run.status}`);
+    }
+
+    const now = new Date();
+
+    if (run.status === "queued") {
+      // The worker hasn't picked it up yet — settle synchronously here.
+      await this.queue.removeJob(runId);
+      await this.prisma.analysisRun.update({
+        where: { id: runId },
+        data: {
+          status: "cancelled",
+          cancelRequestedAt: now,
+          finishedAt: now,
+        },
+      });
+      // Fire the cross-page toast now since the processor terminal branch
+      // won't run for a queued cancel.
+      await this.runNotify.publish({
+        workspaceId,
+        runId,
+        meetingTitle: run.meeting.title,
+        kind: "cancelled",
+      });
+      return { runId, status: "cancelled" };
+    }
+
+    // Running: cooperative cancel via the processor.
+    await this.prisma.analysisRun.update({
+      where: { id: runId },
+      data: { cancelRequestedAt: now },
+    });
+    return { runId, status: "running" };
+  }
+
+  /**
+   * POST /runs/:id/retry — enqueue a fresh AnalysisRun for the same meeting.
+   *
+   * Only defined for `failed`/`cancelled` runs (a completed run has a result;
+   * a queued/running run should be cancelled first). Mirrors the push-retry
+   * pattern from Phase 2: retry = new work, not resume-from-failed-stage —
+   * simpler + easier to reason about + avoids partial-state landmines.
+   *
+   * The Meeting's roster is already confirmed (that's how the original run
+   * got enqueued in the first place), so the new run picks up straight into
+   * the pipeline with no extra user step.
+   */
+  async retryRun(
+    orgId: string,
+    runId: string,
+    workspaceIdParam?: string,
+  ): Promise<RetryRunResponse> {
+    const workspaceId = await this.workspaces.resolve(orgId, workspaceIdParam);
+    const run = await this.prisma.analysisRun.findFirst({
+      where: { id: runId, orgId, workspaceId },
+    });
+    if (!run) throw new NotFoundException(`Run ${runId} not found`);
+
+    if (run.status !== "failed" && run.status !== "cancelled") {
+      throw new BadRequestException(
+        `Run ${runId} is ${run.status} — only failed/cancelled runs can be retried`,
+      );
+    }
+
+    const meeting = await this.prisma.meeting.findFirst({
+      where: { id: run.meetingId, orgId, workspaceId },
+    });
+    if (!meeting) {
+      throw new NotFoundException(`Meeting ${run.meetingId} not found`);
+    }
+    // A retry can only fire on a meeting whose roster was confirmed — that's
+    // implicit in the run existing, but double-check so we never enqueue a job
+    // the worker will fail on immediately.
+    if (!meeting.roster) {
+      throw new BadRequestException(
+        `Meeting ${run.meetingId} has no confirmed roster; open /meetings/${run.meetingId}/roster first`,
+      );
+    }
+
+    const fresh = await this.prisma.analysisRun.create({
+      data: {
+        orgId,
+        workspaceId,
+        meetingId: run.meetingId,
+        status: "queued",
+      },
+    });
+    await this.queue.enqueue({
+      runId: fresh.id,
+      meetingId: run.meetingId,
+      orgId,
+    });
+    return { runId: fresh.id };
+  }
+
+  /**
+   * GET /workspaces/:id/runs/stage-timings — median seconds per pipeline
+   * stage across the last N completed runs, powering the stepper's "typical
+   * duration" hint. Cheap: one indexed read + JS math.
+   */
+  async runStageTimings(
+    orgId: string,
+    workspaceIdParam?: string,
+    limit = 10,
+  ): Promise<RunStageTimingsResponse> {
+    const workspaceId = await this.workspaces.resolve(orgId, workspaceIdParam);
+    const rows = await this.prisma.analysisRun.findMany({
+      where: {
+        orgId,
+        workspaceId,
+        status: "completed",
+        stageDurations: { not: Prisma.JsonNull },
+      },
+      select: { stageDurations: true },
+      orderBy: { createdAt: "desc" },
+      take: Math.max(1, Math.min(limit, 50)),
+    });
+    const buckets: Record<string, number[]> = {};
+    for (const r of rows) {
+      const d = r.stageDurations as Record<string, unknown> | null;
+      if (!d) continue;
+      for (const [stage, seconds] of Object.entries(d)) {
+        if (typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0) {
+          (buckets[stage] ??= []).push(seconds);
+        }
+      }
+    }
+    const medianByStage: Record<string, number> = {};
+    for (const [stage, values] of Object.entries(buckets)) {
+      const sorted = [...values].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      medianByStage[stage] =
+        sorted.length % 2 === 0
+          ? (sorted[mid - 1]! + sorted[mid]!) / 2
+          : sorted[mid]!;
+    }
+    return { medianByStage, sampleSize: rows.length };
   }
 
   // ── Phase 3: feedback + chat ─────────────────────────────────────────────
@@ -705,20 +915,40 @@ export class AnalysisService {
   }
 
   /**
-   * GET /runs/:id/stream — SSE of ProgressEvents.
+   * GET /runs/:id/stream — SSE of ProgressEvents plus periodic `keepalive`
+   * comments so long-idle streams (between stages) survive proxy/browser
+   * timeouts without triggering a client reconnect + falling back to polling.
    *
-   * Uses a DEDICATED Redis subscriber (a connection in subscribe mode can't run
-   * other commands), torn down when the client disconnects. Handles the
-   * late-subscriber race: if the run already finished, emit a terminal event and
-   * complete immediately instead of subscribing to a channel no one will publish.
+   * Uses a DEDICATED Redis subscriber (a connection in subscribe mode can't
+   * run other commands), torn down when the client disconnects. Handles the
+   * late-subscriber race: if the run already finished, emit a terminal event
+   * and complete immediately instead of subscribing to a channel no one will
+   * publish to again.
+   *
+   * The emitted shape widens to `{ data: unknown; type?: string }` so we can
+   * emit a named `keepalive` event alongside the default `message` events
+   * (which carry the ProgressEvent). Named events don't fire the client's
+   * `es.onmessage` so `useRunStream` never sees them in its `events` array.
    */
-  streamRun(orgId: string, runId: string, workspaceIdParam?: string): Observable<{ data: ProgressEvent }> {
-    return new Observable<{ data: ProgressEvent }>((subscriber) => {
+  streamRun(
+    orgId: string,
+    runId: string,
+    workspaceIdParam?: string,
+  ): Observable<{ data: unknown; type?: string }> {
+    return new Observable<{ data: unknown; type?: string }>((subscriber) => {
       const { host, port } = this.config.redis;
       const redis = createRedis(host, port);
       let closed = false;
+      let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
 
-      const terminal = (status: "completed" | "failed", message: string): void => {
+      const emitKeepalive = (): void => {
+        subscriber.next({ data: { at: Date.now() }, type: "keepalive" });
+      };
+
+      const terminal = (
+        status: "completed" | "failed",
+        message: string,
+      ): void => {
         const event: ProgressEvent = {
           runId,
           stage: "assemble",
@@ -783,6 +1013,17 @@ export class AnalysisService {
           terminal("failed", run.error ?? "Analysis failed");
           return;
         }
+        if (run.status === "cancelled") {
+          // Cancel maps to `failed` on the ProgressEvent (no `cancelled`
+          // StageStatus in @ma/shared, breaking change avoided). The client
+          // reads `RunStatus` from `GET /runs/:id` for the real distinction.
+          terminal("failed", "Cancelled by user");
+          return;
+        }
+
+        // Start keep-alive AFTER subscribe/terminal decisions so we don't
+        // emit pings on a stream that's about to complete.
+        keepaliveTimer = setInterval(emitKeepalive, 15_000);
       };
 
       // Surface async failures to the client instead of silently hanging.
@@ -792,6 +1033,7 @@ export class AnalysisService {
       return () => {
         if (closed) return;
         closed = true;
+        if (keepaliveTimer) clearInterval(keepaliveTimer);
         redis.disconnect();
       };
     });
