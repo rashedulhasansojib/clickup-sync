@@ -1,0 +1,1212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Meetsy v2 — Implementation &amp; Verification Guide</title>
+<style>
+  :root { --ink:#18181b; --muted:#52525b; --soft:#71717a; --line:#e4e4e7; --bg:#ffffff;
+          --accent:#1d4ed8; --accent2:#7c3aed; --green:#15803d; --amber:#b45309; --red:#b91c1c;
+          --panel:#f8fafc; --code-bg:#0f172a; --code-fg:#e2e8f0; }
+  * { box-sizing:border-box; }
+  html { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         color:var(--ink); line-height:1.55; font-size:11pt; margin:0; }
+  .page { padding:6px 52px; }
+  h1 { font-size:30pt; line-height:1.1; margin:0 0 6px; letter-spacing:-0.5px; }
+  h2 { font-size:17pt; margin:26px 0 10px; padding-top:14px; border-top:2px solid var(--ink); letter-spacing:-0.3px; page-break-after:avoid; }
+  h3 { font-size:13pt; margin:18px 0 6px; page-break-after:avoid; }
+  h4 { font-size:11.5pt; margin:16px 0 4px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; }
+  p, li { color:var(--ink); }
+  .muted { color:var(--muted); }
+  .small { font-size:9.5pt; }
+  code { font-family:"SF Mono",Menlo,Consolas,monospace; font-size:9.5pt; background:#f4f4f5; padding:1px 5px; border-radius:4px; color:#3f3f46; }
+  pre.code { background:var(--code-bg); color:var(--code-fg); padding:12px 14px; border-radius:8px; font-size:8.8pt; overflow:auto; line-height:1.45; }
+  a { color:var(--accent); text-decoration:none; }
+  table { width:100%; border-collapse:collapse; margin:12px 0; font-size:9.5pt; }
+  th,td { border:1px solid var(--line); padding:7px 9px; text-align:left; vertical-align:top; }
+  th { background:#f4f4f5; font-weight:600; }
+  .tag { display:inline-block; border:1px solid var(--line); border-radius:6px; padding:1px 7px; font-size:8.5pt; }
+  .tag.blue{ background:#eff6ff; color:var(--accent); border-color:#bfdbfe; }
+  .tag.violet{ background:#f5f3ff; color:var(--accent2); border-color:#ddd6fe; }
+  .tag.green{ background:#f0fdf4; color:var(--green); border-color:#bbf7d0; }
+  .tag.amber{ background:#fffbeb; color:var(--amber); border-color:#fde68a; }
+  .tag.red{ background:#fef2f2; color:var(--red); border-color:#fecaca; }
+  .callout { border:1px solid var(--line); border-left:4px solid var(--accent); background:var(--panel); border-radius:6px; padding:12px 16px; margin:14px 0; }
+  .callout.honest { border-left-color:var(--accent2); background:#faf5ff; }
+  .callout.safety { border-left-color:var(--red); background:#fef2f2; }
+  .callout.ok { border-left-color:var(--green); background:#f0fdf4; }
+  .callout.warn { border-left-color:var(--amber); background:#fffbeb; }
+  .mermaid { margin:14px 0; text-align:center; page-break-inside:avoid; }
+  .mermaid svg { max-width:100% !important; width:auto !important; height:auto !important; max-height:560px; }
+  .callout, .step, table, figure, .grid2, .stat-row { page-break-inside:avoid; }
+  figure { margin:18px 0; text-align:center; }
+  figcaption { font-size:9pt; color:var(--soft); margin-top:6px; }
+  .toc { columns:2; column-gap:36px; font-size:10pt; }
+  .toc a { color:var(--ink); }
+  .toc .n { color:var(--soft); margin-right:6px; }
+  .pagebreak { page-break-before:auto; }
+  #p3, #p5, #p7, #p9, #p12, #p14, #p16 { page-break-before:always; }
+  .cover { height:1000px; display:flex; flex-direction:column; justify-content:center; page-break-after:always; }
+  .cover .kicker { color:var(--accent); font-weight:600; letter-spacing:1px; text-transform:uppercase; font-size:11pt; }
+  .cover .sub { font-size:15pt; color:var(--muted); margin-top:10px; max-width:640px; }
+  .cover .meta { margin-top:40px; font-size:10pt; color:var(--soft); border-top:1px solid var(--line); padding-top:16px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+  .step { border:1px solid var(--line); border-radius:8px; padding:12px 16px; margin:10px 0; background:#fff; }
+  .step .num { display:inline-flex; width:24px; height:24px; align-items:center; justify-content:center;
+               background:var(--ink); color:#fff; border-radius:50%; font-size:10pt; font-weight:600; margin-right:8px; }
+  .stat-row { display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin:14px 0; }
+  .stat { border:1px solid var(--line); border-radius:8px; padding:12px 14px; background:#fff; }
+  .stat .k { font-size:9pt; color:var(--soft); text-transform:uppercase; letter-spacing:.5px; }
+  .stat .v { font-size:20pt; font-weight:600; letter-spacing:-.5px; margin-top:4px; color:var(--ink); }
+  .stat .sub { font-size:9pt; color:var(--muted); margin-top:2px; }
+  ul { margin:6px 0; padding-left:20px; }
+  li { margin:2px 0; }
+  .legend span { margin-right:14px; font-size:9pt; }
+  footer { margin-top:40px; border-top:1px solid var(--line); padding-top:10px; font-size:8.5pt; color:var(--soft); }
+  .checklist li { list-style:none; margin:5px 0; padding-left:24px; position:relative; }
+  .checklist li::before { content:"✓"; position:absolute; left:0; top:0; color:var(--green); font-weight:700; }
+  .checklist li.pending::before { content:"○"; color:var(--soft); }
+  .phase-card { border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:8px; padding:14px 16px; margin:12px 0; background:#fff; }
+  .phase-card h3 { margin-top:0; }
+  .kbd { border:1px solid var(--line); background:#fafafa; border-radius:4px; padding:1px 6px; font-family:"SF Mono",Menlo,Consolas,monospace; font-size:9pt; box-shadow:0 1px 0 var(--line); }
+  .route { font-family:"SF Mono",Menlo,Consolas,monospace; background:#eff6ff; color:var(--accent); border:1px solid #bfdbfe; padding:1px 6px; border-radius:4px; font-size:9pt; }
+</style>
+</head>
+<body>
+
+<!-- ───────────────────────── COVER ───────────────────────── -->
+<div class="page cover">
+  <div class="kicker">Implementation &amp; Verification Guide · v2</div>
+  <h1>Meetsy v2</h1>
+  <div class="sub">Reorganization, evidence-first review, learning-loop trust, KB legibility, and per-workspace tuning — the cockpit rebuild that finally makes the meeting-intelligence engine legible to IC engineers.</div>
+  <div class="meta">
+    Full walkthrough of Phases 0 → 6, per-route UI verification journey, and success-criteria checklist &nbsp;·&nbsp; All six phases complete &amp; verified<br/>
+    Generated 2026-07-19 &nbsp;·&nbsp; Branch <code>feat/meetsy-phase0</code> &nbsp;·&nbsp; Last commit <code>7884b32</code> · Phase 6 UX polish landed<br/>
+    Monorepo · Clicksy (root) + Meetsy (<code>apps/meetsy-api</code>, <code>apps/meetsy-web</code>, <code>packages/*</code>)
+  </div>
+</div>
+
+<!-- ───────────────────────── TOC ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 style="border-top:none;margin-top:0">Contents</h2>
+  <div class="toc">
+    <p><span class="n">1</span><a href="#p1">v2 in one page — the four problems it solves</a></p>
+    <p><span class="n">2</span><a href="#p2">Audience decision + the six phases</a></p>
+    <p><span class="n">3</span><a href="#p3">System architecture &amp; the dependency graph</a></p>
+    <p><span class="n">4</span><a href="#p4">Phase 0 — Foundations</a></p>
+    <p><span class="n">5</span><a href="#p5">Phase 1 — IA + Home + History</a></p>
+    <p><span class="n">6</span><a href="#p6">Phase 2 — Evidence-first review + push retry</a></p>
+    <p><span class="n">7</span><a href="#p7">Phase 3 — Learning trust</a></p>
+    <p><span class="n">8</span><a href="#p8">Phase 4 — <code>/kb</code> consolidation</a></p>
+    <p><span class="n">9</span><a href="#p9">Phase 5 — <code>/tuning</code> per-workspace tunables</a></p>
+    <p><span class="n">10</span><a href="#p10">Phase 6 — Cross-cutting UX polish</a></p>
+    <p><span class="n">11</span><a href="#p11">Data model changes at a glance</a></p>
+    <p><span class="n">12</span><a href="#p12">End-to-end sequence (upload → push)</a></p>
+    <p><span class="n">13</span><a href="#p13">Queues, streams &amp; data stores</a></p>
+    <p><span class="n">14</span><a href="#p14">UI journey — step-by-step verification</a></p>
+    <p><span class="n">15</span><a href="#p15">Success-criteria checklist</a></p>
+    <p><span class="n">16</span><a href="#p16">Verification results &amp; ops appendix</a></p>
+  </div>
+
+  <!-- ───────────────────────── 1 · WHAT + WHY ───────────────────────── -->
+  <h2 id="p1">1 · v2 in one page — the four problems it solves</h2>
+  <p>v1 (Phases 0–3 of the <code>2026-06-27</code> integration plan) shipped the <b>engine</b>: shared cookie-session auth, ClickUp write-back, RAG knowledge base, smart-assign + a learning loop. Every task on a run carried three predictions (sprint / duplicate / owner) and a nudge chip when the learning gate fired. But four things blocked trust and adoption — and v2 (the <code>2026-07-18</code> plan) is the cockpit rebuild that fixes them.</p>
+
+  <div class="grid2">
+    <div class="phase-card">
+      <h3>Problem 1 · The review page does everything</h3>
+      <p class="muted"><code>apps/meetsy-web/app/runs/[runId]/*</code> was ~1200 lines rendering stepper + tasks + push editor + chat + learning in one scroll. No home, no history, no way back to a past run except URL memory.</p>
+      <p><b>v2 fix →</b> Phase 1 introduces <code>/home</code>, <code>/meetings</code>, full-text search, tabbed <code>/runs/:id</code> (Overview / Push / Chat / Insights).</p>
+    </div>
+    <div class="phase-card">
+      <h3>Problem 2 · Evidence is computed but not shown</h3>
+      <p class="muted"><code>assignment.ranked[]</code>, <code>evidenceTaskIds</code> (5 precedent tasks per candidate), <code>FieldPrediction.candidates[]</code>, <code>kbContext.sourceId</code> — all in the payload, none rendered. Every task-id chip was dead text.</p>
+      <p><b>v2 fix →</b> Phase 2 rewrites <code>signals.tsx</code> so evidence is expanded by default; every chip is a clickable button that opens a side sheet with the ClickUp task's title/status/owner/URL.</p>
+    </div>
+    <div class="phase-card">
+      <h3>Problem 3 · The learning loop is invisible until it fires</h3>
+      <p class="muted">The panel at <code>components.tsx:1021</code> filtered <code>gatePassed===true</code> and dropped the tail. Users couldn't see a pattern building up (2/3 corrections in). Metric labels used jargon (<i>"Raw model accuracy proxy"</i>).</p>
+      <p><b>v2 fix →</b> Phase 3 adds <code>/learning</code> (Active / Building up / Coverage), an SSE near-gate toast, <code>FIELDS = ["assignee","sprint"]</code> expansion, plain-English metric labels.</p>
+    </div>
+    <div class="phase-card">
+      <h3>Problem 4 · The KB is legible only during onboarding</h3>
+      <p class="muted"><code>GET /workspaces/:id/kb/search</code> (hybrid RRF) and <code>/kb/documents/:docId</code> existed with no UI. Nothing to browse or inspect what the model knows about your workspace.</p>
+      <p><b>v2 fix →</b> Phase 4 consolidates everything under <code>/kb</code> — Overview / Tasks / Documents / Search / Rebuild — plus a global <span class="kbd">⌘K</span> palette that searches the KB from any route.</p>
+    </div>
+  </div>
+
+  <div class="callout honest">
+    <b>Plus a silent-loss bug (Phase 0 R1/R2):</b> <code>AnalysisRun.result</code>'s five signal keys (<code>kbContext</code>, <code>fieldPredictions</code>, <code>duplicates</code>, <code>assignment</code>, <code>adjustments</code>) were stripped by <code>analysis.service.ts:227</code> on every feedback submit and every chat-added task — so a run's evidence disappeared the first time it was touched. v2 Phase 0 introduces <code>ReviewResultSchema</code> in <code>@ma/shared</code> + a <code>mergeSignals()</code> helper called before every persist. All five keys (plus the new <code>neighboursByTask</code> from Phase 2) now round-trip.
+  </div>
+
+  <h4>What a v2 user gets, in one sentence</h4>
+  <p>Land on <code>/home</code> after login → see recent runs and a personal "is-the-model-getting-better-at-predicting-me" digest → open any past run without URL memory → see evidence expanded on the task cards → click any chip to see the actual ClickUp task → watch the learning loop <i>build up</i> instead of just firing → tune per-workspace thresholds with preview replay → and drive it all keyboard-first, dark-mode-aware, on any screen size.</p>
+</div>
+
+<!-- ───────────────────────── 2 · AUDIENCE + PHASES ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p2">2 · Audience decision + the six phases</h2>
+  <p>The single locked audience decision for v2, made 2026-07-18 with the product owner: <b>IC engineers checking their assignments</b>. Every downstream choice follows from it.</p>
+
+  <div class="callout">
+    <b>What "IC engineers as primary user" changed:</b>
+    <ul>
+      <li>Evidence panels default to <b>expanded</b>, not collapsed — an IC wants to see the reasoning without an extra click.</li>
+      <li>Every provenance chip (<code>CU-01H…</code>) is <b>clickable → side sheet</b> with title/owner/status/link.</li>
+      <li>Review page gets <b>keyboard traversal</b> (<span class="kbd">j</span>/<span class="kbd">k</span> between tasks, <span class="kbd">Esc</span> closes the sheet).</li>
+      <li>Push editor becomes a <b>secondary tab</b>, not the default view. Overview leads.</li>
+      <li>Nudges are framed as <b>"here's what your team taught the model"</b>, not "click accept to be faster."</li>
+    </ul>
+  </div>
+
+  <h3>The six phases at a glance</h3>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Phase</th><th>Delivers</th><th>Backend footprint</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><b>0</b></td><td>Foundations</td><td>Signal-loss fix · <code>WorkspaceMlConfig</code> + <code>AnalysisRunSnapshot</code> migrations · task-lookup + runs-list endpoints · <code>ReviewResultSchema</code> in <code>@ma/shared</code> · shadcn/ui + lucide + next-themes + sonner.</td><td>~4 endpoints, 2 tables, 1 shared schema.</td></tr>
+      <tr><td><b>1</b></td><td>IA + Home + History</td><td>Left sidebar, <code>/home</code>, <code>/meetings</code> list with full-text search, <code>/runs/:id</code> re-scaffolded into tabs. Per-user learning digest.</td><td><code>GET /workspaces/:id/learning/me</code>, <code>GET /workspaces/:id/runs/search?q</code>, tsvector column + GIN index.</td></tr>
+      <tr><td><b>2</b></td><td>Evidence-first review</td><td>Task cards with expanded evidence, every chip clickable → side sheet, raw top-5 kNN neighbours per task, push-retry queue + dead-letter.</td><td>Push-retry BullMQ queue + <code>PushDeadLetter</code> table + <code>POST /runs/:id/push/retry</code>.</td></tr>
+      <tr><td><b>3</b></td><td>Learning trust</td><td><code>/learning</code> (Active / Building up / Coverage), gate constants in API, renamed jargon metrics, <code>FIELDS = ["assignee","sprint"]</code>, near-gate SSE toast.</td><td>Pattern-history endpoint, Redis learning cache, learning SSE channel.</td></tr>
+      <tr><td><b>4</b></td><td><code>/kb</code> consolidation</td><td>Single <code>/kb</code> route (Overview / Tasks / Documents / Search / Rebuild). Global <span class="kbd">⌘K</span> palette. <code>/onboarding</code> retired.</td><td><code>GET /workspaces/:id/kb/tasks?cursor&amp;filter</code>.</td></tr>
+      <tr><td><b>5</b></td><td><code>/tuning</code> (Owner)</td><td>Per-workspace tunables (dup bands, sim floor, gate values, model routing). Preview endpoint replays last-N runs against candidate config.</td><td><code>GET|PUT /workspaces/:id/ml-config</code>, <code>POST /workspaces/:id/ml-config/preview</code>.</td></tr>
+      <tr><td><b>6</b></td><td>Cross-cutting UX</td><td>Dark-mode palette sweep + toggle, keyboard shortcuts + landmarks, empty states + skeleton loaders, <code>prefers-reduced-motion</code>, mobile-safe review.</td><td>None — frontend-only.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Delivery unit</h3>
+  <p>Each phase was split into a small number of PRs (labelled A → DD). Every phase closed with a <b>single atomic commit</b> and a verify table in <code>docs/meetsy/BUILD-JOURNAL.md</code> (typecheck + lint + jest suite). Migrations were hand-authored and stay unapplied at commit time — the orchestrator applies via <code>prisma migrate deploy</code>.</p>
+</div>
+
+<!-- ───────────────────────── 3 · ARCHITECTURE ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p3">3 · System architecture &amp; the dependency graph</h2>
+  <p>Meetsy is a separately-deployable sibling to Clicksy. Shared: login/session, org/workspace model, one Postgres (Meetsy owns <code>meetsy</code> schema, reads Clicksy's <code>public</code> read-only), one ClickUp token, one Redis instance. Meetsy adds an Azure OpenAI dependency for the pipeline (chat + embeddings on the unified <code>niftyaibd-resource.services.ai.azure.com/openai/v1</code> endpoint as of 2026-06-29).</p>
+
+  <div class="mermaid">
+flowchart LR
+  user(["IC engineer (browser)"])
+  subgraph WEB["apps/meetsy-web · Next.js 15 App Router"]
+    home["/home · digest"]
+    meetings["/meetings · search + filter"]
+    run["/runs/:id · tabs · j/k · evidence"]
+    kb["/kb · Overview/Tasks/Docs/Search/Rebuild"]
+    learning["/learning · Active/Building/Coverage"]
+    tuning["/tuning · Owner-writable"]
+    cmdk["⌘K palette"]
+  end
+  subgraph API["apps/meetsy-api · NestJS 11"]
+    auth["Cookie session (read-only public.sessions)"]
+    pipeline["Transcript pipeline"]
+    kbsvc["KB · RAG · retrieval"]
+    intel["FieldPrediction · Assignment · Learning"]
+    push["ClickUp write-back + retry queue"]
+    mlcfg["MlConfigService · Snapshot writer"]
+    sse["LearningStreamService (SSE)"]
+  end
+  subgraph DATA["Shared data plane"]
+    pg[("Postgres · public + meetsy")]
+    redis[("Redis · queues + pubsub + cache")]
+    azure[("Azure OpenAI v1")]
+    clickup[("ClickUp API")]
+  end
+
+  user --> WEB
+  home --> API
+  meetings --> API
+  run --> API
+  kb --> API
+  learning --> API
+  tuning --> API
+  cmdk --> API
+
+  API --> pg
+  pipeline --> azure
+  kbsvc --> azure
+  push --> clickup
+  sse -.-> redis
+  intel --> redis
+  mlcfg --> pg
+  </div>
+
+  <h3>Phase dependency graph</h3>
+  <p>Phase 0 unblocks everything. Phases 1/2/3 fan out from it. Phases 4 and 5 depend on Phase 0 alone (KB endpoints + <code>WorkspaceMlConfig</code> already exist). Phase 6 is a cross-cut polish that touches every route from Phases 1–5.</p>
+
+  <div class="mermaid">
+flowchart TB
+  P0[Phase 0<br/>Foundations<br/>signal-loss fix · migrations · design system]
+  P1[Phase 1<br/>IA + Home + History<br/>sidebar · /home · /meetings · tabs]
+  P2[Phase 2<br/>Evidence-first review<br/>expanded panels · clickable chips · kNN · retry]
+  P3[Phase 3<br/>Learning trust<br/>/learning · sprint · SSE · cache]
+  P4[Phase 4<br/>/kb consolidation<br/>tabs · ⌘K · retire /onboarding]
+  P5[Phase 5<br/>/tuning<br/>Owner tunables · preview replay]
+  P6[Phase 6<br/>Cross-cutting UX<br/>dark · keyboard · a11y · mobile]
+
+  P0 --> P1
+  P0 --> P2
+  P0 --> P3
+  P0 --> P4
+  P0 --> P5
+  P1 --> P6
+  P2 --> P6
+  P3 --> P6
+  P4 --> P6
+  P5 --> P6
+  </div>
+
+  <h3>What DID and DIDN'T change under the hood</h3>
+  <div class="grid2">
+    <div class="callout ok">
+      <b>Changed (v2)</b>
+      <ul>
+        <li>Result-persist path rewired to preserve five signal keys + <code>neighboursByTask</code>.</li>
+        <li>Two new meetsy tables (<code>WorkspaceMlConfig</code>, <code>AnalysisRunSnapshot</code>) + a dead-letter table + a tsvector column on <code>Meeting</code>.</li>
+        <li>Web routing collapsed: <code>/</code> → <code>/home</code>, <code>/onboarding</code> → <code>/kb</code>, <code>/settings/kb</code> → <code>/kb?tab=rebuild</code>.</li>
+        <li>Learning gate constants (<code>MIN_CORRECTIONS</code>, <code>MIN_AGREEMENT</code>) sourced from <code>WorkspaceMlConfig</code>; duplicate bands too.</li>
+        <li>SSE learning-stream via Redis pub/sub, mounted at the shell.</li>
+      </ul>
+    </div>
+    <div class="callout warn">
+      <b>Deliberately did NOT change</b>
+      <ul>
+        <li>The engine itself. Same pipeline, same retrieval, same smart-assign math from v1 Phase 3.</li>
+        <li>Clicksy's <code>src/</code>. All Clicksy-side edits (v1) were the two cookie-Domain lines.</li>
+        <li>Session shape. Same <code>clickup_sync_sid</code> cookie, same CSRF double-submit.</li>
+        <li>Model choice — <b>gpt-5.5</b> stays the pipeline main; overrides land in <code>WorkspaceMlConfig.models</code> but are stored, not yet consumed (deferred).</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ───────────────────────── 4 · PHASE 0 ───────────────────────── -->
+<div class="page">
+  <h2 id="p4">4 · Phase 0 — Foundations</h2>
+  <p><b>Goal:</b> unblock every subsequent phase in one PR triple. Shipped as PR-A (signal-loss fix), PR-B (Prisma models + endpoints), PR-C (design-system foundations).</p>
+
+  <h3>PR-A · signal-loss fix</h3>
+  <p><b>Root cause (grounded in v2 spec §1.1):</b> <code>loadRunContext</code> at <code>analysis.service.ts:227</code> parsed <code>run.result</code> with strict <code>AnalysisResultSchema.parse()</code>, dropping the five signal keys. <code>assemble()</code> then rebuilt a strict AnalysisResult without them. Both feedback and chat writes persisted the stripped payload. As a knock-on, <code>push.service.ts:158</code> read <code>.fieldPredictions</code> off the raw JSON blob and returned <code>{}</code> — the FieldOverride logger silently died for those runs.</p>
+  <p><b>Fix:</b></p>
+  <ul>
+    <li>New <code>packages/shared/src/review-result.ts</code> — Zod source-of-truth for <code>KbContextHitSchema</code>, <code>TaskPredictionSchema</code> (with <code>FieldPredictionSchema</code>, <code>PriorCandidateSchema</code>, <code>DuePredictionSchema</code>), <code>DuplicateHitSchema</code>, <code>TaskAssignmentSchema</code>, <code>TaskAdjustmentsSchema</code>. Every signal key is <b>optional</b> so historical runs still parse.</li>
+    <li><code>ReviewResultSchema</code> re-exported and swapped into <code>RunResponseSchema.result</code>, <code>SubmitFeedbackResponseSchema.result</code>, <code>SendChatResponseSchema.result</code>.</li>
+    <li>New <code>mergeSignals(base, source)</code> helper called from <b>both</b> write paths (<code>submitFeedback</code> line 291, <code>sendChat</code> line 366) — the merged <code>ReviewResult</code>, not the stripped <code>AnalysisResult</code>, is what gets persisted and returned.</li>
+    <li>Web: local <code>ReviewResult</code> interface in <code>signals.tsx</code> (77 lines) deleted; now imports from <code>@ma/shared</code>.</li>
+  </ul>
+
+  <h3>PR-B · Prisma models + endpoints</h3>
+  <div class="mermaid">
+erDiagram
+  WorkspaceMlConfig {
+    string workspaceId PK
+    string orgId
+    json tunables
+    json models
+    string updatedBy
+    datetime updatedAt
+    datetime createdAt
+  }
+  AnalysisRunSnapshot {
+    string runId PK
+    string workspaceId
+    json tunables
+    json models
+    datetime createdAt
+  }
+  AnalysisRun {
+    string id PK
+    string workspaceId
+    string status
+    json result
+    datetime createdAt
+  }
+  AnalysisRun ||--o| AnalysisRunSnapshot : "1:0..1 cascade"
+  </div>
+  <ul>
+    <li><b>New model <code>WorkspaceMlConfig</code></b> — <code>workspaceId</code> PK (one row per workspace), <code>tunables</code> JSONB, <code>models</code> JSONB, <code>updatedBy?</code>, index on <code>orgId</code>. Soft ref to <code>public.workspaces</code>.</li>
+    <li><b>New model <code>AnalysisRunSnapshot</code></b> — 1:1 with <code>AnalysisRun</code> via cascade FK, frozen <code>tunables</code>+<code>models</code>. Append-only. Enables reproducible <code>/tuning</code> preview in Phase 5.</li>
+    <li><b>New index</b> on <code>AnalysisRun(workspaceId, createdAt)</code> — powers the newest-first paginated runs-list.</li>
+    <li><b>New <code>GET /workspaces/:id/clickup/tasks/:taskId</code></b> — resolves ClickUp task ids surfaced in duplicate chips + <code>evidenceTaskIds</code> to <code>{title, status, assigneeName, url}</code>. Soft-scopes by workspace; returns <code>null</code> on soft-deleted tasks so the chip degrades to "unavailable."</li>
+    <li><b>New <code>GET /workspaces/:id/runs?limit&amp;offset&amp;status</code></b> — paginated list with a derived <code>pushStatus</code>: <code>not_configured / not_pushed / partial / pushed</code>. Batches one <code>$transaction([findMany,count])</code> plus a page-wide <code>TaskPush.findMany</code>.</li>
+  </ul>
+
+  <h3>PR-C · design-system foundations</h3>
+  <p>Adds shadcn/ui + Radix primitives + lucide-react + next-themes + sonner to <code>apps/meetsy-web</code>. Sixteen primitives installed (button/card/dialog/sheet/tabs/dropdown-menu/command/tooltip/skeleton/sonner/input/select/label/checkbox/radio-group/separator). Existing <code>app/ui.tsx</code> becomes a one-line shim that re-exports from <code>app/ui-legacy.tsx</code> so no caller migration is forced — later phases opt in.</p>
+
+  <div class="callout">
+    <b>Tailwind v4 wiring (critical):</b> <code>globals.css</code> uses <code>@custom-variant dark (&amp;:where(.dark, .dark *));</code> (v4's way to enable class-based dark mode), <code>@import "tw-animate-css";</code> (Radix uses <code>animate-in/out</code> classes), and the shadcn oklch token palette in <code>:root</code> + <code>.dark</code> with an <code>@theme inline</code> block mapping vars to Tailwind utility names.
+  </div>
+
+  <h4>Phase 0 verify (all green)</h4>
+  <table>
+    <tr><th>Target</th><th>Result</th></tr>
+    <tr><td><code>@ma/shared build</code></td><td>PASS</td></tr>
+    <tr><td>meetsy-api typecheck</td><td>PASS</td></tr>
+    <tr><td>meetsy-web typecheck + lint</td><td>PASS (0/0)</td></tr>
+    <tr><td>meetsy-api jest</td><td>41 suites / 235 tests</td></tr>
+    <tr><td>Clicksy backend tests</td><td>108 suites / 824 tests (no regression)</td></tr>
+  </table>
+</div>
+
+<!-- ───────────────────────── 5 · PHASE 1 ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p5">5 · Phase 1 — IA + Home + History</h2>
+  <p><b>Goal:</b> collapse the single-route review page into a sidebar + home + history layout. Shipped as PR-D (sidebar + <code>/home</code> + <code>/meetings</code>), PR-E (full-text search backend + UI), PR-F (per-user learning digest), PR-G (<code>/runs/:id</code> tabs).</p>
+
+  <div class="mermaid">
+flowchart LR
+  brand[Brand]
+  home["Home"]:::pri
+  new["New meeting"]:::pri
+  meetings["Meetings"]:::pri
+  kb["Knowledge base"]:::pri
+  learning["Learning"]:::pri
+  settings["Settings ▾"]:::sec
+  ws["Workspace switcher"]
+  toggle["Theme toggle"]
+  user["user@example.com"]
+
+  subgraph SIDEBAR["Left rail (256px on md+)"]
+    brand
+    home
+    new
+    meetings
+    kb
+    learning
+    settings
+    ws
+    toggle
+    user
+  end
+  classDef pri fill:#eff6ff,stroke:#bfdbfe,color:#1d4ed8
+  classDef sec fill:#f4f4f5,stroke:#e4e4e7,color:#52525b
+  </div>
+
+  <h3>PR-D · sidebar shell + <span class="route">/home</span> + <span class="route">/meetings</span></h3>
+  <ul>
+    <li><b>New <code>components/nav/sidebar.tsx</code></b> — a persistent left rail on <code>md+</code>; smaller screens collapse into an off-canvas <code>Sheet</code> triggered by a hamburger. Active-route highlight matches the current pathname's PREFIX (<code>/settings/kb/documents</code> still highlights KB).</li>
+    <li><b><code>/</code> → redirect to <code>/home</code>.</b> The old upload form moved to <code>/new/page.tsx</code> via <code>git mv</code> (history intact).</li>
+    <li><b><code>/home</code></b> — two-column layout: recent-runs list (limit 5) on the left, learning-digest slot on the right. Shared <code>RunRow</code> component.</li>
+    <li><b><code>/meetings</code></b> — paginated full history with filter chips (All / Completed / Running / Failed), <code>?q=&amp;page=&amp;status=</code> URL surface, wrapped in <code>&lt;Suspense&gt;</code> per Next 15's <code>useSearchParams</code> rule.</li>
+  </ul>
+
+  <h3>PR-E · runs full-text search</h3>
+  <ul>
+    <li><b>Hand-authored migration</b> adds a generated <code>tsv tsvector</code> column to <code>meetsy."Meeting"</code> (title weighted A, transcript weighted C) + a GIN index. Postgres 12+ generated column recomputes on every INSERT/UPDATE — no trigger, no backfill.</li>
+    <li><b><code>AnalysisService.searchRuns</code></b> uses <code>$queryRaw</code> for the WHERE + rank + count (order <code>ts_rank_cd DESC, createdAt DESC</code>), reuses the same push-status derivation as <code>listRuns</code>. Returns the exact <code>RunListView</code> shape.</li>
+    <li><b><code>GET /workspaces/:id/runs/search?q=&amp;limit=&amp;offset=&amp;status=</code></b> — empty/whitespace <code>q</code> → 400; <code>q &gt; 200</code> chars → 400. Declared BEFORE <code>GET /runs/:id</code> so the route isn't shadowed as a run id.</li>
+    <li><b><code>/meetings</code> search UX</b>: 300ms-debounced input; commit on debounce via <code>router.replace</code> so filter churn doesn't fill history.</li>
+  </ul>
+
+  <h3>PR-F · per-user learning digest</h3>
+  <ul>
+    <li><b><code>LearningService.meSummary(workspaceId, userId)</code></b> joins <code>FieldOverride ↔ TaskPush</code> on <code>(runId, meetsyTaskId)</code> and filters by <code>TaskPush.pushedBy = userId</code>. Buckets the last 6 ISO weeks (Monday UTC), zero-padded so a sparkline has a fixed x-axis.</li>
+    <li><b><code>GET /workspaces/:id/learning/me</code></b> — any authenticated user; the <code>me</code> in the path is a literal, the userId comes from the session principal.</li>
+    <li><b><code>components/learning/digest-card.tsx</code></b> — one card, three metric rows (Accuracy, Corrections, Nudge acceptance), each with a hand-drawn SVG <code>Sparkline</code> (no chart-lib dep). Empty state ("As you review runs…") when <code>totalOverrides = 0</code>.</li>
+  </ul>
+
+  <h3>PR-G · <span class="route">/runs/:id</span> tabbed scaffold</h3>
+  <ul>
+    <li><code>ResultsSection</code> / <code>PushSection</code> / <code>ChatPanel</code> split into <b>Overview</b> / <b>Push</b> / <b>Chat</b> tabs plus a placeholder <b>Insights</b>.</li>
+    <li><code>forceMount</code> on every <code>TabsContent</code> with <code>data-[state=inactive]:hidden</code> — Radix would otherwise unmount inactive panels, restarting <code>ChatPanel</code> state + <code>PushSection</code> fetches.</li>
+    <li><b>Hash sync</b>: initial tab reads from <code>#hash</code> (deep-linkable — <code>/runs/abc#push</code> opens on Push). Tab clicks use <code>history.replaceState</code>.</li>
+  </ul>
+
+  <h4>Phase 1 verify</h4>
+  <table>
+    <tr><th>Target</th><th>Result</th></tr>
+    <tr><td>meetsy-api jest</td><td>43 suites / 246 tests (+11)</td></tr>
+    <tr><td>meetsy-web typecheck + lint</td><td>PASS (0/0)</td></tr>
+    <tr><td>Clicksy tests</td><td>110 suites / 835 tests (unchanged)</td></tr>
+  </table>
+</div>
+
+<!-- ───────────────────────── 6 · PHASE 2 ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p6">6 · Phase 2 — Evidence-first review + push retry</h2>
+  <p><b>Goal:</b> make the review page the answer to "why did the pipeline think that?" — every signal the API computes is rendered inline, expanded by default, with drill-down. Shipped as PR-H (kNN neighbours), PR-I (push retry queue + dead-letter), PR-J (evidence panels), PR-K (chip → side-sheet + retry-failed button).</p>
+
+  <h3>PR-H · top-5 kNN neighbours attached to <code>run.result</code></h3>
+  <p>The kNN neighbours per task were already computed by <code>FieldPredictionService</code> and threaded through the processor for owner ranking — then dropped on the floor at persist. PR-H adds <code>neighboursByTask</code> so the review UI can show "why did the pipeline think of this task as similar?" without re-embedding.</p>
+  <ul>
+    <li><b>Shared schema:</b> <code>NeighbourHitSchema</code> in <code>@ma/shared</code> — mirrors the runtime <code>Neighbour</code> interface with <code>createdDate</code>/<code>closedDate</code> as <code>z.string().datetime().nullable()</code>.</li>
+    <li><b>Persist:</b> the <code>result: {...}</code> write at <code>analysis.processor.ts:243</code> gains <code>neighboursByTask: sliceNeighbours(taskAnalysis.neighboursByTask, 5)</code>.</li>
+    <li><b>mergeSignals():</b> extended to preserve <code>neighboursByTask</code> — same failure mode Phase 0 R2 fixed for the other signal keys.</li>
+    <li><b>Bounds:</b> top-5 × ~20 tasks × ~100 bytes ≈ 10 KB/run — trivial vs. transcript-sized fields already on <code>run.result</code>.</li>
+  </ul>
+
+  <h3>PR-I · push retry queue + dead-letter</h3>
+  <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant W as meetsy-web
+  participant A as PushRetryController
+  participant Q as meetsy-push-retry (BullMQ)
+  participant P as PushRetryProcessor
+  participant DB as Postgres
+  participant CU as ClickUp
+
+  U->>W: click "Retry failed (N)"
+  W->>A: POST /runs/:id/push/retry { taskIds? }
+  A->>DB: find failed TaskPush rows
+  A->>Q: enqueue N jobs (attempts: 4, exp backoff)
+  A-->>W: { enqueued: [], skipped: [] }
+
+  loop for each job
+    Q->>P: process job
+    P->>DB: read TaskPush by (runId, taskId)
+    alt already pushed
+      P->>P: no-op
+    else
+      P->>CU: replay stored payload
+      alt success
+        P->>DB: TaskPush(status="pushed", ...)
+      else final failure
+        P->>DB: write PushDeadLetter row
+        P->>DB: TaskPush.status stays "failed"
+      end
+    end
+  end
+  </div>
+  <ul>
+    <li><b>Hand-authored migration</b> adds <code>meetsy."PushDeadLetter"</code> table with <code>{id, runId, meetsyTaskId, workspaceId, jobId, payload, errorMessage, errorStack, attemptsMade, failedAt, retriedAt, resolvedAt, resolvedBy}</code> + 2 indexes.</li>
+    <li><b>Queue name</b> <code>meetsy-push-retry</code>. Job id <code>${runId}:${meetsyTaskId}:${nonce}</code> (nonce is <code>Date.now().toString(36)</code> — per-enqueue so a retry-after-retry actually runs; the DB row is the idempotency key). Options: <code>attempts: 4</code>, <code>backoff: { type: "exponential", delay: 2000 }</code>.</li>
+    <li><b>Retry endpoint</b> <code>POST /runs/:id/push/retry</code> — body <code>{ taskIds?: string[] }</code>. Response <code>{ enqueued: [], skipped: [{ meetsyTaskId, reason }] }</code>. Reasons: <code>not_found</code>, <code>not_failed:&lt;status&gt;</code>, <code>enqueue_failed:&lt;msg&gt;</code>.</li>
+    <li><b>Dead-letter admin</b> <code>PushDeadLetterController</code> at <code>/workspaces/:id/push/dead-letter</code> — Owner/Admin only; GET lists unresolved by default, POST <code>/:deadLetterId/resolve</code> hand-marks with <code>resolvedBy = user.userId</code>.</li>
+  </ul>
+
+  <h3>PR-J · evidence panels expanded by default</h3>
+  <p><code>signals.tsx</code> rewritten from the ground up. The old file rendered four shallow rows (duplicates → 3 pred chips → optional nudge → owner name-only) with <code>assignment.ranked[]</code>, <code>FieldPrediction.candidates[]</code>, and <code>evidenceTaskIds</code> never rendered.</p>
+  <p><b>Sections rendered per task card (each short-circuits when its signal is absent):</b></p>
+  <ol>
+    <li><b>Duplicates</b> — every <code>d.taskId</code> renders as a <code>TaskChip</code> (red/amber by band).</li>
+    <li><b>Suggested fields</b> — Sprint / Due / Estimate chips PLUS a sub-strip of sim-weighted candidates (<code>from A · 42% · B · 25% …</code>), picked value styled distinct. A <code>clamp</code> badge appears when <code>isModal === false</code> (LLM overrode the modal top).</li>
+    <li><b>Owner</b> — top-3 ranked candidates with score bars (<code>ownershipScore</code>), closed/open/tracked-hours line, plus every <code>evidenceTaskIds</code> (up to 5) as clickable <code>TaskChip</code>s. "Show N more" expands to the full ranking; recommended candidate highlighted green.</li>
+    <li><b>Learning nudge</b> — <code>assignee</code> AND <code>sprint</code> (Phase 3 fills the sprint side of <code>TaskAdjustments</code>).</li>
+    <li><b>Similar (neighboursByTask)</b> — top-3 neighbours as <code>TaskChip</code>s with the cosine %.</li>
+  </ol>
+
+  <h3>PR-K · clickable chips → side sheet + retry-failed button</h3>
+  <ul>
+    <li><b><code>TaskSheetProvider</code></b> — a single side-sheet slot per view; any chip in the subtree calls <code>openTaskSheet(taskId)</code>. Scoped to <code>runs/[runId]/page.tsx</code> in Phase 2; hoisted to <code>AppShell</code> in Phase 4 so the KB tab can reuse it.</li>
+    <li><b><code>TaskChip</code></b> — a real <code>&lt;button&gt;</code>, 6 tone variants, focus ring for keyboard traversal. Falls back to a no-op when no provider is mounted.</li>
+    <li><b><code>TaskDetailSheet</code></b> — right-side <code>Sheet</code>, re-fetches on each open via <code>api.getClickupTask(workspaceId, taskId)</code>. Three legit states: loading, loaded (title/status/assignee/updatedAt/"Open in ClickUp ↗"), null (task predates KB — legitimate; message reassures the chip is still trustworthy).</li>
+    <li><b>Retry-failed button</b> in <code>PushSection</code>: <code>variant="secondary"</code> "Retry failed (N)" that fires <code>api.retryFailedPushes(runId)</code> and reloads after 3s. Only rendered when <code>failedCount &gt; 0</code>.</li>
+  </ul>
+
+  <h4>Phase 2 verify</h4>
+  <table>
+    <tr><th>Target</th><th>Result</th></tr>
+    <tr><td>meetsy-api jest</td><td>46 suites / 262 tests (+16)</td></tr>
+    <tr><td>meetsy-web typecheck + lint</td><td>PASS (0/0)</td></tr>
+    <tr><td>New migration</td><td><code>20260718200000_meetsy_v2_phase2_push_dead_letter</code> · UNAPPLIED at commit</td></tr>
+  </table>
+</div>
+
+<!-- ───────────────────────── 7 · PHASE 3 ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p7">7 · Phase 3 — Learning trust</h2>
+  <p><b>Goal:</b> make the loop legible and trustable. Before Phase 3 the loop's state was hidden in a single settings panel; users saw a nudge or didn't, with no signal that they were "one correction away" from teaching the loop. Shipped as PR-L (<code>FIELDS</code> expansion), PR-M (Redis cache + gate + history), PR-N (near-gate SSE), PR-O (<code>/learning</code> page).</p>
+
+  <h3>PR-L · <code>FIELDS = ["assignee", "sprint"]</code></h3>
+  <div class="callout">
+    <b>What "expand the learning loop" means concretely:</b> before v2, <code>LearningService</code> was hardcoded to one field. Snapshot type was <code>{assignee: FieldAggregate}</code>, <code>TaskAdjustments</code> was <code>{assignee?: …}</code>, push only branched on the assignee prediction. Phase 3 widens to a second learnable field (<code>sprint</code>) with the discipline that adding a THIRD field in a future phase is a five-line change.
+  </div>
+  <ul>
+    <li><b><code>CorrectionStat</code></b> gains <code>field: string</code> (which learnable field) and <code>key: string</code> (URL-safe base64url of <code>field|predicted|confirmed</code>, used as the path segment on <code>/learning/patterns/:key/history</code>).</li>
+    <li><b>Sprint resolution asymmetry</b> (documented): assignee resolves <code>clickupUserId → name</code>, sprint resolves via <code>WorkspacePushConfig.sprintLists[]</code> (<code>listId → name</code>). Both happen at aggregate time.</li>
+    <li>Existing spec suite ported — every <code>aggregateField(...)</code> call now passes <code>"assignee"</code> first arg. New <code>learning.service.sprint.spec.ts</code> proves the sprint path end-to-end.</li>
+  </ul>
+
+  <h3>PR-M · Redis snapshot cache + gate endpoint + pattern history</h3>
+  <ul>
+    <li><b><code>LearningCacheService</code></b> — Redis KV cache for <code>LearningService.snapshot()</code>. Key <code>meetsy:learning:snapshot:v1:{workspaceId}</code>, <code>SETEX</code> 3600. Hard-invalidated on <code>logFieldOverride</code>. The <code>v1</code> guards against a future snapshot-shape change reading a stale value. Read-through-cached: hit returns stored value; miss falls through to DB scan then writes back.</li>
+    <li><b><code>GET /workspaces/:id/learning/gate</code></b> — returns <code>{minCorrections, minAgreement, nearGateThreshold, fields}</code>. Workspace-independent today; Phase 5 makes it per-workspace by reading from <code>WorkspaceMlConfig</code> (shape stays stable).</li>
+    <li><b><code>GET /workspaces/:id/learning/patterns/:key/history</code></b> — decodes the base64url key (400 malformed / unknown field), consults the resolved snapshot for stats (404 if the pattern isn't in the workspace), then scans up to 500 newest <code>FieldOverride</code> rows and filters to those matching <code>(predicted, confirmed)</code>. <code>nudgeShown</code> per entry so the UI can badge nudge-influenced rows.</li>
+  </ul>
+
+  <h3>PR-N · near-gate SSE toast</h3>
+  <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant W as meetsy-web
+  participant API as PushController
+  participant LS as LearningService
+  participant CACHE as LearningCache
+  participant STREAM as LearningStreamService
+  participant R as Redis pub/sub
+  participant WSSE as useLearningStream (EventSource)
+
+  U->>API: push task (confirm correction)
+  API->>LS: logFieldOverride(...)
+  LS->>CACHE: invalidate(workspaceId)
+  LS->>LS: maybePublishThreshold(...)
+  LS->>LS: snapshot() (fresh, uncached)
+  alt count == NEAR_GATE_THRESHOLD
+    LS->>STREAM: publish "near-gate" event
+    STREAM->>R: PUBLISH learning:{ws}
+    R-->>WSSE: SSE data
+    WSSE->>W: toast("One more correction and X → Y will nudge")
+  else count == MIN_CORRECTIONS
+    LS->>STREAM: publish "gate-passed" event
+    STREAM->>R: PUBLISH learning:{ws}
+    R-->>WSSE: SSE data
+    WSSE->>W: toast.success("X → Y is now nudging")
+  end
+  </div>
+  <ul>
+    <li><b><code>LearningStreamService</code></b> — Redis pub/sub for workspace-scoped <code>near-gate | gate-passed</code> events. Mirrors <code>kbChannel</code>: dedicated publisher connection, per-subscription subscriber connection, teardown on client disconnect.</li>
+    <li><b><code>classifyThreshold(count, minCorrections)</code></b> — pure decision, <code>NEAR_GATE_THRESHOLD → "near-gate"</code>, <code>MIN_CORRECTIONS → "gate-passed"</code>, else <code>null</code>.</li>
+    <li><b>Skips (belt-and-braces):</b> agreement rows (<code>predicted === confirmed</code>), abstain/unresolved (no value on one side), and nudge-influenced writes (they don't count toward the organic aggregate per <code>learning-aggregate.ts:73</code>).</li>
+    <li><b><code>GET /workspaces/:id/learning/stream</code></b> (<code>@Sse</code>) — Observable returned SYNCHRONOUSLY with async workspace resolution inside; Nest's SSE handler subscribes to the return value and does not unwrap a Promise.</li>
+    <li><b>Web wire-up:</b> <code>lib/useLearningStream.ts</code> mounted inside <code>SignedInShell</code> so toasts fire workspace-wide.</li>
+  </ul>
+
+  <h3>PR-O · <span class="route">/learning</span> workspace page</h3>
+  <ul>
+    <li><b>Active</b> — patterns the loop currently gates (<code>gatePassed === true</code>). Per row: <code>predicted → confirmed</code>, correction count, consistency %.</li>
+    <li><b>Building up</b> — near-gate patterns (<code>!gatePassed &amp;&amp; count &gt;= 1</code>). Per row: progress bar <code>count / minCorrections</code>, <code>N of 3</code> label. Clicking opens the <code>PatternHistorySheet</code>.</li>
+    <li><b>Coverage</b> — per-field: predictions seen, "Predictions you changed" (formerly <code>rawOverrideRate</code>), "Suggestions shown" (nudgeSample), "Suggestions accepted", and — when &gt; 0 — Unresolved (amber, so a resolution bug looks like a resolution bug, not "sparse data").</li>
+    <li><b>Metric renaming happens ONLY at this UI layer.</b> The API still returns <code>rawOverrideRate</code> / <code>nudgeAcceptanceRate</code>; the existing <code>LearningPanel</code> in the review page keeps working.</li>
+  </ul>
+
+  <h4>Phase 3 verify</h4>
+  <table>
+    <tr><th>Target</th><th>Result</th></tr>
+    <tr><td>meetsy-api jest</td><td>53 suites / 293 tests (+31)</td></tr>
+    <tr><td>meetsy-web typecheck + lint</td><td>PASS (0/0)</td></tr>
+    <tr><td>Migrations</td><td>None new — loop grew, Postgres shape didn't</td></tr>
+  </table>
+</div>
+
+<!-- ───────────────────────── 8 · PHASE 4 ───────────────────────── -->
+<div class="page">
+  <h2 id="p8">8 · Phase 4 — <code>/kb</code> consolidation</h2>
+  <p><b>Goal:</b> replace the seven-step <code>/onboarding</code> wizard and the deeply-buried <code>/settings/kb</code> with a single canonical <code>/kb</code> route, plus a global <span class="kbd">⌘K</span> palette so KB search reaches the user from anywhere. Shipped as PR-P (<code>GET /kb/tasks</code>), PR-Q (<code>/kb</code> shell + 5 tabs), PR-R (retire <code>/onboarding</code>), PR-S (<span class="kbd">⌘K</span> palette).</p>
+
+  <h3>PR-P · <code>GET /workspaces/:id/kb/tasks</code></h3>
+  <ul>
+    <li><b><code>KbTasksService</code></b> joins <code>KbChunk</code> (meetsy) with <code>public.clickup_tasks</code> and returns the distinct set of embedded ClickUp tasks, keyset-paged on <code>(updated_date DESC NULLS LAST, task_id DESC)</code>.</li>
+    <li><b><code>?filter=&lt;q&gt;</code></b> narrows via a case-insensitive <code>ILIKE</code> against <code>task_name</code>, <code>client</code>, and <code>assignees_names</code>.</li>
+    <li><b>Cursor</b> is <code>base64url(JSON.stringify({u: iso|null, t: taskId}))</code> — malformed → 400.</li>
+    <li><b>Runs via <code>prisma.$queryRaw</code></b> — Prisma's <code>groupBy</code> doesn't compose keyset paging + a distinct chunk count in one round-trip; all params bound through the tagged template.</li>
+  </ul>
+
+  <h3>PR-Q · <span class="route">/kb</span> shell + Overview / Tasks / Documents / Search / Rebuild</h3>
+  <div class="mermaid">
+flowchart LR
+  status[KbStatusCard<br/>+ idle banner]
+  tabs{"?tab=<name>"}
+  ov[Overview<br/>FactsSummary]
+  ta[Tasks<br/>keyset paged]
+  doc[Documents<br/>upload/list/delete]
+  sr[Search<br/>debounced /kb/search]
+  rb[Rebuild<br/>Owner/Admin only]
+  sheet[TaskDetailSheet]
+
+  status --> tabs
+  tabs --> ov
+  tabs --> ta
+  tabs --> doc
+  tabs --> sr
+  tabs --> rb
+  ta -.click chip.-> sheet
+  sr -.click hit.-> sheet
+  </div>
+  <ul>
+    <li>Client route; shadcn <code>&lt;Tabs&gt;</code> keyed off <code>?tab=&lt;name&gt;</code>. Owner/Admin sees Rebuild; Members see the other four.</li>
+    <li><b>Status card</b> + idle banner render ABOVE the tabs so a not-ready KB is visible without a redirect (see PR-R).</li>
+    <li><b>Search tab</b>: plain <code>Input</code> with 300ms debounce → <code>api.kbSearch(ws, q, 20)</code>. Hits render as clickable cards; clicking opens the shared <code>TaskDetailSheet</code>. <code>?q=</code> echoed back into the URL so browser back is honest.</li>
+  </ul>
+
+  <h3>PR-R · retire <code>/onboarding</code></h3>
+  <ul>
+    <li><code>KbGate</code> deleted (v1's redirect-to-<code>/onboarding</code>). <code>SignedInShell</code> renders children directly.</li>
+    <li><code>app/onboarding/page.tsx</code> deleted; <code>app/onboarding/steps.tsx</code> → <code>app/kb/steps.tsx</code> via <code>git mv</code>.</li>
+    <li><code>app/settings/kb/page.tsx</code> → server-side <code>redirect("/kb?tab=rebuild")</code>. External bookmarks resolve.</li>
+    <li><b>Idle-state UX:</b> when <code>kbStatus.status !== "ready"</code>, the page renders a banner above the tabs. Owner/Admin can flip it into a <code>KbBuildPanel</code>; Members see a read-only "ask an Owner/Admin" note.</li>
+  </ul>
+
+  <h3>PR-S · global <span class="kbd">⌘K</span> command palette</h3>
+  <ul>
+    <li><b>Toggled by <span class="kbd">⌘K</span> or <span class="kbd">Ctrl+K</span></b> via a <code>window</code> keydown listener.</li>
+    <li><b>Two groups:</b> <b>Go to</b> (Home, New meeting, Meetings, Learning, Knowledge base; Owner/Admin also sees Push settings) and <b>Search knowledge base</b> — 250ms-debounced live search against <code>/kb/search</code> (<code>k=8</code>).</li>
+    <li><b>Selecting a hit</b> navigates to <code>/kb?tab=search&amp;q=&lt;query&gt;</code> (the palette closes; the search tab renders the full hit list in context).</li>
+    <li><b>Mounted in <code>AppShell.tsx</code></b> next to the <code>&lt;Toaster&gt;</code> — inside <code>SignedInShell</code> so <code>useWorkspace</code> is safe, outside <code>&lt;main&gt;</code> so it overlays the whole app.</li>
+  </ul>
+
+  <h4>Phase 4 verify</h4>
+  <table>
+    <tr><th>Target</th><th>Result</th></tr>
+    <tr><td>meetsy-api jest</td><td>54 suites / 300 tests (+7)</td></tr>
+    <tr><td>meetsy-web typecheck + lint</td><td>PASS (0/0)</td></tr>
+  </table>
+</div>
+
+<!-- ───────────────────────── 9 · PHASE 5 ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p9">9 · Phase 5 — <code>/tuning</code> per-workspace tunables</h2>
+  <p><b>Goal:</b> close the gap Phase 0 opened. Phase 0 landed the <code>WorkspaceMlConfig</code> + <code>AnalysisRunSnapshot</code> tables and a <code>MlConfigService.forWorkspace(...)</code> accessor, but nothing in the runtime actually READ those tunables — the analysis pipeline still used compile-time constants. Phase 5 wires the two tunable groups whose consumers are already isolated behind pure functions (<b>dup bands</b> + <b>learning gate</b>) and adds an Owner-visible <code>/tuning</code> page with a preview replay endpoint.</p>
+
+  <div class="callout warn">
+    <b>Honest scope note.</b> The remaining tunables (<code>simFloor</code> / <code>minQualifying</code> / <code>closedWeight</code> / <code>rrfK</code> / <code>novelMaxSimCutoff</code> / <code>linkMinSim</code> / <code>embedBatch</code> / model-routing) are STORED in <code>WorkspaceMlConfig.tunables</code> but not yet consumed by runtime code — each requires a small refactor of its caller. The UI flags them with a "Not applied yet" chip so an Owner isn't misled. This is Phase 5's design decision, not a bug.
+  </div>
+
+  <h3>PR-T · <code>MlConfigService.upsert</code> + <code>GET | PUT /workspaces/:id/ml-config</code></h3>
+  <ul>
+    <li><b><code>MlConfigService.viewForWorkspace(workspaceId)</code></b> returns <code>{tunables, models, updatedBy, updatedAt, isDefault}</code> — <code>isDefault=true</code> when the row is absent so the UI can show a "workspace hasn't customised this" chip.</li>
+    <li><b><code>MlConfigService.upsert(workspaceId, orgId, updatedBy, payload)</code></b> defensively re-parses through <code>RunSnapshotPayloadSchema</code> (belt-and-braces after the controller's <code>ZodValidationPipe</code>), does a single <code>prisma.workspaceMlConfig.upsert({...})</code>, then calls <code>this.cache.invalidate(workspaceId)</code> so the learning-snapshot cache doesn't return a stale value keyed off the pre-edit gate constants.</li>
+    <li><b><code>TuningController</code></b>: <code>GET</code> any authed user, <code>PUT</code> Owner-only, <code>POST /preview</code> Owner-only.</li>
+  </ul>
+
+  <h3>PR-U · runtime consumption of dup bands + learning gate</h3>
+  <ul>
+    <li><b><code>classifyDuplicates(neighbours, bands?)</code></b> — extended signature; <code>bands</code> defaults to compile-time constants so callers that don't pass one keep working.</li>
+    <li><b><code>FieldPredictionService.analyze(..., tunables?)</code></b> — optional so unit tests can keep calling the 3-arg form. When passed, plumbs <code>{dupFlag, dupSuggest}</code> to <code>classifyDuplicates</code>.</li>
+    <li><b><code>AnalysisProcessor</code></b> loads <code>const mlSnapshot = await this.mlConfig.forWorkspace(workspaceId)</code> up front, passes <code>mlSnapshot.tunables</code> to <code>fieldPrediction.analyze</code>, and REUSES the same snapshot for the <code>AnalysisRunSnapshot</code> write — one less query per run.</li>
+    <li><b><code>aggregateField(field, records, gate?)</code></b> — <code>gatePassed</code> derives from <code>gate.*</code>, so a workspace with <code>minCorrections=5</code> genuinely needs 5.</li>
+    <li><b><code>LearningService.gate(workspaceId)</code></b> is now async and reads from <code>mlConfig.forWorkspace(...)</code>. <code>nearGateThreshold = max(minCorrections - 1, 0)</code> so a workspace tuned to <code>minCorrections=1</code> doesn't have a "near-gate" state.</li>
+  </ul>
+
+  <h3>PR-V · <code>POST /workspaces/:id/ml-config/preview</code></h3>
+  <div class="mermaid">
+sequenceDiagram
+  participant O as Owner
+  participant W as /tuning page
+  participant API as MlConfigPreviewService
+  participant DB as Postgres
+
+  O->>W: adjust dupFlag/dupSuggest, hit Preview
+  W->>API: POST /ml-config/preview { candidate, limit }
+  API->>DB: last N AnalysisRuns LEFT JOIN AnalysisRunSnapshot
+  loop for each run
+    API->>API: extract neighboursByTask (safeParse)
+    API->>API: classify baseline (snapshot or default)
+    API->>API: classify candidate
+    API->>API: count flag/suggest/changed
+  end
+  API->>DB: current LearningSnapshot
+  API->>API: countGate(snap, baseline) vs countGate(snap, candidate)
+  API-->>W: { runs: [], gateDelta, skipped }
+  W->>O: PreviewSheet with per-run delta + skipped fields note
+  </div>
+  <ul>
+    <li><b>Synchronous replay</b> — the spec's <code>meetsy-ml-preview</code> BullMQ queue is deferred; preview compute is cheap JSON math (a few kB of neighbour data per run × 10 runs).</li>
+    <li><b>Legacy runs</b> without <code>neighboursByTask</code> return <code>duplicates: null</code> so the UI can visibly say "this run pre-dates neighbour storage".</li>
+    <li><b>Gate delta is workspace-wide</b> — one <code>countGate(snap, baseline)</code> + one <code>countGate(snap, candidate)</code> against the current snapshot.</li>
+    <li><b><code>skippedFields()</code></b> returns the fixed list of non-replayable tunables + reasons for the UI's "these fields aren't in preview" note.</li>
+    <li><b>Limit</b> clamps to <code>[1, 20]</code> (default 10). Owner-only.</li>
+  </ul>
+
+  <h3>PR-W · <span class="route">/tuning</span> web page</h3>
+  <ul>
+    <li>Every <code>WorkspaceTunables</code> field renders as <code>&lt;Input type="number"&gt;</code> bound to metadata in <code>tunable-meta.ts</code> (min/max/step from the Zod schema).</li>
+    <li>Fields where <code>consumed=false</code> show a "Not applied yet" chip.</li>
+    <li>Model routing renders as a read-only table (routing changes are a Phase 6+ refactor).</li>
+    <li><b>Preview</b> button opens a <code>PreviewSheet</code> with per-run duplicate deltas + workspace-wide gate delta + skipped-fields note.</li>
+    <li><b>Save</b> fires a <code>sonner</code> toast on success/failure.</li>
+    <li><b>Sidebar entry</b> — <code>Sliders</code> icon, <code>ownerAdminOnly: true</code>. Members can still navigate directly (read-only view); hiding the sidebar entry keeps their surface uncluttered.</li>
+  </ul>
+
+  <h4>Phase 5 verify</h4>
+  <table>
+    <tr><th>Target</th><th>Result</th></tr>
+    <tr><td>meetsy-api jest</td><td>56 suites / 313 tests (+13)</td></tr>
+    <tr><td>meetsy-web typecheck + lint</td><td>PASS (0/0)</td></tr>
+  </table>
+</div>
+
+<!-- ───────────────────────── 10 · PHASE 6 ───────────────────────── -->
+<div class="page">
+  <h2 id="p10">10 · Phase 6 — Cross-cutting UX polish</h2>
+  <p><b>Goal:</b> a trust pass, not a feature phase. Phase 0 wired shadcn/ui + <code>next-themes</code> + <code>.dark</code> class variant, but no route was actually audited — 364 <code>zinc-*</code> / <code>slate-*</code> / <code>bg-white</code> usages across ~30 files meant <code>system=dark</code> rendered white cards on a dark background. Phase 6 closes that plus keyboard traversal, skeleton loaders, landmarks, focus rings, and <code>prefers-reduced-motion</code>. Backend footprint: <b>none</b>.</p>
+
+  <h3>PR-AA · dark-mode palette sweep + theme toggle</h3>
+  <ul>
+    <li><b><code>components/theme-toggle.tsx</code></b> — shadcn <code>DropdownMenu</code> with Light / Dark / System items (Sun / Moon / Laptop icons). Trigger icon animates rotate/scale between Sun and Moon under the <code>.dark</code> class variant.</li>
+    <li><b>Sidebar</b> palette swept to semantic tokens (<code>bg-background</code>, <code>border-border</code>, <code>text-foreground</code>, <code>text-muted-foreground</code>, <code>bg-primary</code>, <code>bg-accent</code>). Active nav pill uses <code>bg-primary text-primary-foreground</code>. <code>aria-current="page"</code> on active link.</li>
+    <li><b><code>app/ui-legacy.tsx</code></b> primitives migrated to semantic tokens. Priority hues (red/orange/sky) kept but got dark-mode variants — legible in dark mode without changing meaning.</li>
+    <li><b>Bulk sweep across 22 application files</b>: <code>bg-white → bg-card</code>; <code>text-zinc-{900,800,700} → text-foreground</code>; <code>text-zinc-{600,500} → text-muted-foreground</code>; <code>border-zinc-200 → border-border</code>; <code>bg-zinc-{100,200} → bg-muted</code>; <code>hover:bg-zinc-100 → hover:bg-accent</code>; …</li>
+  </ul>
+
+  <h3>PR-BB · keyboard shortcuts + landmarks + focus rings</h3>
+  <ul>
+    <li><b>Skip-to-content link</b> — first focusable element in <code>AppShell</code>: <code>sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:bg-primary focus:text-primary-foreground focus:z-50</code>.</li>
+    <li><b><code>&lt;main id="main-content" role="main" tabIndex={-1}&gt;</code></b> — skip link + screen-reader landmark both target the same node. Redundant <code>role="main"</code> is belt-and-suspenders (some AT don't map the tag alone reliably).</li>
+    <li><b><code>useReviewKeys()</code></b> attaches a window-level <code>keydown</code> listener: <span class="kbd">j</span> / <span class="kbd">↓</span> focuses next <code>[data-task-anchor]</code>; <span class="kbd">k</span> / <span class="kbd">↑</span> focuses prev; wraps at both ends; guards against firing while typing in <code>&lt;input&gt;</code> / <code>&lt;textarea&gt;</code> / <code>[contenteditable]</code>; ignores keys with <code>Ctrl</code> / <code>Meta</code> / <code>Alt</code> modifiers so <span class="kbd">Ctrl+J</span> still works. Smooth-scrolls into view with <code>scrollIntoView({block:"nearest"})</code>.</li>
+    <li><b>TaskCard</b> wrapped in <code>&lt;div data-task-anchor={task.id} tabIndex={-1} className="scroll-mt-24 rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"&gt;</code>.</li>
+    <li><b>Focus-ring pass</b> — sidebar links + brand logo got <code>focus-visible:</code> rings. shadcn primitives already ship with rings via base recipes.</li>
+  </ul>
+
+  <h3>PR-CC · skeleton loaders + empty states</h3>
+  <ul>
+    <li><b><code>components/ui/empty-state.tsx</code></b> — dashed-border card, icon in a muted <code>rounded-full bg-muted</code> circle, title, optional description + single action. Semantic tokens throughout.</li>
+    <li><b><code>/home</code></b>: three <code>Skeleton</code> rows matching <code>RunRow</code> height. Hand-rolled "No runs yet" replaced with <code>EmptyState</code> pointing at <code>/new</code>.</li>
+    <li><b><code>/meetings</code></b>: five-row <code>Skeleton</code> stack. Two empty-state branches (search-no-results and filter-no-results) consolidated into one <code>EmptyState</code> that adapts icon (<code>Search</code> vs <code>ListChecks</code>) and action (Clear search vs Analyze a meeting).</li>
+    <li><b><code>/kb</code> tasks tab</b>: five <code>Skeleton h-14</code> rows; <code>EmptyState</code> with <code>ListChecks</code> icon.</li>
+    <li><b>Button-embedded spinners kept</b> — <code>&lt;Spinner&gt;</code> inside <code>&lt;Button&gt;</code> is an affordance, not a layout loader.</li>
+  </ul>
+
+  <h3>PR-DD · reduced-motion + mobile-safe review</h3>
+  <ul>
+    <li><b><code>@media (prefers-reduced-motion: reduce)</code></b> block at <code>globals.css:105</code>: <code>animation-duration: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 0ms !important; scroll-behavior: auto !important;</code> on <code>*, *::before, *::after</code>. Neutralizes shadcn slide/fade, sonner toast slide, sheet slides, Tailwind <code>animate-*</code> in one shot. <code>!important</code> because Tailwind utilities + Radix data-state animations have specificity we can't beat via cascade.</li>
+    <li><b>Mobile:</b> <code>PersonSection</code>'s task indent went from <code>pl-9</code> to <code>pl-4 md:pl-9</code>. On phones tasks stack flush-left instead of eating half the horizontal budget under the person's avatar column.</li>
+    <li><b>TaskDetailSheet</b> kept <code>side="right"</code> — shadcn's <code>SheetContent</code> already uses <code>w-full max-w-md</code> which collapses to full-width on phones (&lt; 448px). Bottom-drawer flip was reconsidered and skipped (avoids a Radix Sheet unmount during resize).</li>
+    <li><b><code>aria-live</code></b> — <code>ErrorBanner</code> carries <code>role="alert"</code>; Sonner's toast root declares <code>role="status"</code>.</li>
+  </ul>
+
+  <h4>Phase 6 verify</h4>
+  <table>
+    <tr><th>Target</th><th>Result</th></tr>
+    <tr><td>meetsy-web typecheck + lint</td><td>PASS (0/0)</td></tr>
+    <tr><td>meetsy-api jest (drift check)</td><td>56 suites / 313 tests (unchanged)</td></tr>
+  </table>
+</div>
+
+<!-- ───────────────────────── 11 · DATA MODEL ───────────────────────── -->
+<div class="page">
+  <h2 id="p11">11 · Data model changes at a glance</h2>
+  <p>v2 adds two tables + a dead-letter table + a tsvector column. Every migration is hand-authored, meetsy-schema only, and applied via <code>prisma migrate deploy</code> at deploy time.</p>
+
+  <div class="mermaid">
+erDiagram
+  Meeting ||--o{ AnalysisRun : "has"
+  AnalysisRun ||--o| AnalysisRunSnapshot : "1:0..1 cascade"
+  AnalysisRun ||--o{ TaskPush : "pushes"
+  TaskPush ||--o{ PushDeadLetter : "dead-letters"
+  Workspace ||--o| WorkspaceMlConfig : "one row per ws"
+
+  Meeting {
+    string id PK
+    string workspaceId
+    string transcript
+    tsvector tsv "GENERATED tsv (title A + transcript C) + GIN index"
+    datetime createdAt
+  }
+  AnalysisRun {
+    string id PK
+    string workspaceId
+    string status
+    json result "kbContext, fieldPredictions, duplicates, assignment, adjustments, neighboursByTask"
+    datetime createdAt
+  }
+  AnalysisRunSnapshot {
+    string runId PK
+    string workspaceId
+    json tunables "frozen at run.completed"
+    json models
+    datetime createdAt
+  }
+  WorkspaceMlConfig {
+    string workspaceId PK
+    string orgId
+    json tunables "dupFlag, dupSuggest, simFloor, minCorrections, minAgreement, rrfK, ..."
+    json models "per-stage model routing (stored, not yet consumed)"
+    string updatedBy
+    datetime updatedAt
+  }
+  TaskPush {
+    string id PK
+    string runId
+    string meetsyTaskId
+    string status "not_pushed | pushed | failed"
+    string clickupTaskId
+    json payload
+  }
+  PushDeadLetter {
+    string id PK
+    string runId
+    string meetsyTaskId
+    string workspaceId
+    string jobId
+    json payload
+    string errorMessage
+    int attemptsMade
+    datetime failedAt
+    datetime resolvedAt
+    string resolvedBy
+  }
+  </div>
+
+  <h3>Migration inventory</h3>
+  <table>
+    <tr><th>Timestamp</th><th>Phase</th><th>What it adds</th></tr>
+    <tr><td><code>20260718...</code></td><td>0</td><td><code>WorkspaceMlConfig</code> + <code>AnalysisRunSnapshot</code> + <code>AnalysisRun (workspaceId, createdAt)</code> index.</td></tr>
+    <tr><td><code>20260718150000</code></td><td>1</td><td><code>Meeting.tsv tsvector</code> generated column + GIN index. Postgres 12+ generated column recomputes on every INSERT/UPDATE — no trigger, no backfill.</td></tr>
+    <tr><td><code>20260718200000</code></td><td>2</td><td><code>PushDeadLetter</code> table + 2 indexes.</td></tr>
+  </table>
+
+  <h3>Signal keys on <code>AnalysisRun.result</code></h3>
+  <ul>
+    <li><code>kbContext</code> — the ranked KB hits used at prompt time (workspace-level grounding).</li>
+    <li><code>fieldPredictions</code> — per-task <code>{sprint, due, estimate}</code>: modal value + sim-weighted candidates + priors.</li>
+    <li><code>duplicates</code> — per-task list of <code>{taskId, sim, band}</code> at the flag/suggest thresholds.</li>
+    <li><code>assignment</code> — per-task <code>{recommended, ranked[], reasoning}</code> with per-candidate <code>{ownershipScore, evidenceTaskIds}</code>.</li>
+    <li><code>adjustments</code> — per-task <code>{assignee?, sprint?}</code> — the "learning nudge" pulled from <code>LearningService.snapshot()</code>.</li>
+    <li><code>neighboursByTask</code> — <b>new in Phase 2</b> — top-5 kNN neighbours per task from <code>FieldPredictionService</code>. Cosine-descending, ~10 KB/run.</li>
+  </ul>
+
+  <div class="callout ok">
+    <b>Round-trip invariant.</b> All six signal keys survive <code>submitFeedback</code> and <code>sendChat</code> mutations via <code>mergeSignals(assembled, ctx.result)</code>. Historical runs (pre-v2 Phase 0) keep working: every key is <b>optional</b> on <code>ReviewResultSchema</code>, so a legacy result with none of them parses cleanly.
+  </div>
+</div>
+
+<!-- ───────────────────────── 12 · SEQUENCE ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p12">12 · End-to-end sequence (upload → review → push)</h2>
+  <p>A single trace of what happens from the moment an IC drops a transcript to the moment the ClickUp tasks land. Every v2 addition is annotated.</p>
+
+  <div class="mermaid">
+sequenceDiagram
+  participant U as IC engineer
+  participant W as meetsy-web
+  participant API as meetsy-api
+  participant P as AnalysisProcessor
+  participant KB as KB retrieval
+  participant AZ as Azure OpenAI (gpt-5.5)
+  participant CU as ClickUp API
+  participant DB as Postgres (meetsy + public)
+  participant R as Redis (queues, cache, pubsub)
+
+  U->>W: /new · drop transcript, pick workspace
+  W->>API: POST /meetings + POST /runs (with CSRF)
+  API->>DB: Meeting row + AnalysisRun(status=queued)
+  API->>R: enqueue analysis job
+  API-->>W: { runId }
+  W->>W: navigate /runs/:id (Overview tab, PipelineStepper visible)
+  W->>API: GET /runs/:id/stream (SSE)
+
+  P->>DB: load AnalysisRun
+  P->>API: mlConfig.forWorkspace(ws) [Phase 5 read]
+  P->>KB: retrieveContext(workspace, transcript summary)
+  KB->>DB: pgvector kNN + tsvector RRF
+  KB-->>P: KbContextHit[]
+  P->>AZ: analyze(transcript, kbContext)
+  AZ-->>P: candidate tasks
+  P->>KB: fieldPrediction.analyze(tasks, meetingDate, tunables)
+  KB-->>P: { fieldPredictions, duplicates, neighboursByTask }
+  P->>API: LearningService.snapshot(ws) [cached in Redis, Phase 3]
+  API-->>P: adjustments (per-task assignee + sprint nudges)
+  P->>DB: update AnalysisRun(status=completed, result={six keys})
+  P->>DB: AnalysisRunSnapshot(runId, tunables, models) [Phase 0/5]
+  P-->>W: SSE event: completed
+  W->>API: GET /runs/:id
+  API-->>W: RunResponse (parsed via ReviewResultSchema)
+
+  U->>W: review Overview tab (evidence expanded)
+  U->>W: click provenance chip
+  W->>API: GET /workspaces/:id/clickup/tasks/:taskId [Phase 0]
+  API-->>W: { title, status, assigneeName, url }
+  W->>U: TaskDetailSheet (right side)
+
+  U->>W: correct sprint field
+  U->>W: submit feedback or add task via chat
+  W->>API: POST /runs/:id/feedback (or /chat)
+  API->>DB: loadRunContext (ReviewResultSchema, preserves signals)
+  API->>DB: persist merged result (Phase 0 R2)
+
+  U->>W: switch to Push tab, hit Push
+  W->>API: POST /runs/:id/push
+  API->>CU: create tasks
+  API->>DB: TaskPush rows
+  API->>DB: FieldOverride rows [correction logs]
+  API->>R: LearningCache.invalidate(ws) [Phase 3]
+  API->>API: LearningService.maybePublishThreshold(...)
+  alt count == MIN_CORRECTIONS - 1
+    API->>R: PUBLISH learning:{ws} { kind: near-gate }
+    R-->>W: SSE toast: "One more and X → Y will nudge"
+  else count == MIN_CORRECTIONS
+    R-->>W: SSE toast.success: "X → Y now nudges"
+  end
+
+  opt some pushes failed
+    U->>W: click "Retry failed (N)"
+    W->>API: POST /runs/:id/push/retry [Phase 2]
+    API->>R: enqueue meetsy-push-retry jobs
+    R->>API: process (attempts:4, exp backoff)
+    alt success
+      API->>DB: TaskPush(status=pushed)
+    else exhausted
+      API->>DB: PushDeadLetter row
+    end
+  end
+  </div>
+</div>
+
+<!-- ───────────────────────── 13 · QUEUES + STORES ───────────────────────── -->
+<div class="page">
+  <h2 id="p13">13 · Queues, streams &amp; data stores</h2>
+
+  <h3>BullMQ queues (meetsy-api)</h3>
+  <table>
+    <tr><th>Name</th><th>Purpose</th><th>Options</th><th>Phase</th></tr>
+    <tr><td><code>analysis</code></td><td>Transcript → candidate tasks (pipeline)</td><td>—</td><td>v1</td></tr>
+    <tr><td><code>meetsy-kb</code></td><td>KB embed + status broadcast</td><td>—</td><td>v1 (Phase 2)</td></tr>
+    <tr><td><code>meetsy-kb-docs</code></td><td>PDF/SOP ingest → chunk + embed</td><td>—</td><td>v1 (Phase 2b)</td></tr>
+    <tr><td><code>meetsy-push-retry</code></td><td>Retry failed ClickUp pushes</td><td><code>attempts:4</code>, exp backoff <code>2000ms</code>, <code>removeOnComplete/Fail: 100</code></td><td><b>v2 Phase 2</b></td></tr>
+  </table>
+
+  <h3>Redis usage (three roles)</h3>
+  <div class="grid3">
+    <div class="callout">
+      <b>Queue</b>
+      <p>BullMQ for the queues above. Workers + producers use separate Redis connections per the existing pattern.</p>
+    </div>
+    <div class="callout">
+      <b>Cache</b>
+      <p><code>LearningCacheService</code> — key <code>meetsy:learning:snapshot:v1:{workspaceId}</code>, <code>SETEX</code> 3600. Hard-invalidated on <code>logFieldOverride</code>. Bounded staleness (1h) means a failed DEL is safe — nudges get worse if stale, they don't break.</p>
+    </div>
+    <div class="callout">
+      <b>Pub/sub</b>
+      <p><code>LearningStreamService</code> uses <code>PUBLISH learning:{ws}</code>. Dedicated publisher connection; per-subscription subscriber connection; teardown on disconnect. Mirrors the <code>kbChannel</code> pattern.</p>
+    </div>
+  </div>
+
+  <h3>SSE endpoints (event source)</h3>
+  <table>
+    <tr><th>Endpoint</th><th>Purpose</th><th>Payload</th><th>Phase</th></tr>
+    <tr><td><code>GET /runs/:id/stream</code></td><td>Pipeline progress + completion</td><td><code>{event, step, message}</code></td><td>v1</td></tr>
+    <tr><td><code>GET /workspaces/:id/kb/stream</code></td><td>KB build progress</td><td><code>{status, progress, message}</code></td><td>v1 Phase 2</td></tr>
+    <tr><td><code>GET /workspaces/:id/learning/stream</code></td><td>Near-gate / gate-passed toasts</td><td><code>{workspaceId, field, predicted, confirmed, count, at, kind}</code></td><td><b>v2 Phase 3</b></td></tr>
+  </table>
+
+  <h3>New endpoints — quick reference</h3>
+  <table>
+    <tr><th>Endpoint</th><th>Roles</th><th>Delivers</th></tr>
+    <tr><td><code>GET /workspaces/:id/runs</code></td><td>any authed</td><td>Paginated run list with derived pushStatus. <b>Phase 0</b></td></tr>
+    <tr><td><code>GET /workspaces/:id/runs/search?q=</code></td><td>any authed</td><td>Full-text search via tsvector. <b>Phase 1</b></td></tr>
+    <tr><td><code>GET /workspaces/:id/clickup/tasks/:taskId</code></td><td>any authed</td><td>Resolves an evidence chip to <code>{title, status, assigneeName, url}</code>. <b>Phase 0</b></td></tr>
+    <tr><td><code>GET /workspaces/:id/learning/me</code></td><td>any authed (self)</td><td>Per-user 6-week accuracy/nudge digest. <b>Phase 1</b></td></tr>
+    <tr><td><code>GET /workspaces/:id/learning/gate</code></td><td>any authed</td><td><code>{minCorrections, minAgreement, nearGateThreshold, fields}</code>. <b>Phase 3</b></td></tr>
+    <tr><td><code>GET /workspaces/:id/learning/patterns/:key/history</code></td><td>any authed</td><td>Pattern's timeline (up to 500 rows). <b>Phase 3</b></td></tr>
+    <tr><td><code>GET /workspaces/:id/kb/tasks?cursor&amp;filter</code></td><td>any authed</td><td>Keyset-paged distinct embedded ClickUp tasks. <b>Phase 4</b></td></tr>
+    <tr><td><code>POST /runs/:id/push/retry</code></td><td>any authed</td><td>Retry failed pushes. <b>Phase 2</b></td></tr>
+    <tr><td><code>GET /workspaces/:id/push/dead-letter</code></td><td>Owner/Admin</td><td>List unresolved dead letters. <b>Phase 2</b></td></tr>
+    <tr><td><code>POST /workspaces/:id/push/dead-letter/:id/resolve</code></td><td>Owner/Admin</td><td>Hand-mark resolved. <b>Phase 2</b></td></tr>
+    <tr><td><code>GET /workspaces/:id/ml-config</code></td><td>any authed</td><td>Current tunables + models + <code>isDefault</code>. <b>Phase 5</b></td></tr>
+    <tr><td><code>PUT /workspaces/:id/ml-config</code></td><td>Owner</td><td>Persist tunables; invalidates learning cache. <b>Phase 5</b></td></tr>
+    <tr><td><code>POST /workspaces/:id/ml-config/preview</code></td><td>Owner</td><td>Replay last-N runs against candidate. <b>Phase 5</b></td></tr>
+  </table>
+</div>
+
+<!-- ───────────────────────── 14 · UI JOURNEY ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p14">14 · UI journey — step-by-step verification</h2>
+  <p>Use this section to walk the app end-to-end and confirm every v2 surface behaves as designed. Assumes a working workspace with a built KB and at least one past run. Take screenshots as you go if you'd like a visual record.</p>
+
+  <div class="callout">
+    <b>Test setup:</b> log in via Clicksy (<code>app.localtest.me:3000/login</code> in dev) using an existing account; the session cookie carries across to Meetsy at <code>meetsy.localtest.me:3001</code> (or your equivalent). If <code>/auth/me</code> 401s, the cross-subdomain cookie is misconfigured — see the Phase 0 live verification section of <code>BUILD-JOURNAL.md</code>.
+  </div>
+
+  <h3>Journey A · Land + orient</h3>
+  <div class="step"><span class="num">1</span> Open <span class="route">/</span> — should redirect to <span class="route">/home</span> (client-side redirect via <code>router.replace</code>, brief spinner OK).</div>
+  <div class="step"><span class="num">2</span> Verify the <b>sidebar</b> is visible on the left on <code>md+</code> screens with entries: Home, New meeting, Meetings, Knowledge base, Learning; Settings (▾) reveals Push + Tuning for Owner/Admin. Resize below 768px — sidebar collapses into a hamburger.</div>
+  <div class="step"><span class="num">3</span> On <span class="route">/home</span> confirm two-column layout: recent runs (up to 5) on the left, <b>learning digest card</b> on the right with three sparkline rows (Accuracy, Corrections, Nudge acceptance). If you're new, expect an empty state ("As you review runs…").</div>
+  <div class="step"><span class="num">4</span> Click a run row — you should land on <span class="route">/runs/:id</span> with the tabs visible.</div>
+
+  <h3>Journey B · Meetings history + search</h3>
+  <div class="step"><span class="num">1</span> Navigate to <span class="route">/meetings</span>. Verify pagination (20/page), status filter chips (All / Completed / Running / Failed), and the search input on the right.</div>
+  <div class="step"><span class="num">2</span> Click <b>Completed</b> — URL updates to <code>?status=completed</code> without pushing history. Click <b>All</b> to clear.</div>
+  <div class="step"><span class="num">3</span> Type a keyword from a past transcript in the search box — 300ms after you stop typing, URL updates to <code>?q=&lt;term&gt;</code> and the list re-renders. Confirm the empty-state icon adapts (<code>Search</code> when q is active; <code>ListChecks</code> otherwise).</div>
+  <div class="step"><span class="num">4</span> Click the <code>X</code> in the search input — <code>q</code> clears; list re-loads.</div>
+
+  <h3>Journey C · Evidence-first review (the big one)</h3>
+  <div class="step"><span class="num">1</span> Open any completed run at <span class="route">/runs/:id</span>. Verify tabs at the top: <b>Overview / Push / Chat / Insights</b>. Default is Overview.</div>
+  <div class="step"><span class="num">2</span> On each task card, evidence is <b>expanded by default</b> — no accordion click needed. Sections top-to-bottom: Duplicates → Suggested fields → Owner → Learning nudge → Similar (if neighboursByTask is present).</div>
+  <div class="step"><span class="num">3</span> Click any red or amber <b>duplicate chip</b> (<code>CU-01H…</code>) — a right-side <code>TaskDetailSheet</code> opens with title, status, assignee, updated timestamp, and "Open in ClickUp ↗" link. If the task predates the KB, the sheet reads "we don't have this task's title." <span class="kbd">Esc</span> closes.</div>
+  <div class="step"><span class="num">4</span> Under Owner, click any of the <code>evidenceTaskIds</code> chips. Same sheet, different task.</div>
+  <div class="step"><span class="num">5</span> Try <span class="kbd">j</span> and <span class="kbd">k</span> — focus rings move between task cards; the card smooth-scrolls into view. <span class="kbd">↓</span> / <span class="kbd">↑</span> work too. Type in an input field first — <span class="kbd">j</span>/<span class="kbd">k</span> stop firing while you're typing.</div>
+  <div class="step"><span class="num">6</span> If you see a <b>Learning nudge</b>, confirm it references either <code>assignee</code> or <code>sprint</code>. If your KB is small, expect no nudges — check the Learning page to see if patterns are building up.</div>
+  <div class="step"><span class="num">7</span> Deep-link check: append <code>#push</code> to the URL and reload — the Push tab is now active. Same with <code>#chat</code>, <code>#insights</code>. Unknown hash → back to <code>overview</code>.</div>
+
+  <h3>Journey D · Push + retry</h3>
+  <div class="step"><span class="num">1</span> Switch to the <b>Push</b> tab. Confirm the workspace is <b>push-configured</b> (target list picked) or you'll see a "not configured" hint.</div>
+  <div class="step"><span class="num">2</span> Push a task (or use a run that has already been pushed). Confirm every pushed row shows a <code>pushed</code> pill and a link out to the created ClickUp task.</div>
+  <div class="step"><span class="num">3</span> If any push failed, a <b>"Retry failed (N)"</b> secondary button appears in the header row. Click it — the toast should confirm the enqueue; ~3 seconds later the page reloads and failed rows have flipped to <code>pushed</code> (or stayed <code>failed</code> with a dead-letter row for later).</div>
+  <div class="step"><span class="num">4</span> (Owner/Admin only) Query <code>GET /workspaces/:id/push/dead-letter</code> — an unresolved list shows every push that exhausted 4 attempts. <code>POST /:id/resolve</code> hand-marks with your userId.</div>
+
+  <h3>Journey E · The learning loop, made visible</h3>
+  <div class="step"><span class="num">1</span> Navigate to <span class="route">/learning</span>. Three sections stack: <b>Active</b> (patterns the loop currently gates), <b>Building up</b> (near-gate patterns with a <code>count / minCorrections</code> progress bar), and <b>Coverage</b> (per-field predictions seen / corrections / nudge accepts / unresolved).</div>
+  <div class="step"><span class="num">2</span> Click any pattern row in <b>Building up</b> — <code>PatternHistorySheet</code> opens on the right with the pattern's aggregate stats + a chronological entry list.</div>
+  <div class="step"><span class="num">3</span> (Optional, requires a workspace with a pattern one correction away from gating) Trigger a correction that pushes a pattern to <code>count === MIN_CORRECTIONS - 1</code>. Watch for a <b>Sonner info toast</b>: "One more correction and X → Y will start nudging." Push one more — the toast should upgrade to a green success: "X → Y is now nudging."</div>
+  <div class="step"><span class="num">4</span> Confirm the "Predictions you changed" and "Suggestions accepted" labels — no <code>rawOverrideRate</code> or <code>nudgeAcceptanceRate</code> jargon visible to the user.</div>
+
+  <h3>Journey F · Knowledge base — one route to rule them all</h3>
+  <div class="step"><span class="num">1</span> Navigate to <span class="route">/kb</span>. Above the tabs, the <b>KB status card</b> is visible (idle / building / ready). If the KB isn't ready, a banner appears with a build panel (Owner/Admin) or a "ask an Owner/Admin" message (Members).</div>
+  <div class="step"><span class="num">2</span> Cycle the tabs: <b>Overview</b> (facts summary) · <b>Tasks</b> (paginated, filter box, click a row → <code>TaskDetailSheet</code>) · <b>Documents</b> (upload, list, delete for Owner/Admin) · <b>Search</b> (debounced <code>/kb/search</code>, results as clickable cards, <code>?q=</code> in URL) · <b>Rebuild</b> (Owner/Admin only — <code>KbBuildPanel</code>).</div>
+  <div class="step"><span class="num">3</span> Hit <span class="kbd">⌘K</span> (or <span class="kbd">Ctrl+K</span>) — the command palette opens overlay-style. Under <b>Go to</b>: Home / New meeting / Meetings / Learning / Knowledge base (+ Push for Owner/Admin). Under <b>Search knowledge base</b>: type a query, 250ms later hits appear; selecting one navigates to <code>/kb?tab=search&amp;q=&lt;query&gt;</code>.</div>
+  <div class="step"><span class="num">4</span> <b>Verify <code>/onboarding</code> is retired</b> — type <code>/onboarding</code> into the URL bar. It should 404 (page.tsx was deleted). <code>/settings/kb</code> should redirect to <code>/kb?tab=rebuild</code>.</div>
+
+  <h3>Journey G · Owner tuning + preview</h3>
+  <div class="step"><span class="num">1</span> As Owner, navigate to <span class="route">/tuning</span>. Sections stack: Duplicate detection / Similarity / Gate / Novelty / KB. Every field renders as a numeric input with the current value.</div>
+  <div class="step"><span class="num">2</span> Fields with a <b>"Not applied yet"</b> chip are STORED but not consumed by runtime code (Phase 5 honesty). Fields WITHOUT the chip (dup bands + gate values) are LIVE.</div>
+  <div class="step"><span class="num">3</span> Change <code>dupFlag</code> from 0.72 to 0.80. Click <b>Preview</b> — a right-side sheet opens with per-run delta (baseline vs candidate flag/suggest counts, and how many tasks would have re-classified) for the last 10 runs.</div>
+  <div class="step"><span class="num">4</span> Confirm the <b>skipped-fields note</b> at the bottom of the preview lists the tunables that aren't in preview (simFloor, rrfK, etc. — non-replayable without re-embedding).</div>
+  <div class="step"><span class="num">5</span> Click <b>Save</b> — Sonner success toast, page re-fetches. Trigger a new run to prove the runtime picked up the new bands.</div>
+  <div class="step"><span class="num">6</span> As Member, navigate to <code>/tuning</code> — the page loads read-only (inputs disabled; no Save or Preview buttons). Sidebar doesn't show a Tuning entry for Members.</div>
+
+  <h3>Journey H · Dark mode + a11y</h3>
+  <div class="step"><span class="num">1</span> Bottom-right of the sidebar (or top-right on mobile) — click the <b>theme toggle</b>. Cycle Light / Dark / System. Every route from Journey A–G should render correctly with no white-on-black cards.</div>
+  <div class="step"><span class="num">2</span> Tab from the top of any page — the first focus stop is <b>"Skip to main content"</b>. Press Enter — focus jumps to <code>&lt;main&gt;</code>.</div>
+  <div class="step"><span class="num">3</span> macOS: System Settings → Accessibility → Display → <b>Reduce Motion</b>, then reload. Sheet slides, toast slides, animate-in transitions — all visibly gone.</div>
+  <div class="step"><span class="num">4</span> Resize the viewport below 768px — sidebar collapses to a hamburger, review page task cards stack flush-left, long task titles wrap instead of overflowing.</div>
+</div>
+
+<!-- ───────────────────────── 15 · CHECKLIST ───────────────────────── -->
+<div class="page">
+  <h2 id="p15">15 · Success-criteria checklist</h2>
+  <p>Direct from the v2 plan (§6). All nine criteria are met at the code + verify level as of commit <code>7884b32</code> on branch <code>feat/meetsy-phase0</code>.</p>
+
+  <ul class="checklist">
+    <li><b>1.</b> A user lands on <code>/home</code> after login, sees their recent runs, and can navigate to any past run without URL memory. <span class="tag green">Phase 1 · PR-D</span></li>
+    <li><b>2.</b> Every prediction chip on a task card is <b>clickable</b> and opens a side sheet with the past ClickUp task's title/status/owner/URL. <span class="tag green">Phase 2 · PR-K</span></li>
+    <li><b>3.</b> <code>assignment.ranked[]</code>, <code>evidenceTaskIds</code>, and <code>FieldPrediction.candidates[]</code> are <b>visibly rendered</b>, not tooltip-only. <span class="tag green">Phase 2 · PR-J</span></li>
+    <li><b>4.</b> A user can see patterns <b>building up</b> in the learning loop (2/3 corrections, near-gate), not just active nudges. <span class="tag green">Phase 3 · PR-O</span></li>
+    <li><b>5.</b> The learning loop covers both <code>assignee</code> and <code>sprint</code>. <span class="tag green">Phase 3 · PR-L</span></li>
+    <li><b>6.</b> An Owner can adjust duplicate bands / sim floor / gate values from <code>/tuning</code>, preview the impact against last-N historical runs, and save without a deploy. <span class="tag green">Phase 5 · PR-W · dup bands + gate live; other fields stored + previewed</span></li>
+    <li><b>7.</b> <code>/kb</code> is one route with search, browse, upload, and rebuild all in tabs. <span class="tag green">Phase 4 · PR-Q</span></li>
+    <li><b>8.</b> Feedback + chat mutations no longer strip evidence from <code>AnalysisRun.result</code>. <span class="tag green">Phase 0 · PR-A + Phase 2 extension for neighbours</span></li>
+    <li><b>9.</b> Dark mode works end-to-end; keyboard traversal (j/k) works on the review page. <span class="tag green">Phase 6 · PR-AA + PR-BB</span></li>
+  </ul>
+
+  <h3>Test suite growth (per phase)</h3>
+  <div class="stat-row">
+    <div class="stat"><div class="k">v1 → Phase 0</div><div class="v">217 → 235</div><div class="sub">+18 tests</div></div>
+    <div class="stat"><div class="k">Phase 0 → 1</div><div class="v">235 → 246</div><div class="sub">+11 tests</div></div>
+    <div class="stat"><div class="k">Phase 1 → 2</div><div class="v">246 → 262</div><div class="sub">+16 tests</div></div>
+    <div class="stat"><div class="k">Phase 2 → 3</div><div class="v">262 → 293</div><div class="sub">+31 tests</div></div>
+  </div>
+  <div class="stat-row">
+    <div class="stat"><div class="k">Phase 3 → 4</div><div class="v">293 → 300</div><div class="sub">+7 tests</div></div>
+    <div class="stat"><div class="k">Phase 4 → 5</div><div class="v">300 → 313</div><div class="sub">+13 tests</div></div>
+    <div class="stat"><div class="k">Phase 5 → 6</div><div class="v">313 → 313</div><div class="sub">frontend-only</div></div>
+    <div class="stat"><div class="k">Final total</div><div class="v">313</div><div class="sub">56 suites, all green</div></div>
+  </div>
+
+  <h3>Honest deferred list</h3>
+  <p>Not everything is done. These are documented deferrals, not accidental gaps:</p>
+  <ul>
+    <li><b>Non-replayable tunables</b> (<code>simFloor</code>, <code>minQualifying</code>, <code>closedWeight</code>, <code>rrfK</code>, <code>novelMaxSimCutoff</code>, <code>linkMinSim</code>, <code>embedBatch</code>, model routing) — stored in <code>WorkspaceMlConfig</code>, "Not applied yet" chip in UI, one-file refactor each to consume. <span class="tag amber">Phase 6+</span></li>
+    <li><b><code>meetsy-ml-preview</code> BullMQ queue</b> — Phase 5 preview is synchronous JSON math today; queue is documented as ready to wire when preview grows heavier. <span class="tag amber">If needed</span></li>
+    <li><b>Full a11y audit</b> (axe/WCAG-AA sweep) — Phase 6 hit landmarks, focus, skip link, reduced motion, <code>aria-current</code>, <code>role="alert"</code>. A formal audit is not run. <span class="tag amber">Follow-up</span></li>
+    <li><b>Palette recent-search history</b> (local-storage backed) — Phase 6 polish. <span class="tag amber">Nice-to-have</span></li>
+    <li><b>Bottom-drawer TaskDetailSheet on mobile</b> — reconsidered and skipped (Radix Sheet unmount during resize is a risk; the right-side sheet already collapses to full width on phones).</li>
+    <li><b>Cross-run task linking</b> ("this task in run A is a continuation of task in run B") — deferred at plan level, not scoped for v2.</li>
+    <li><b>Migrations UNAPPLIED at commit time</b>: <code>20260718150000_meetsy_v2_phase1_run_search</code>, <code>20260718200000_meetsy_v2_phase2_push_dead_letter</code>, and Phase 0's <code>WorkspaceMlConfig</code>/<code>AnalysisRunSnapshot</code> migration all ride <code>prisma migrate deploy</code> on next deploy.</li>
+  </ul>
+</div>
+
+<!-- ───────────────────────── 16 · OPS ───────────────────────── -->
+<div class="page pagebreak">
+  <h2 id="p16">16 · Verification results &amp; ops appendix</h2>
+
+  <h3>All-green verification (2026-07-19)</h3>
+  <table>
+    <tr><th>Target</th><th>Command</th><th>Result</th></tr>
+    <tr><td>meetsy-web typecheck</td><td><code>pnpm --filter @ma/web typecheck</code></td><td class="tag green">PASS</td></tr>
+    <tr><td>meetsy-web lint</td><td><code>next lint</code></td><td class="tag green">PASS · 0 warnings · 0 errors</td></tr>
+    <tr><td>meetsy-api typecheck</td><td><code>pnpm --filter @ma/api typecheck</code></td><td class="tag green">PASS</td></tr>
+    <tr><td>meetsy-api jest</td><td><code>npx jest</code> (in apps/meetsy-api)</td><td class="tag green">56 suites · 313 tests · 5.918s</td></tr>
+    <tr><td>Working tree</td><td><code>git status</code></td><td class="tag green">clean</td></tr>
+    <tr><td>Branch</td><td><code>git branch --show-current</code></td><td><code>feat/meetsy-phase0</code></td></tr>
+    <tr><td>HEAD</td><td><code>git rev-parse --short HEAD</code></td><td><code>7884b32</code> — feat(meetsy): v2 Phase 6 — cross-cutting UX polish</td></tr>
+  </table>
+
+  <div class="callout">
+    <b>Why <code>next build</code> is skipped.</b> Per the <code>meetsy-web-next-build-dev-footgun</code> memory, running <code>next build</code> against a live <code>next dev</code> server's shared <code>.next</code> state breaks every route in dev. <code>typecheck + lint + jest</code> is the sanctioned verification path here.
+  </div>
+
+  <h3>Local dev boot</h3>
+  <pre class="code">## Dependencies
+pnpm install                                # Node ≥22.12 required (Prisma 7 preinstall gate)
+
+## Postgres (host port 55432 in our dev override)
+docker compose -f docker-compose.yml -f &lt;override&gt;.yml up -d postgres redis
+
+## Clicksy migrations (public schema)
+pnpm prisma:deploy
+
+## Meetsy grants (creates meetsy role + schema)
+psql -f apps/meetsy-api/prisma/grants.sql
+
+## Meetsy migrations (meetsy schema only, via meetsy role)
+pnpm --filter @ma/api exec prisma migrate deploy
+
+## Clicksy backend + web (ports 3000/5173)
+pnpm build && node dist/src/main.js
+pnpm --filter web dev
+
+## Meetsy API + web (ports 3010/3001)
+pnpm --filter @ma/api build && node apps/meetsy-api/dist/main.js
+pnpm --filter @ma/web dev</pre>
+
+  <h3>Cross-subdomain cookie test (from the Phase 0 live-verify)</h3>
+  <p>Use <code>*.localtest.me</code> (all subdomains resolve to <code>127.0.0.1</code>) so a parent-domain cookie genuinely crosses origins. <code>localhost</code> ports alone are different origins and won't share cookies.</p>
+  <pre class="code">## Sign up on Clicksy
+curl -i -c cookies.txt -H "Content-Type: application/json" \
+  -d '{"email":"o@localtest.me","password":"...","name":"...","orgName":"..."}' \
+  http://app.localtest.me:3000/api/auth/signup
+
+## Confirm Meetsy accepts the shared session
+curl -i -b cookies.txt http://meetsy.localtest.me:3010/auth/me
+## → 200 {"userId":"...","orgId":"org_seed","role":"OWNER","email":"o@localtest.me","isMachine":false}</pre>
+
+  <h3>Environment variables that matter for v2</h3>
+  <table>
+    <tr><th>Variable</th><th>Purpose</th></tr>
+    <tr><td><code>MEETSY_DATABASE_URL</code></td><td>Meetsy DB URL, points at the <code>meetsy</code> role, <code>?schema=meetsy</code> so <code>_prisma_migrations</code> lands correctly.</td></tr>
+    <tr><td><code>COOKIE_DOMAIN</code></td><td>Optional parent-domain scope for the session cookie so it crosses subdomains.</td></tr>
+    <tr><td><code>NEXT_PUBLIC_CLICKSY_LOGIN_URL</code></td><td>Where meetsy-web bounces 401s to.</td></tr>
+    <tr><td><code>AZURE_OPENAI_*</code></td><td>Unified v1 endpoint + api-key; chat + embeddings on one resource as of 2026-06-29.</td></tr>
+    <tr><td><code>REDIS_URL</code></td><td>BullMQ + LearningCache + LearningStream pubsub.</td></tr>
+  </table>
+
+  <h3>Where to look when something breaks</h3>
+  <table>
+    <tr><th>Symptom</th><th>First place to look</th></tr>
+    <tr><td>Signals disappear after feedback / chat</td><td><code>analysis.service.ts:227</code> (<code>loadRunContext</code>) and <code>mergeSignals</code> at file bottom.</td></tr>
+    <tr><td>Chip click does nothing</td><td><code>TaskSheetProvider</code> mounted in the subtree? <code>useTaskSheet()</code> hook fires?</td></tr>
+    <tr><td>Learning toast never fires</td><td>Redis pubsub reachable? <code>LearningStreamService</code> log; <code>useLearningStream</code> mounted in <code>SignedInShell</code>? Was the correction nudge-influenced (won't fire)?</td></tr>
+    <tr><td>Push retry stuck</td><td><code>PushDeadLetter</code> table — if a row exists with <code>attemptsMade=4</code>, ClickUp genuinely refused four times; inspect <code>errorMessage</code>.</td></tr>
+    <tr><td>Tuning save has no runtime effect</td><td>Two possibilities: (a) field is "Not applied yet" (see stat above the input); (b) <code>LearningCache</code> not invalidated — check <code>MlConfigService.upsert</code> logs.</td></tr>
+    <tr><td>Dark mode reverts on hard reload</td><td><code>&lt;html suppressHydrationWarning&gt;</code> present? <code>ThemeProvider</code>'s <code>defaultTheme="system"</code> + <code>enableSystem</code> both set?</td></tr>
+    <tr><td><code>j</code>/<code>k</code> doesn't scroll</td><td>Are you focused inside an input? The hook guards against it. Are there any <code>[data-task-anchor]</code> elements in the DOM?</td></tr>
+    <tr><td>Full-text search returns no matches</td><td>Migration <code>20260718150000_meetsy_v2_phase1_run_search</code> applied? Postgres 12+? Generated column populated (should be automatic on INSERT/UPDATE)?</td></tr>
+  </table>
+
+  <h3>Source-of-truth files, in read order</h3>
+  <ol>
+    <li><code>docs/superpowers/plans/2026-07-18-meetsy-v2-plan.md</code> — the umbrella plan.</li>
+    <li><code>docs/superpowers/specs/2026-07-18-meetsy-v2-phase{0..6}-*-design.md</code> — one spec per phase, matches the six phase-cards above.</li>
+    <li><code>docs/meetsy/BUILD-JOURNAL.md</code> — append-only per-PR journal with verify tables (this is where every claim in this guide is grounded).</li>
+    <li><code>apps/meetsy-api/prisma/schema.prisma</code> — final data model.</li>
+    <li><code>packages/shared/src/review-result.ts</code> — the <code>ReviewResultSchema</code> that solved the signal-loss bug.</li>
+    <li><code>apps/meetsy-web/app/{home,meetings,runs/[runId],learning,kb,tuning}/</code> — all v2 routes.</li>
+  </ol>
+
+  <footer>
+    Meetsy v2 · Implementation &amp; Verification Guide · Generated 2026-07-19 · Branch <code>feat/meetsy-phase0</code> · HEAD <code>7884b32</code> · Not committed to <code>main</code> yet.
+  </footer>
+</div>
+
+<!-- Mermaid render (self-contained; runs client-side in Chrome headless) -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'neutral',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    themeVariables: {
+      primaryColor: '#eff6ff',
+      primaryTextColor: '#18181b',
+      primaryBorderColor: '#bfdbfe',
+      lineColor: '#52525b',
+      fontSize: '13px'
+    },
+    flowchart: { htmlLabels: true, curve: 'basis' },
+    sequence: { actorMargin: 40, messageMargin: 24, mirrorActors: false }
+  });
+</script>
+</body>
+</html>

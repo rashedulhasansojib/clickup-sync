@@ -1128,3 +1128,28 @@ The runtime paths that already had a clean pure-function seam get wired through 
 **Phase 6 status:** DONE. All four PRs (AA/BB/CC/DD) landed on `feat/meetsy-phase0`.
 
 **Meetsy v2 status:** DONE. All six phases (0–6) landed. The v2 success criteria from `docs/superpowers/plans/2026-07-18-meetsy-v2-plan.md` §6 are met: Home + past-run navigation (Phase 1), clickable evidence chips + side sheet (Phase 2), visible learning-loop patterns building up + `assignee`+`sprint` learning (Phase 3), consolidated `/kb` route (Phase 4), `/tuning` with preview replay (Phase 5), dark mode + keyboard traversal (Phase 6).
+
+---
+
+### 2026-07-19 — Meetsy v2 Implementation & Verification Guide (PDF) — DONE
+
+Full-length HTML → PDF walkthrough covering v2 Phases 0–6, plus a per-route UI-journey verification guidebook (8 journeys) and the success-criteria checklist. Rendered via headless Chrome from the checked-in HTML source.
+
+- `docs/meetsy/Meetsy-v2-Implementation-Guide.source.html` — HTML source with inline CSS, 8 Mermaid diagrams (architecture, phase-dependency graph, sidebar layout, ER model, KB tab flow, three sequences: SSE learning toast, push retry, end-to-end upload→push), 16 numbered sections including a per-phase deep-dive for each of Phases 0–6. Mermaid renders client-side from CDN under Chrome's `--virtual-time-budget=15000` so all diagrams flush to SVG before capture.
+- `docs/meetsy/Meetsy-v2-Implementation-Guide.pdf` — the rendered guide (2.16 MB).
+
+**Verify state at guide time (2026-07-19):** meetsy-web typecheck ✅ · `next lint` ✅ (0/0) · meetsy-api typecheck ✅ · `npx jest` ✅ (56 suites / 313 tests / 5.918s) · working tree clean · HEAD `7884b32`.
+
+**What the guide covers:**
+1. v2 in one page — the four problems solved (review-page overload, hidden evidence, invisible learning loop, KB legibility) + the Phase-0 signal-loss bug.
+2. Audience decision (IC engineers) + the six-phase table.
+3. Architecture + phase-dependency graph (both as Mermaid diagrams).
+4–10. Per-phase deep dives (0 · Foundations → 6 · Cross-cutting UX polish) with PR-level detail (A → DD), grounded in this journal.
+11. Data model changes at a glance (ER diagram) + migration inventory + signal-key round-trip invariant.
+12. End-to-end sequence (upload → review → push) with every v2 addition annotated.
+13. Queues, SSE streams, data stores + endpoint quick reference.
+14. UI journey — 8 step-by-step verification walkthroughs (A · land + orient · through H · dark mode + a11y).
+15. Success-criteria checklist (9 criteria from v2 plan §6, all met) + test-suite growth by phase + honest deferred list.
+16. Verification results + ops appendix (local boot, cross-subdomain cookie test, env vars, "where to look when something breaks", source-of-truth read order).
+
+The prior PDF at `docs/meetsy/Meetsy-Implementation-Guide.pdf` (v1 Phases 0–3, integration plan 2026-06-27) is left untouched — the two are complementary.
