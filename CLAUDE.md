@@ -50,7 +50,8 @@ The n8n workflow files are historical source material. Do not copy n8n quirks bl
 
 ## Runtime stack
 
-- Node.js `>=22`
+- **Node.js `>=22.13`** (real floor — Vite 8 + rolldown 1.x + Prisma 7 all reject earlier). Pinned via `.nvmrc` (`22.13`) and `engines.node`. `.npmrc` has `engine-strict=true` so wrong Node fails the install loudly instead of silently dropping optional native bindings.
+- **pnpm 9.12** (pinned via root `packageManager` field). `.npmrc` has `manage-package-manager-versions=true` so any pnpm on `PATH` (Homebrew, corepack, npm-global) auto-invokes the pinned 9.12 for this repo. If pnpm isn't on PATH yet: `brew install pnpm` (one-time; lives at `/opt/homebrew/bin/pnpm`, survives nvm switching).
 - NestJS 11
 - Prisma 7 with `prisma.config.ts`
 - PostgreSQL
@@ -58,33 +59,96 @@ The n8n workflow files are historical source material. Do not copy n8n quirks bl
 - BullMQ
 - Swagger at `/docs`
 
-## Important commands
+## Running the project
 
-Use these commands from the repository root:
+Two flows: **from-scratch** (fresh clone / new machine / after wiping `node_modules`) and **daily** (every subsequent boot).
+
+### A · From scratch (once per machine, or after a full wipe)
 
 ```bash
-npm install
-npm run dev:deps
-npm run prisma:generate
-npm run prisma:deploy
-npm run start:dev
+# 1 · Machine prerequisites (one-time)
+brew install pnpm                            # pnpm at /opt/homebrew/bin/pnpm, survives nvm switching
+# nvm should already be installed; if not: brew install nvm
+
+# 2 · Node version (reads .nvmrc = 22.13)
+cd /path/to/clickup-sync
+nvm install                                  # installs Node v22.13.x if missing
+nvm use                                      # activates it here
+nvm alias default 22.13                      # (optional) make it your global default
+
+# 3 · Copy env file (once per clone)
+cp .env.example .env                         # fill in real values afterwards
+
+# 4 · Install deps (postinstall auto-runs BOTH `prisma generate` calls now — see .npmrc guardrails)
+pnpm install
+
+# 5 · Start Docker services (Postgres, Redis)
+npm run dev:deps                             # docker compose up -d postgres redis
+
+# 6 · Apply DB migrations
+npm run prisma:deploy                        # Clicksy schema (public)
+# Meetsy schema (first time only, needs the meetsy role from grants.sql):
+psql -f apps/meetsy-api/prisma/grants.sql
+pnpm --filter @ma/api exec prisma migrate deploy
+
+# 7 · Boot everything
+npm run dev:platform                         # clicksy-api + clicksy-web + meetsy-api + meetsy-web
 ```
 
-Quality checks:
+That's it. From this point on, every route is up:
+- Clicksy web: <http://localhost:5173>
+- Clicksy API: <http://localhost:3000>
+- Meetsy web: <http://localhost:3001>
+- Meetsy API: <http://localhost:3010>
+
+### B · Daily development (every subsequent boot)
 
 ```bash
+cd /path/to/clickup-sync
+nvm use                                      # picks 22.13 from .nvmrc (skip if it's your default)
+npm run dev:deps                             # ensures Postgres+Redis containers are up (no-op if already running)
+npm run dev:platform                         # boots all four apps under one concurrently window
+```
+
+If you `git pull` and the schema or deps changed:
+
+```bash
+pnpm install                                 # postinstall auto-regenerates Prisma clients
+npm run prisma:deploy                        # apply new Clicksy migrations
+pnpm --filter @ma/api exec prisma migrate deploy   # apply new Meetsy migrations
+npm run dev:platform
+```
+
+### C · Quality checks (before every commit)
+
+```bash
+# From root — Clicksy backend
 npm run lint
 npm run test
 npm run build
+
+# Meetsy — the sanctioned verify path (next build is deliberately skipped per meetsy-web-next-build-dev-footgun memory)
+pnpm --filter @ma/api typecheck
+pnpm --filter @ma/api test
+pnpm --filter @ma/web typecheck
+pnpm --filter @ma/web lint                   # next lint
 ```
 
-Database reset for local development only:
+### D · Reset local DB (dev only — NEVER staging/prod)
 
 ```bash
-npm run dev:reset
+npm run dev:reset                            # docker compose down -v && bring back up && prisma:deploy
 ```
 
-Do not run destructive database reset commands against staging or production.
+### E · Common gotchas
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `command not found: pnpm` after `nvm deactivate` | pnpm was installed into an nvm-managed Node's global bin | `brew install pnpm` puts it at `/opt/homebrew/bin/pnpm`, immune to nvm state |
+| `Cannot find native binding` for `@rolldown/binding-*` | Node was too old at install time so pnpm silently skipped the optional binding | Switch Node → `rm -rf node_modules` → `pnpm install`. `.npmrc`'s `engine-strict=true` now makes this fail loudly at install instead |
+| `Property 'meeting' does not exist on type 'PrismaService'` (200+ TS errors on meetsy-api) | Prisma client not generated (fresh `node_modules` without `prisma generate`) | The `postinstall` hooks in root + `apps/meetsy-api/package.json` handle this automatically; if you land here anyway: `pnpm --filter @ma/api exec prisma generate && DATABASE_URL=postgresql://placeholder pnpm exec prisma generate --config ./prisma.config.ts` |
+| Vite says `Node.js version 22.13+` | Old nvm default is active | `nvm use` in repo dir picks up `.nvmrc = 22.13` |
+| pnpm 11 refuses to boot on Node 22.12 | Homebrew's pnpm 11.15+ requires Node ≥22.13 | The `.nvmrc` and `engines.node` already say `22.13`; `nvm install && nvm use` |
 
 ## Environment variables
 

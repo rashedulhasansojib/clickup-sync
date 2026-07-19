@@ -1117,29 +1117,66 @@ sequenceDiagram
     <b>Why <code>next build</code> is skipped.</b> Per the <code>meetsy-web-next-build-dev-footgun</code> memory, running <code>next build</code> against a live <code>next dev</code> server's shared <code>.next</code> state breaks every route in dev. <code>typecheck + lint + jest</code> is the sanctioned verification path here.
   </div>
 
-  <h3>Local dev boot</h3>
-  <pre class="code">## Dependencies
-pnpm install                                # Node ≥22.12 required (Prisma 7 preinstall gate)
+  <h3>Running the project — from scratch (one-time, or after a full wipe)</h3>
+  <pre class="code">## 1 · Machine prerequisites
+brew install pnpm                       # lives at /opt/homebrew/bin/pnpm, survives nvm switching
 
-## Postgres (host port 55432 in our dev override)
-docker compose -f docker-compose.yml -f &lt;override&gt;.yml up -d postgres redis
+## 2 · Node version — reads .nvmrc = 22.13
+cd /path/to/clickup-sync
+nvm install                             # installs 22.13.x if missing
+nvm use                                 # activates for this shell
+nvm alias default 22.13                 # optional: make it your global default
 
-## Clicksy migrations (public schema)
-pnpm prisma:deploy
+## 3 · Env file (once per clone)
+cp .env.example .env                    # fill in real values
 
-## Meetsy grants (creates meetsy role + schema)
-psql -f apps/meetsy-api/prisma/grants.sql
+## 4 · Install deps — postinstall hooks run BOTH prisma generate calls automatically
+pnpm install
 
-## Meetsy migrations (meetsy schema only, via meetsy role)
-pnpm --filter @ma/api exec prisma migrate deploy
+## 5 · Start Docker services
+npm run dev:deps                        # docker compose up -d postgres redis
 
-## Clicksy backend + web (ports 3000/5173)
-pnpm build && node dist/src/main.js
-pnpm --filter web dev
+## 6 · Apply DB migrations
+npm run prisma:deploy                                       # Clicksy (public schema)
+psql -f apps/meetsy-api/prisma/grants.sql                   # first time only — creates meetsy role
+pnpm --filter @ma/api exec prisma migrate deploy            # Meetsy (meetsy schema)
 
-## Meetsy API + web (ports 3010/3001)
-pnpm --filter @ma/api build && node apps/meetsy-api/dist/main.js
-pnpm --filter @ma/web dev</pre>
+## 7 · Boot the whole platform
+npm run dev:platform                    # clicksy-api :3000 · clicksy-web :5173 · meetsy-api :3010 · meetsy-web :3001</pre>
+
+  <h3>Running the project — every subsequent boot</h3>
+  <pre class="code">cd /path/to/clickup-sync
+nvm use                                 # 22.13 from .nvmrc (skip if it's your default)
+npm run dev:deps                        # containers up (no-op if already running)
+npm run dev:platform                    # all four apps in one window
+
+## If a git pull changed the schema or deps:
+pnpm install                                                # postinstall regenerates Prisma clients
+npm run prisma:deploy                                       # apply new Clicksy migrations
+pnpm --filter @ma/api exec prisma migrate deploy            # apply new Meetsy migrations
+npm run dev:platform</pre>
+
+  <h3>Quality checks before every commit</h3>
+  <pre class="code">## Clicksy backend (root)
+npm run lint
+npm run test
+npm run build
+
+## Meetsy — sanctioned verify path (next build deliberately skipped per meetsy-web-next-build-dev-footgun)
+pnpm --filter @ma/api typecheck
+pnpm --filter @ma/api test
+pnpm --filter @ma/web typecheck
+pnpm --filter @ma/web lint</pre>
+
+  <h3>Common gotchas — quick reference</h3>
+  <table>
+    <tr><th>Symptom</th><th>Fix</th></tr>
+    <tr><td><code>command not found: pnpm</code> after <code>nvm deactivate</code></td><td><code>brew install pnpm</code> — puts it at <code>/opt/homebrew/bin/pnpm</code>, immune to nvm state.</td></tr>
+    <tr><td><code>Cannot find native binding @rolldown/binding-*</code></td><td>Node was too old at install time. Switch Node → <code>rm -rf node_modules</code> → <code>pnpm install</code>. The repo's <code>.npmrc</code> now sets <code>engine-strict=true</code>, so this fails loudly at install instead of silently skipping.</td></tr>
+    <tr><td>200+ TS errors like <code>Property 'meeting' does not exist on type 'PrismaService'</code></td><td>Prisma client wasn't generated. The postinstall hooks in root + <code>apps/meetsy-api/package.json</code> handle this automatically. If somehow bypassed: <code>pnpm --filter @ma/api exec prisma generate</code> + <code>DATABASE_URL=postgresql://placeholder pnpm exec prisma generate --config ./prisma.config.ts</code>.</td></tr>
+    <tr><td>Vite refuses to start ("Node.js version 22.13+ required")</td><td><code>nvm use</code> in the repo dir picks up <code>.nvmrc = 22.13</code>.</td></tr>
+    <tr><td>pnpm 11 refuses to boot on Node 22.12</td><td>Homebrew's pnpm 11.15+ needs Node ≥22.13; the <code>.nvmrc</code> and <code>engines.node</code> both say 22.13. <code>nvm install &amp;&amp; nvm use</code>.</td></tr>
+  </table>
 
   <h3>Cross-subdomain cookie test (from the Phase 0 live-verify)</h3>
   <p>Use <code>*.localtest.me</code> (all subdomains resolve to <code>127.0.0.1</code>) so a parent-domain cookie genuinely crosses origins. <code>localhost</code> ports alone are different origins and won't share cookies.</p>

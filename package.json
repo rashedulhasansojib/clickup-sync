@@ -6,9 +6,11 @@
   "license": "UNLICENSED",
   "packageManager": "pnpm@9.12.0",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.13",
+    "pnpm": ">=9.12"
   },
   "scripts": {
+    "postinstall": "DATABASE_URL=\"${DATABASE_URL:-postgresql://placeholder@localhost/placeholder}\" prisma generate --config ./prisma.config.ts",
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"prisma/**/*.prisma\"",
     "start": "nest start",
