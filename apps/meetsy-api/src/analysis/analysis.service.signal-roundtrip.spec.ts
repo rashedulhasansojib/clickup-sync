@@ -248,6 +248,8 @@ describe("AnalysisService — signal round-trip (v2 Phase 0)", () => {
       workspaces as never,
       {} as never,
       {} as never,
+      {} as never,
+      {} as never,
     );
     return { service, prisma, azure, getPersistedResult: () => persistedResult };
   }

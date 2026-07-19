@@ -42,6 +42,8 @@ import { createRedis, runChannel } from "./queue/redis";
 import { WorkspaceResolver } from "./workspace.resolver";
 import { ClickUpClient } from "../clickup/clickup.client";
 import { AssigneeResolverService } from "../clickup/assignee-resolver.service";
+import { RosterMemoryService, type LearnStats } from "../roster/roster-memory.service";
+import { RosterLlmService } from "../roster/roster-llm.service";
 
 /**
  * Orchestrates the HTTP-facing flow:
@@ -65,6 +67,8 @@ export class AnalysisService {
     private readonly workspaces: WorkspaceResolver,
     private readonly clickup: ClickUpClient,
     private readonly assigneeResolver: AssigneeResolverService,
+    private readonly rosterMemory: RosterMemoryService,
+    private readonly rosterLlm: RosterLlmService,
   ) {}
 
   /**
@@ -122,10 +126,21 @@ export class AnalysisService {
 
   /**
    * Best-effort: annotate each roster participant IN PLACE with a suggested
-   * ClickUp member (clickupUserId + clickupName). Resolves the workspace's
-   * members once, then for each participant tries the displayName and any aliases
-   * (first hit wins). Wrapped so a missing token / no ClickUp connection leaves
-   * every participant at clickupUserId:null and never blocks meeting creation.
+   * ClickUp member + a `source` tag showing which resolver tier matched.
+   *
+   * Tier order (per Phase 7 spec §4.3):
+   *   1. KB   — RosterMemoryService.suggest (per-workspace learned mapping).
+   *             A KB hit for a real member → `source="kb"`. A KB BLOCKLIST hit
+   *             (row exists, clickupUserId=null) forces the participant to
+   *             Unassigned and does NOT fall through to the heuristic.
+   *   2. HEUR — AssigneeResolverService (exact → first-name → prefix).
+   *   3. LLM  — RosterLlmService (PR-E). Azure structured call with the workspace's
+   *             top KB rows as few-shot context. Only fires when 1 + 2 both miss;
+   *             the picked id is NEVER auto-written to KB (user has to confirm at
+   *             roster-time, and that confirmation drives the normal PR-A write).
+   *
+   * Wrapped so a missing token / no ClickUp connection leaves every participant
+   * at clickupUserId:null and never blocks meeting creation.
    */
   private async suggestClickupMembers(
     workspaceId: string,
@@ -134,17 +149,72 @@ export class AnalysisService {
     if (roster.length === 0) return;
     try {
       const members = await this.clickup.getAssignableMembers(workspaceId);
-      if (members.length === 0) return;
+      if (members.length === 0) {
+        // Still tag everyone with source so the UI has consistent metadata.
+        for (const p of roster) {
+          p.source = "none";
+        }
+        return;
+      }
       const nameById = new Map(members.map((m) => [m.clickupUserId, m.name]));
       for (const p of roster) {
+        let resolved = false;
         for (const name of [p.displayName, ...p.aliases]) {
+          // 1. KB (per-workspace roster memory).
+          const kb = await this.rosterMemory.suggest(workspaceId, name);
+          if (kb) {
+            if (kb.clickupUserId === null) {
+              // Explicit blocklist — the user has previously said "never match
+              // this name". Force Unassigned and skip the heuristic; the user
+              // can override at the roster step if the blocklist is stale.
+              p.clickupUserId = null;
+              p.clickupName = null;
+              p.source = "kb";
+              p.confirmations = kb.confirmations;
+              resolved = true;
+              break;
+            }
+            if (nameById.has(kb.clickupUserId)) {
+              // KB mapping to a still-allowlisted member — authoritative hit.
+              p.clickupUserId = kb.clickupUserId;
+              p.clickupName = nameById.get(kb.clickupUserId) ?? null;
+              p.source = "kb";
+              p.confirmations = kb.confirmations;
+              resolved = true;
+              break;
+            }
+            // KB points at a member who has left the allowlist — treat as a
+            // miss and let the heuristic try. User will re-pick and the next
+            // learn call will update the KB.
+          }
+          // 2. Heuristic.
           const matchedId = this.assigneeResolver.resolve(name, members);
           if (matchedId) {
             p.clickupUserId = matchedId;
             p.clickupName = nameById.get(matchedId) ?? null;
+            p.source = "heuristic";
+            resolved = true;
             break;
           }
         }
+        // 3. LLM fallback — only once per participant, ONLY when KB + heuristic
+        // exhausted every alias. The KB write only happens if the human keeps
+        // this suggestion at roster-time.
+        if (!resolved) {
+          const llmId = await this.rosterLlm.suggest({
+            workspaceId,
+            displayName: p.displayName,
+            aliases: p.aliases,
+            members,
+          });
+          if (llmId && nameById.has(llmId)) {
+            p.clickupUserId = llmId;
+            p.clickupName = nameById.get(llmId) ?? null;
+            p.source = "llm";
+            resolved = true;
+          }
+        }
+        if (!resolved) p.source = "none";
       }
     } catch (err) {
       this.logger.warn(
@@ -159,10 +229,11 @@ export class AnalysisService {
    */
   async confirmRoster(
     orgId: string,
+    userId: string,
     meetingId: string,
     body: ConfirmRosterRequest,
     workspaceIdParam?: string,
-  ): Promise<{ runId: string }> {
+  ): Promise<{ runId: string; learned: LearnStats }> {
     const workspaceId = await this.workspaces.resolve(orgId, workspaceIdParam);
     const meeting = await this.prisma.meeting.findFirst({
       where: { id: meetingId, orgId, workspaceId },
@@ -171,10 +242,40 @@ export class AnalysisService {
       throw new NotFoundException(`Meeting ${meetingId} not found`);
     }
 
+    // v2 Phase 7 — capture what we ORIGINALLY suggested BEFORE we overwrite the
+    // Meeting.roster JSON with the confirmed roster below. Best-effort parse:
+    // malformed JSON just yields [] so learning is a no-op, never a blocker.
+    const suggestedRoster = ParticipantSchema.array().safeParse(meeting.roster ?? []);
+
     await this.prisma.meeting.update({
       where: { id: meetingId },
       data: { roster: body.roster as unknown as Prisma.InputJsonValue },
     });
+
+    // v2 Phase 7 — learn per-workspace alias→member mappings from this
+    // confirmation. AWAITED so the response carries the stats for the toast.
+    // The service's internal error handling still counts failures as `skipped`,
+    // so a Prisma hiccup here never bubbles up as a 500.
+    let learned: LearnStats = { kept: 0, learned: 0, corrected: 0, blocklisted: 0, skipped: 0 };
+    if (suggestedRoster.success) {
+      try {
+        learned = await this.rosterMemory.learnFromConfirmation({
+          workspaceId,
+          userId,
+          suggested: suggestedRoster.data,
+          confirmed: body.roster,
+        });
+        if (learned.learned || learned.corrected || learned.kept || learned.blocklisted) {
+          this.logger.log(
+            `Roster memory (meeting=${meetingId}): ${JSON.stringify(learned)}`,
+          );
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Roster memory failed (meeting=${meetingId}): ${(err as Error).message}`,
+        );
+      }
+    }
 
     // Find the queued run for this meeting (created at upload time).
     const run = await this.prisma.analysisRun.findFirst({
@@ -186,7 +287,7 @@ export class AnalysisService {
     }
 
     await this.queue.enqueue({ runId: run.id, meetingId, orgId: meeting.orgId });
-    return { runId: run.id };
+    return { runId: run.id, learned };
   }
 
   /**

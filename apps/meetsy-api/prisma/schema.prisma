@@ -69,6 +69,18 @@ enum KbSourceType {
   @@schema("meetsy")
 }
 
+// v2 Phase 7 — provenance of a ParticipantAlias row. Written by the roster
+// learning path when the user confirms/edits/blocks a roster suggestion, or
+// seeded by an admin via CSV import.
+enum AliasSource {
+  user_confirmed
+  user_corrected
+  user_blocklisted
+  admin_seeded
+
+  @@schema("meetsy")
+}
+
 model Meeting {
   id                   String    @id @default(cuid())
   // Soft references to public (no DB FK): org owns users, workspace owns meetings.
@@ -431,6 +443,38 @@ model WorkspaceMlConfig {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@index([orgId])
+  @@schema("meetsy")
+}
+
+// v2 Phase 7 — per-workspace "roster memory". Every row is a learned mapping
+// from a transcript participant name (`alias`, NORMALIZED to lowercase +
+// single-spaced + punctuation-stripped) to a ClickUp member. `clickupUserId`
+// null = explicit blocklist ("never suggest anyone for this alias"). Read at
+// meeting-upload time BEFORE the deterministic 3-tier heuristic, written at
+// roster-confirm time by diffing suggested-vs-confirmed. Scoped per workspace
+// (people move companies; aliases don't).
+model ParticipantAlias {
+  id            String      @id @default(cuid())
+  workspaceId   String      @map("workspace_id")
+  // Normalized lookup key: lowercased, single-spaced, punctuation stripped.
+  alias         String
+  // Original casing for display in the /kb Participants tab.
+  aliasRaw      String      @map("alias_raw")
+  // Soft ref to a ClickUp member id. null = blocklist (do not suggest).
+  clickupUserId String?     @map("clickup_user_id")
+  source        AliasSource
+  // Increments each time the user re-confirms the same mapping. UI can render
+  // "KB · confirmed N×" as a trust signal.
+  confirmations Int         @default(1)
+  lastSeenAt    DateTime    @default(now()) @map("last_seen_at")
+  // Soft ref to public.users — audit only, no cross-schema FK.
+  createdBy     String      @map("created_by")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, alias], name: "workspace_alias_unique")
+  @@index([workspaceId])
+  @@map("participant_aliases")
   @@schema("meetsy")
 }
 

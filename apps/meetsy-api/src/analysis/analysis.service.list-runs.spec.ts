@@ -42,6 +42,8 @@ describe("AnalysisService — listRuns", () => {
       workspaces as never,
       {} as never,
       {} as never,
+      {} as never,
+      {} as never,
     );
     return { service, $transaction, taskPushFindMany, workspacePushConfigFindUnique };
   }

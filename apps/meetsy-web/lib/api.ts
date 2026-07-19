@@ -47,9 +47,68 @@ export function setActiveWorkspaceId(id: string | null) {
   activeWorkspaceId = id;
 }
 
-/** Response from POST /meetings/:id/roster — confirms roster, returns the run to watch. */
+/** Response from POST /meetings/:id/roster — confirms roster, returns the run
+ * to watch + a per-participant summary of what the roster-memory KB learned
+ * (v2 Phase 7). `learned` is always present; zeros on legacy backends read
+ * fine since every field is a plain number. */
 export interface ConfirmRosterResponse {
   runId: string;
+  learned: {
+    kept: number;
+    learned: number;
+    corrected: number;
+    blocklisted: number;
+    skipped: number;
+  };
+}
+
+// ── Roster memory KB browser (v2 Phase 7 PR-D) ────────────────────────
+/** Provenance of a saved alias mapping. `admin_seeded` = manual create/edit
+ * from the /kb Participants tab; other values come from roster confirmations. */
+export type ParticipantAliasSource =
+  | "user_confirmed"
+  | "user_corrected"
+  | "user_blocklisted"
+  | "admin_seeded";
+
+/** One row from GET /workspaces/:id/participant-aliases. `clickupName` is
+ * joined server-side (all roles can read even if `/clickup/members` is Owner
+ * /Admin gated); null = mapping points at a departed member OR blocklist row. */
+export interface ParticipantAliasRow {
+  id: string;
+  workspaceId: string;
+  alias: string;
+  aliasRaw: string;
+  clickupUserId: string | null;
+  clickupName: string | null;
+  source: ParticipantAliasSource;
+  confirmations: number;
+  lastSeenAt: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface ParticipantAliasesPage {
+  rows: ParticipantAliasRow[];
+  nextCursor: string | null;
+  total: number;
+}
+
+export interface CreateParticipantAliasBody {
+  aliasRaw: string;
+  clickupUserId: string | null;
+}
+export interface UpdateParticipantAliasBody {
+  aliasRaw?: string;
+  clickupUserId?: string | null;
+}
+export interface BulkImportParticipantAliasBody {
+  rows: Array<{ aliasRaw: string; clickupUserId?: string | null }>;
+}
+export interface BulkImportResult {
+  imported: number;
+  updated: number;
+  skipped: number;
 }
 
 // ── ClickUp write-back (Phase 1) ───────────────────────────────────────
@@ -1022,6 +1081,68 @@ export const api = {
     const qs = limit !== undefined ? `?limit=${limit}` : "";
     return request<MlConfigPreviewView>(
       `/workspaces/${encodeURIComponent(ws)}/ml-config/preview${qs}`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  // ── Roster memory KB browser (v2 Phase 7 PR-D) ────────────────────────
+
+  /** GET /workspaces/:id/participant-aliases — paginated KB rows (any authed). */
+  listParticipantAliases(
+    ws: string,
+    opts: { cursor?: string; filter?: string; limit?: number } = {},
+  ): Promise<ParticipantAliasesPage> {
+    const qs = new URLSearchParams();
+    if (opts.cursor) qs.set("cursor", opts.cursor);
+    if (opts.filter) qs.set("filter", opts.filter);
+    if (opts.limit !== undefined) qs.set("limit", String(opts.limit));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<ParticipantAliasesPage>(
+      `/workspaces/${encodeURIComponent(ws)}/participant-aliases${suffix}`,
+    );
+  },
+
+  /** POST /workspaces/:id/participant-aliases — seed/overwrite (Owner/Admin). */
+  createParticipantAlias(
+    ws: string,
+    body: CreateParticipantAliasBody,
+  ): Promise<ParticipantAliasRow> {
+    return request<ParticipantAliasRow>(
+      `/workspaces/${encodeURIComponent(ws)}/participant-aliases`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  /** PATCH /workspaces/:id/participant-aliases/:aliasId — edit (Owner/Admin). */
+  updateParticipantAlias(
+    ws: string,
+    aliasId: string,
+    body: UpdateParticipantAliasBody,
+  ): Promise<ParticipantAliasRow> {
+    return request<ParticipantAliasRow>(
+      `/workspaces/${encodeURIComponent(ws)}/participant-aliases/${encodeURIComponent(aliasId)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    );
+  },
+
+  /** DELETE /workspaces/:id/participant-aliases/:aliasId — remove (Owner/Admin). */
+  deleteParticipantAlias(
+    ws: string,
+    aliasId: string,
+  ): Promise<{ ok: true }> {
+    return request<{ ok: true }>(
+      `/workspaces/${encodeURIComponent(ws)}/participant-aliases/${encodeURIComponent(aliasId)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  /** POST /workspaces/:id/participant-aliases/bulk-import — CSV batch (Owner/Admin). */
+  bulkImportParticipantAliases(
+    ws: string,
+    body: BulkImportParticipantAliasBody,
+  ): Promise<BulkImportResult> {
+    return request<BulkImportResult>(
+      `/workspaces/${encodeURIComponent(ws)}/participant-aliases/bulk-import`,
       { method: "POST", body: JSON.stringify(body) },
     );
   },

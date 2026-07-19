@@ -1153,3 +1153,100 @@ Full-length HTML → PDF walkthrough covering v2 Phases 0–6, plus a per-route 
 16. Verification results + ops appendix (local boot, cross-subdomain cookie test, env vars, "where to look when something breaks", source-of-truth read order).
 
 The prior PDF at `docs/meetsy/Meetsy-Implementation-Guide.pdf` (v1 Phases 0–3, integration plan 2026-06-27) is left untouched — the two are complementary.
+
+---
+
+## 2026-07-19 — Meetsy v2 Phase 7: roster memory KB (learned participant→member mappings)
+
+**Design goal:** the pre-Phase-7 assignee resolver was stateless — `AssigneeResolverService` walked exact → first-name → prefix on every meeting, so a workspace that had already corrected "Dan L." → Daniel Kim ten times still guessed the same wrong Dan Leary the eleventh time. Phase 7 closes that loop with a per-workspace lookup table (`meetsy.participant_aliases`) plus a diff-and-upsert learner that fires at roster-confirm time — pure code, no LLM in the training loop. On top of that: an Owner/Admin KB browser at `/kb → Participants` (list, seed, edit, blocklist, CSV bulk-import) and an OPTIONAL LLM tier-3 fallback that only fires when KB and heuristic both miss, and whose picked id is never auto-written to the KB (the human still has to confirm at roster-time). Spec: [`docs/superpowers/specs/2026-07-19-meetsy-v2-phase7-roster-memory-design.md`](../superpowers/specs/2026-07-19-meetsy-v2-phase7-roster-memory-design.md).
+
+**Why NOT fold this into the existing `FieldOverride` learning loop (§2.3 of the spec):** Phase 3's `FieldOverride` + `LearningService` operates at **task-push time**, learns statistically (2/N support threshold before publishing a nudge), and lives in the `clickup_task` embedding graph. Roster memory operates at **meeting-upload time**, is a lookup (one confirmation is authoritative — "yes, transcript-'Dan L.' IS Daniel Kim, don't ask again"), and is workspace-scoped by nature (people move companies; aliases don't). Same domain shape, different semantics — separate model.
+
+### 2026-07-19 — PR-A: Prisma model + `RosterMemoryService` write path — DONE / GREEN
+
+- **`apps/meetsy-api/prisma/schema.prisma`** — new `enum AliasSource { user_confirmed | user_corrected | user_blocklisted | admin_seeded }` and new `model ParticipantAlias` with `@@unique([workspaceId, alias], name: "workspace_alias_unique")`, integer `confirmations` counter (increments on repeat KEPT-confirmations, resets to 1 on correction), `lastSeenAt`, denormalized `aliasRaw` (original casing for display) alongside the normalized lookup key `alias`, `createdBy` (soft FK to `public.users`, no cross-schema FK), `@@schema("meetsy")`.
+- **`apps/meetsy-api/prisma/migrations/20260719120000_meetsy_v2_phase7_roster_memory/migration.sql`** — hand-authored (Prisma-generated files ran into the multiSchema public-DDL trap that Phase 0 documented). Meetsy-schema-only: `CREATE TYPE meetsy."AliasSource"`, `CREATE TABLE meetsy.participant_aliases`, unique index on `(workspace_id, alias)`, workspace index. No `public` DDL, no `CREATE SCHEMA`.
+- **`apps/meetsy-api/src/roster/roster-memory.service.ts`** (new) — `RosterMemoryService` with three exports:
+  - `normalizeAlias(raw)` — lowercase, trim, strip non-letter/number/space (Unicode-aware via `\p{L}\p{N}`), collapse whitespace. Keeps "Zoë" as "zoë". Collides "Dan L." + "Dan L" + "dan l." into the same key `dan l` so the KB doesn't fragment on punctuation.
+  - `suggest(workspaceId, name) → { clickupUserId, source: "kb", confirmations } | null` — indexed `findUnique` on the composite unique. Best-effort: any Prisma error is warn-logged and returns `null` so a KB read failure never blocks meeting upload.
+  - `learnFromConfirmation({ workspaceId, userId, suggested, confirmed }) → LearnStats` — diffs by stable participant `id`. Per row: KEPT (X→X) → `user_confirmed` with `confirmations += 1`; CORRECTED (X→Y) → `user_corrected` with `confirmations = 1`; LEARNED (null→Y) → same but treats as first mapping; CLEARED (X→null WITHOUT the blocklist flag) → skip (prevents accidental blocklist on a distracted user); STAYED-NULL / empty alias → skip; **EXPLICIT BLOCKLIST** (`confirmed.blocklist === true && confirmed.clickupUserId === null`) → `user_blocklisted` row. Every write is upsert on the composite unique. Errors swallowed and counted as `skipped`.
+- **`apps/meetsy-api/src/roster/roster-memory.service.spec.ts`** — 17 unit tests: normalization (whitespace, punctuation, unicode, empties), each diff branch (KEPT / CORRECTED / LEARNED / CLEARED / STAYED-NULL), skip-empty-name, alias-key normalization on write, mixed batch, EXPLICIT-BLOCKLIST (with and without a prior suggestion), Prisma error swallow, and `suggest()` variants (mapping hit / blocklist hit / miss / blank name / error swallow).
+
+### 2026-07-19 — PR-B: suggest-time KB read integration — DONE / GREEN
+
+- **`apps/meetsy-api/src/analysis/analysis.service.ts` (`suggestClickupMembers`)** — resolver chain reordered from stateless 3-tier heuristic to KB-first:
+  1. `RosterMemoryService.suggest(workspaceId, name)` — for each of `[displayName, ...aliases]`, KB hit for a real allowlisted member wins (`source="kb"`, `confirmations` passed through to the UI). KB **blocklist** hit (row exists, `clickupUserId=null`) forces the participant to Unassigned AND breaks the alias loop — the user has previously said "never match this name", and we honor that at suggest time. KB pointing to a departed member (row exists but member no longer in allowlist) is treated as a miss and falls through to the heuristic — user re-picks, next learn call updates the KB.
+  2. `AssigneeResolverService.resolve(name, members)` — the existing exact → first-name → prefix code, unchanged. Match → `source="heuristic"`.
+  3. (PR-E) LLM fallback, or `source="none"` terminal.
+- **`packages/shared/src/domain.ts`** — `Participant` schema gains three OPTIONAL fields: `source` (`SuggestionSourceSchema = z.enum(["kb","heuristic","llm","none"])`), `confirmations?: number`, `blocklist?: boolean` (the last is a transient UI flag, cleared on learn). Optional so pre-Phase-7 rosters still parse.
+- **`apps/meetsy-api/src/analysis/analysis.module.ts`** — imports the new `RosterModule` so `AnalysisService` can inject `RosterMemoryService`. `AnalysisService.confirmRoster` now **awaits** the learn call (was fire-and-forget before) and returns `{ runId, learned: LearnStats }` — required so PR-C can show a "Meetsy learned…" toast that reflects reality. Internal errors are still swallowed (best-effort at the service layer), so a DB failure returns zeroes but never 500s.
+- **Tests** — `analysis.service.create-meeting.spec.ts` gains 3 tests: (1) KB hit shortcuts the heuristic; (2) KB blocklist forces Unassigned and skips the heuristic; (3) KB pointing at a departed member falls through to the heuristic. 4 sibling analysis specs updated to inject the new `rosterMemory` constructor arg.
+
+### 2026-07-19 — PR-C: roster UI badges + "Meetsy learned…" toast — DONE / GREEN
+
+- **`apps/meetsy-web/app/meetings/[id]/roster/page.tsx`** — three new UI surfaces added to the roster review screen:
+  - **`SourceBadge`** — color-coded chip next to each participant reflecting `source`. `⭐ KB · confirmed N×` (amber) beats `🔍 Heuristic match` (blue) beats `✨ AI guess` (purple, populated only when PR-E fires) beats `⚪ No match yet` (muted). Blocklisted rows render `⛔ Blocklisted — won't suggest again` (red). Hover title strings explain what each tier means to the user, so the trust signal is legible without training. Legacy rosters (no `source`) render no badge — matching the badge-less UI those users already know.
+  - **"Never match this name" button** — visible when a participant is not blocklisted; sets `clickupUserId = null, blocklist = true` on the local `Participant`. Picking a member from the dropdown clears the flag. On confirm, blocklisted rows persist a `user_blocklisted` KB row that is honored on future meetings until an Owner/Admin clears it via the `/kb` browser (PR-D).
+  - **Sonner toast on confirm** — the response `{ learned: {kept, learned, corrected, blocklisted, skipped} }` drives a summary toast: e.g. *"Meetsy will remember learned 2, corrected 1, blocklisted 1 for this workspace."* Zero-valued fields are omitted so common cases stay terse (e.g. *"Meetsy will remember kept 3."*).
+- **`apps/meetsy-web/lib/api.ts`** — `ConfirmRosterResponse` gains the `learned` block. Client-side local-fallback effect preserves/corrects the `source` field so the badge is stable across re-renders (the client-only heuristic tags participants it fills in as `source="heuristic"` too).
+- **`apps/meetsy-api/src/roster/roster-memory.service.ts`** — `LearnStats` gains a `blocklisted` counter; the explicit-blocklist branch writes the `user_blocklisted` row and increments the counter. Extended 17→19 tests to cover both blocklist paths (with and without a prior suggestion).
+
+### 2026-07-19 — PR-D: `/kb → Participants` tab (KB browser) — DONE / GREEN
+
+- **`apps/meetsy-api/src/roster/participant-aliases.dto.ts`** (new) — zod schemas for `POST /` (`CreateParticipantAliasSchema` — `aliasRaw` + nullable `clickupUserId`), `PATCH /:aliasId` (`UpdateParticipantAliasSchema` — same fields, both optional, but at least one must be present), and `POST /bulk-import` (`BulkImportParticipantAliasSchema` — 1..1000 rows). View types (`ParticipantAliasRow`, `ParticipantAliasesPage`, `BulkImportResult`) stay local to meetsy-api (matches the `kb.dto.ts` convention).
+- **`apps/meetsy-api/src/roster/roster-browser.service.ts`** (new) — CRUD + list + bulk-import over `ParticipantAlias`. `list()` is keyset-cursored on `(lastSeenAt DESC, id ASC)` with a base64-encoded cursor, uses SQL `contains` on `alias` / `insensitive contains` on `aliasRaw` for filtering, and falls back to an in-memory ClickUp-name filter when the alias search returns zero on the first page (small dataset — worst case is a workspace's full ClickUp member list). Denormalizes `clickupName` server-side by fetching `ClickUpClient.getAssignableMembers(workspaceId)` — this deliberately bypasses the Owner/Admin gate on `GET /clickup/members` so Member-role users can also browse the KB. `create()` writes `admin_seeded` (or `user_blocklisted` if `clickupUserId === null`); `update()` flips the source when the mapping target changes; `delete()` is a hard delete (user re-teaches on next confirm). `bulkImport()` deduplicates within the batch (last row wins on the normalized alias), splits into imported/updated by presence check, and skips rows with empty-normalized aliases or that hit per-row Prisma errors.
+- **`apps/meetsy-api/src/roster/participant-aliases.controller.ts`** (new) — routes at `workspaces/:id/participant-aliases`:
+  - `GET /` — any authed user (Members should be able to inspect what the KB learned).
+  - `POST /` + `POST /bulk-import` + `PATCH /:aliasId` + `DELETE /:aliasId` — `@Roles("OWNER", "ADMIN")`.
+  - All use `WorkspaceResolver` for `?workspaceId=` / default-workspace fallback, matching the Phase 4 convention.
+- **`apps/meetsy-api/src/roster/roster.module.ts`** — now imports `ClickUpModule` (for the member-name join) and registers `RosterBrowserService` + `ParticipantAliasesController`. No cycle: `AnalysisModule → RosterModule → ClickUpModule` is a DAG.
+- **`apps/meetsy-web/lib/api.ts`** — six new shapes (`ParticipantAliasSource`, `ParticipantAliasRow`, `ParticipantAliasesPage`, `CreateParticipantAliasBody`, `UpdateParticipantAliasBody`, `BulkImportParticipantAliasBody`, `BulkImportResult`) and five new client methods (`listParticipantAliases` / `createParticipantAlias` / `updateParticipantAlias` / `deleteParticipantAlias` / `bulkImportParticipantAliases`).
+- **`apps/meetsy-web/app/kb/participants-tab.tsx`** (new) — tab component:
+  - Paginated table with a debounced 300ms search box and "Load more" cursor pagination. Row layout: `aliasRaw → clickupName` header line + one-line footer with the source badge (Confirmed ⭐ · N× / Corrected ✏️ / Blocklisted ⛔ / Manual 👤) and relative "Last confirmed" timestamp.
+  - Owner/Admin row actions: Edit (pencil) / Blocklist (ban icon — only shows when `clickupUserId !== null`) / Delete (trash). Member-role sees the same rows without action buttons.
+  - **Add / Edit modal** (`MappingDialog`) — dropdown of ClickUp members (fetched once via `getClickUpMembers`, name-sorted), plus a "Blocklist — never suggest a member for this name" checkbox that hides the dropdown and forces `clickupUserId = null`.
+  - **Bulk import modal** (`BulkImportDialog`) — CSV paste with client-side parsing (`alias,clickupUserId` per line; blank second field → blocklist), live preview of the first 5 rows plus a malformed-line counter, then `POST /bulk-import`. Success toast reports `imported / updated / skipped` from the server.
+- **`apps/meetsy-web/app/kb/page.tsx`** — new `Participants` tab added between `Search` and `Rebuild` in the `/kb` shell's tab bar and content grid. Any authed user sees the tab; write actions are gated by `canWrite` (Owner/Admin).
+- **`apps/meetsy-api/src/roster/roster-browser.service.spec.ts`** (new) — 18 unit tests: list-with-join (member allowlisted, member departed, blocklist row), cursor pagination + total count, ClickUp-error swallow leaves rows with `clickupName=null`, create (admin_seeded / user_blocklisted / empty-alias-rejected), update (404 / target-flip → source flip / aliasRaw-only preserves source), delete (404 / happy path), bulk-import (imported-vs-updated split, empty-normalize skips, within-batch dedupe last-wins, missing `clickupUserId` = blocklist, per-row error swallow).
+
+### 2026-07-19 — PR-E (optional): LLM fallback tier with KB few-shot context — DONE / GREEN
+
+- **`apps/meetsy-api/src/roster/roster-llm.service.ts`** (new) — `RosterLlmService.suggest({ workspaceId, displayName, aliases, members })`. Only invoked from `AnalysisService.suggestClickupMembers` **once per participant** and **only when KB + heuristic have exhausted every alias**. Fetches up to 8 high-confidence exemplars from `ParticipantAlias` (`user_confirmed | user_corrected | admin_seeded`, ordered by `confirmations DESC, lastSeenAt DESC`, filtered to only members still in the ClickUp allowlist so a departed teammate's row never poisons the prompt) and feeds them as few-shot text alongside the transcript display name, any aliases, and the allowlist. Returns AT MOST ONE id, VALIDATED against the allowlist server-side to defend against hallucinated ids. Everything is best-effort: missing Azure key, model refusal, timeout — all warn-logged and return null so the participant just stays at `source: "none"`.
+- **`apps/meetsy-api/src/analysis/analysis.service.ts`** — tier-3 branch appended after the alias loop. Runs at most once per participant. Sets `source: "llm"` on a hit. **The picked id is NEVER auto-written to the KB** — the user still has to confirm at roster-time; only that confirmation drives the normal `learnFromConfirmation` write (PR-A). This keeps the LLM strictly out of the training loop unless a human validates.
+- **Prompt design (§4.6 of the spec):** system prompt lays out the rules ("pick AT MOST one from the given allowlist / never fabricate / never combine members / a single-letter typo is fine, a totally different name is not"), user prompt has an optional "Recent confirmed mappings in this workspace" few-shot block, the transcript name, any alternate labels, and the allowlist as `- Name [id=cu_x]` bullets. Reasoning effort is `low` — this is a small classification task.
+- **Zod output schema** — `{ clickupUserId: string | null, reasoning: string (max 200 chars) }`. The reasoning field is discarded today but exists so future observability could log why the model declined.
+- **`apps/meetsy-api/src/roster/roster-llm.service.spec.ts`** (new) — 9 unit tests: empty-allowlist short-circuit, blank-name short-circuit, happy path (picked id in allowlist), hallucination guard (picked id NOT in allowlist → returns null), null-from-model → null, Azure error swallow → null, few-shot exemplars filtered to allowlisted members only, still runs when the exemplar query fails (LLM only gets the allowlist), aliases surface in the prompt.
+- **`analysis.service.create-meeting.spec.ts`** — 3 more tests: LLM fires only when KB+heuristic miss (`source="llm"`), LLM is skipped when the heuristic already matched (`source="heuristic"`), out-of-allowlist LLM answer → `source="none"` (belt-and-suspenders — the LLM service already filters, and the caller re-validates).
+
+### 2026-07-19 — Phase 7 verify (all GREEN)
+
+| # | Target | Command | Result |
+|---|---|---|---|
+| a | Meetsy API typecheck | `pnpm --filter @ma/api typecheck` | PASS |
+| b | Meetsy API tests | `pnpm --filter @ma/api test` | PASS — **59 suites / 366 tests** (was 313 pre-phase; +53) |
+| c | Meetsy API build | `pnpm --filter @ma/api build` | PASS |
+| d | Meetsy web typecheck | `pnpm --filter @ma/web typecheck` | PASS |
+| e | Meetsy web lint | `pnpm --filter @ma/web lint` | PASS — 0 warnings, 0 errors |
+
+`next build` intentionally skipped per the `meetsy-web-next-build-dev-footgun` memory. Live verify against the Nifty workspace was deferred by user request (this journal entry lands before the boot-and-drive session).
+
+**Test-suite growth by PR:**
+- PR-A: +17 (RosterMemoryService)
+- PR-B: +3 (create-meeting KB-first branch) + spec drift updates on 4 files
+- PR-C: +2 (blocklist branch on RosterMemoryService)
+- PR-D: +18 (RosterBrowserService)
+- PR-E: +9 (RosterLlmService) + +3 (create-meeting LLM branch)
+- Net: 313 → 366 tests (+53) across 59 suites (was 56 → +3 new spec files).
+
+**Migration status:**
+- New: `20260719120000_meetsy_v2_phase7_roster_memory` (enum + table + composite unique + workspace index; meetsy-schema-only).
+- No existing migrations edited.
+- `pnpm --filter @ma/api exec prisma migrate deploy` from a fresh clone is the sanctioned path (grants.sql already covers the meetsy role).
+
+**Deferred (future / follow-ups):**
+- **Backfill from historical `Meeting.roster` JSONs on migration** — declined in the spec §9. Historical rosters don't distinguish "user confirmed X" from "system suggested X and user didn't touch it" — false confidence. Users can bulk-import CSV via PR-D's `/kb Participants` tab if they want to seed retroactively.
+- **Per-alias observability** — no dashboard yet for "which aliases the LLM tier resolved / how often the KB was hit / miss rate over time." Deferrable — add if the KB gets muddy in production.
+- **Cross-workspace or org-wide aliases** — deliberately not implemented; the spec §2 argues people move companies and aliases don't, so workspace-scoping is the right shape. Revisit only if a customer explicitly asks.
+- **Confidence score on the LLM tier** — the model returns `reasoning` but not a numeric confidence. The current design uses "picked id must be in allowlist" as the confidence signal; a future tier could add a self-score and threshold on it.
+
+**Phase 7 status:** DONE. All five PRs (A/B/C/D/E) landed on `feat/meetsy-phase0`. Live verification against the Nifty workspace + final commit-and-push queued for the next session.

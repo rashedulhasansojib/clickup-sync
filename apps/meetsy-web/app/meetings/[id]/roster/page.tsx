@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import type { Participant } from "@ma/shared";
+import { toast } from "sonner";
+import type { Participant, SuggestionSource } from "@ma/shared";
 import { api, ApiError, type AssignableMember } from "@/lib/api";
 import { loadMeeting, clearMeeting } from "@/lib/store";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -107,17 +108,28 @@ export default function RosterPage() {
     const allowed = new Set(members.map((m) => m.clickupUserId));
     setRoster((prev) =>
       prev.map((p) => {
-        const suggested =
-          p.clickupUserId && allowed.has(p.clickupUserId)
-            ? p.clickupUserId
-            : localMatch(p.displayName, members);
+        const backendPickAllowed = p.clickupUserId && allowed.has(p.clickupUserId);
+        const suggested = backendPickAllowed
+          ? p.clickupUserId
+          : localMatch(p.displayName, members);
         const matched = suggested
           ? (members.find((m) => m.clickupUserId === suggested) ?? null)
           : null;
+        // Keep the backend's `source` when we're using its suggestion; if we
+        // fell back to a local fuzzy match, that's a heuristic pick — relabel.
+        // Nothing matched at all → "none".
+        const source: SuggestionSource = backendPickAllowed
+          ? (p.source ?? "heuristic")
+          : matched
+            ? "heuristic"
+            : "none";
         return {
           ...p,
           clickupUserId: matched ? matched.clickupUserId : null,
           clickupName: matched ? matched.name : null,
+          source,
+          // Confirmations only meaningful for a KB source; drop it otherwise.
+          confirmations: source === "kb" ? p.confirmations : undefined,
         };
       }),
     );
@@ -140,7 +152,26 @@ export default function RosterPage() {
               ...p,
               clickupUserId: matched ? matched.clickupUserId : null,
               clickupName: matched ? matched.name : null,
+              // Any explicit member pick clears a prior blocklist intent.
+              blocklist: false,
             }
+          : p,
+      ),
+    );
+  }
+
+  /**
+   * v2 Phase 7 — user marks this name as "never match anyone". Combined with
+   * clickupUserId=null, tells the backend to write a blocklist row in the
+   * ParticipantAlias KB. Clicking again toggles the intent off.
+   */
+  function toggleBlocklist(id: string) {
+    setRoster((prev) =>
+      prev.map((p) =>
+        p.id === id
+          ? p.blocklist
+            ? { ...p, blocklist: false }
+            : { ...p, clickupUserId: null, clickupName: null, blocklist: true }
           : p,
       ),
     );
@@ -177,8 +208,19 @@ export default function RosterPage() {
 
     setSubmitting(true);
     try {
-      const { runId } = await api.confirmRoster(meetingId, { roster: cleaned });
+      const { runId, learned } = await api.confirmRoster(meetingId, { roster: cleaned });
       clearMeeting(meetingId);
+      // v2 Phase 7 — surface what the roster-memory KB learned this round.
+      // Silent when there's nothing informative to say (e.g. all-null roster).
+      const parts: string[] = [];
+      if (learned.learned) parts.push(`learned ${learned.learned}`);
+      if (learned.corrected) parts.push(`corrected ${learned.corrected}`);
+      if (learned.blocklisted) parts.push(`blocklisted ${learned.blocklisted}`);
+      if (parts.length > 0) {
+        toast.success(`Meetsy will remember ${parts.join(", ")} for this workspace.`);
+      } else if (learned.kept > 0) {
+        toast.message(`Reinforced ${learned.kept} known mapping${learned.kept === 1 ? "" : "s"}.`);
+      }
       router.push(`/runs/${runId}`);
     } catch (err) {
       setError(
@@ -253,12 +295,28 @@ export default function RosterPage() {
                 {members === null && activeWorkspaceId && !membersError ? (
                   <Spinner label="Matching members…" />
                 ) : members && members.length > 0 ? (
-                  <MemberSelect
-                    participant={p}
-                    members={members}
-                    disabled={submitting}
-                    onChange={(id) => updateMember(p.id, id)}
-                  />
+                  <div className="space-y-1.5">
+                    <MemberSelect
+                      participant={p}
+                      members={members}
+                      disabled={submitting || p.blocklist === true}
+                      onChange={(id) => updateMember(p.id, id)}
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <SourceBadge participant={p} />
+                      <button
+                        type="button"
+                        onClick={() => toggleBlocklist(p.id)}
+                        disabled={submitting}
+                        className="text-[11px] font-medium text-muted-foreground/80 underline decoration-dotted underline-offset-2 hover:text-foreground disabled:opacity-50"
+                        aria-pressed={p.blocklist === true}
+                      >
+                        {p.blocklist
+                          ? "Undo — allow matching"
+                          : "Never match this name"}
+                      </button>
+                    </div>
+                  </div>
                 ) : null}
               </div>
               <Button
@@ -302,6 +360,77 @@ export default function RosterPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * v2 Phase 7 — small provenance chip next to each roster member picker.
+ *
+ * Reads `Participant.source` (the resolver tier that produced the suggestion at
+ * upload time) + `Participant.blocklist` (a transient UI flag from the "Never
+ * match this name" button). Renders semantic color + short label so the user
+ * can tell an authoritative KB suggestion from a heuristic guess at a glance.
+ *
+ * `source` is undefined on legacy rosters (pre-Phase-7); we render nothing then,
+ * matching the badge-less UI those users are used to.
+ */
+function SourceBadge({ participant }: { participant: Participant }) {
+  if (participant.blocklist) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-600 dark:text-red-400">
+        <span aria-hidden>⛔</span>
+        <span>Blocklisted — won&apos;t suggest again</span>
+      </span>
+    );
+  }
+  const source = participant.source;
+  if (!source) return null;
+  const badgeFor: Record<SuggestionSource, { className: string; label: string; icon: string } | null> = {
+    kb: {
+      className:
+        "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+      label:
+        participant.confirmations && participant.confirmations > 0
+          ? `KB · confirmed ${participant.confirmations}×`
+          : "KB match",
+      icon: "⭐",
+    },
+    heuristic: {
+      className: "bg-blue-500/10 text-blue-700 dark:text-blue-300",
+      label: "Heuristic match",
+      icon: "🔍",
+    },
+    llm: {
+      className: "bg-purple-500/10 text-purple-700 dark:text-purple-300",
+      label: "AI guess",
+      icon: "✨",
+    },
+    none: {
+      className:
+        "bg-muted text-muted-foreground",
+      label: "No match yet",
+      icon: "⚪",
+    },
+  };
+  const cfg = badgeFor[source];
+  if (!cfg) return null;
+  return (
+    <span
+      role="status"
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${cfg.className}`}
+      title={
+        source === "kb"
+          ? "Suggested from this workspace's learned aliases — the KB got smarter from prior corrections."
+          : source === "heuristic"
+            ? "Suggested by name-matching against the ClickUp allowlist. Confirming this will teach the KB."
+            : source === "llm"
+              ? "Suggested by AI when the KB and name-match both missed."
+              : "No resolver tier produced a match — pick a member (or add one) to teach Meetsy for next time."
+      }
+    >
+      <span aria-hidden>{cfg.icon}</span>
+      <span>{cfg.label}</span>
+    </span>
   );
 }
 

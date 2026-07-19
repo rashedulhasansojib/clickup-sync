@@ -127,7 +127,7 @@ export class AnalysisController {
     @Body(new ZodValidationPipe(ConfirmRosterRequestSchema)) body: ConfirmRosterRequest,
     @Query("workspaceId") workspaceId?: string,
   ): Promise<{ runId: string }> {
-    return this.analysis.confirmRoster(user.orgId, id, body, workspaceId);
+    return this.analysis.confirmRoster(user.orgId, user.userId, id, body, workspaceId);
   }
 
   /** Poll a run's status + result. */

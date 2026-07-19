@@ -7,6 +7,19 @@ import { z } from "zod";
  */
 
 // ── Participants / roster ──────────────────────────────────────────────
+
+/**
+ * v2 Phase 7 — the resolver tier that produced a suggestion. Powers the
+ * badge on the roster review chip so the user sees WHY each suggestion was
+ * made. `undefined` on legacy rows written before Phase 7.
+ *   kb        — hit the per-workspace ParticipantAlias table (learned).
+ *   heuristic — matched via AssigneeResolverService's 3-tier deterministic pass.
+ *   llm       — matched via the (future PR-E) LLM fallback.
+ *   none      — no tier resolved this alias.
+ */
+export const SuggestionSourceSchema = z.enum(["kb", "heuristic", "llm", "none"]);
+export type SuggestionSource = z.infer<typeof SuggestionSourceSchema>;
+
 export const ParticipantSchema = z.object({
   /** Stable id within a meeting (e.g. "p1"). */
   id: z.string(),
@@ -22,6 +35,24 @@ export const ParticipantSchema = z.object({
   clickupUserId: z.string().nullable().default(null),
   /** Matched ClickUp member display name (for the verification UI). */
   clickupName: z.string().nullable().default(null),
+  /**
+   * v2 Phase 7 — provenance of the current suggestion. Backend-populated at
+   * upload time; the confirmed roster stored on Meeting.roster preserves the
+   * source that was suggested (so PR-C can diff and toast).
+   */
+  source: SuggestionSourceSchema.optional(),
+  /**
+   * v2 Phase 7 — number of prior confirmations for a KB hit. Powers the
+   * "KB · confirmed N×" badge. Only present when `source === "kb"`.
+   */
+  confirmations: z.number().int().nonnegative().optional(),
+  /**
+   * v2 Phase 7 — set by the roster review UI when the user clicks "Never match
+   * this name". Combined with a null `clickupUserId`, tells the write path to
+   * record a blocklist row (source=user_blocklisted) instead of skipping the
+   * cleared field as a no-op. Transient at confirmation time.
+   */
+  blocklist: z.boolean().optional(),
 });
 export type Participant = z.infer<typeof ParticipantSchema>;
 

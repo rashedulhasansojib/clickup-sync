@@ -17,9 +17,23 @@ import { TasksTab } from "@/app/kb/tasks-tab";
 import { DocumentsTab } from "@/app/kb/documents-tab";
 import { SearchTab } from "@/app/kb/search-tab";
 import { RebuildTab } from "@/app/kb/rebuild-tab";
+import { ParticipantsTab } from "@/app/kb/participants-tab";
 
-type KbTab = "overview" | "tasks" | "documents" | "search" | "rebuild";
-const TAB_ORDER: KbTab[] = ["overview", "tasks", "documents", "search", "rebuild"];
+type KbTab =
+  | "overview"
+  | "tasks"
+  | "documents"
+  | "search"
+  | "participants"
+  | "rebuild";
+const TAB_ORDER: KbTab[] = [
+  "overview",
+  "tasks",
+  "documents",
+  "search",
+  "participants",
+  "rebuild",
+];
 
 function parseTab(raw: string | null, canWrite: boolean): KbTab {
   const parsed = TAB_ORDER.find((t) => t === raw);
@@ -126,6 +140,7 @@ function KbShell({ ws, canWrite }: { ws: string; canWrite: boolean }) {
             <TabsTrigger value="tasks">Tasks</TabsTrigger>
             <TabsTrigger value="documents">Documents</TabsTrigger>
             <TabsTrigger value="search">Search</TabsTrigger>
+            <TabsTrigger value="participants">Participants</TabsTrigger>
             {canWrite && <TabsTrigger value="rebuild">Rebuild</TabsTrigger>}
           </TabsList>
 
@@ -167,6 +182,10 @@ function KbShell({ ws, canWrite }: { ws: string; canWrite: boolean }) {
                 </p>
               </Card>
             )}
+          </TabsContent>
+
+          <TabsContent value="participants" className="mt-4">
+            <ParticipantsTab ws={ws} canWrite={canWrite} />
           </TabsContent>
 
           {canWrite && (

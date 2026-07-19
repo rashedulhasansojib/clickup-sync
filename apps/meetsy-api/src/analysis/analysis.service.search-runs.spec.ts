@@ -43,6 +43,8 @@ describe("AnalysisService — searchRuns", () => {
       workspaces as never,
       {} as never,
       {} as never,
+      {} as never,
+      {} as never,
     );
     return { service, queryRaw, taskPushFindMany };
   }

@@ -40,6 +40,8 @@ describe("AnalysisService — workspace scoping", () => {
       workspaces as never,
       {} as never,
       {} as never,
+      {} as never,
+      {} as never,
     );
     return { service, findFirst, resolve, chatFindMany };
   }
