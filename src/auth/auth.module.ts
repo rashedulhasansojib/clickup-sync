@@ -20,16 +20,18 @@ import { RolesGuard } from './roles.guard';
 import { AuthController } from './auth.controller';
 import { InvitationController } from './invitation.controller';
 import { UsersController } from './users.controller';
+import { isWorker } from '../config/role';
 
 @Module({
   imports: [ConfigModule, MailerModule, AdminModule],
   controllers: [AuthController, InvitationController, UsersController],
   providers: [
-    PasswordService, TokenService, PermissionsService, SessionService, SessionCleanupService,
+    PasswordService, TokenService, PermissionsService, SessionService,
     AuthService, InvitationService, UsersService,
     OrgRepository, UserRepository, SessionRepository, InvitationRepository,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    ...(isWorker() ? [SessionCleanupService] : []),
   ],
   exports: [SessionService, OrgRepository],
 })

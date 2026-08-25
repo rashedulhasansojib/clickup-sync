@@ -112,6 +112,14 @@ const EMPTY: Cache = {
 export class SettingsService implements OnModuleInit {
   private readonly logger = new Logger(SettingsService.name);
   private cache: Cache = { ...EMPTY };
+  /**
+   * Notifies OTHER processes that this cache changed. Registered by
+   * `SettingsSyncService` (which owns the Redis pub/sub) rather than injected,
+   * because `QueueService` already depends on this service — injecting it back
+   * would be a provider cycle. Null until that service initialises, and in
+   * unit tests, where a write simply skips the broadcast.
+   */
+  private changePublisher: (() => void) | null = null;
 
   constructor(
     private readonly repo: SettingsRepository,
@@ -120,6 +128,11 @@ export class SettingsService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     await this.refresh();
+  }
+
+  /** See `changePublisher`. Called once by `SettingsSyncService` on boot. */
+  registerChangePublisher(publish: () => void): void {
+    this.changePublisher = publish;
   }
 
   async refresh(): Promise<void> {
@@ -248,6 +261,7 @@ export class SettingsService implements OnModuleInit {
     }
     await this.repo.upsert(data);
     await this.refresh();
+    this.changePublisher?.();
     return this.getMasked();
   }
 
@@ -255,5 +269,9 @@ export class SettingsService implements OnModuleInit {
   async setWebhookSecret(secret: string, actor?: string): Promise<void> {
     await this.repo.upsert({ webhookSecretEnc: this.crypto.encrypt(secret), updatedBy: actor ?? null });
     await this.refresh();
+    // Critical: the auto-heal rotation runs in the worker, but the signature
+    // guard reads this secret in web. Without the broadcast, web keeps the old
+    // secret and 401s every ClickUp delivery until it is restarted.
+    this.changePublisher?.();
   }
 }

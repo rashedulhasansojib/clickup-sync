@@ -3,13 +3,6 @@
 # ── build ─────────────────────────────────────────────────────────────────────
 # Install ALL deps (incl. dev + workspace deps), generate the Prisma client,
 # compile the backend to dist/, and build the dashboard to apps/web/dist/.
-#
-# npm ci runs in THIS stage so that:
-#   - workspace deps for apps/web are present for `build:web` (no reliance on
-#     hoisting), and
-#   - `prisma generate` writes the client into THIS stage's node_modules, which
-#     the runner then copies — otherwise the container boots with no Prisma
-#     client and crashes.
 FROM node:22-alpine AS build
 WORKDIR /app
 # Copy manifests first so `npm ci` is cached until dependencies change.
@@ -19,16 +12,21 @@ RUN npm ci
 COPY . .
 # Build-time only: prisma.config.ts resolves env('DATABASE_URL'). `prisma generate`
 # never connects, but the var must resolve. The real URL is injected at runtime
-# via env_file and does not leak from this stage into the runner.
+# and does not leak from this stage into the runner.
 ENV DATABASE_URL="postgresql://build:build@localhost:5432/build?schema=public"
 RUN npm run prisma:generate \
  && npm run build \
  && npm run build:web
 
 # ── runner ────────────────────────────────────────────────────────────────────
-# Full node_modules are kept on purpose: `prisma migrate deploy` runs at startup
-# and the Prisma CLI + the loader for prisma.config.ts are devDependencies.
-# node_modules is copied from `build` so it includes the generated Prisma client.
+# Full node_modules are kept on purpose: `prisma migrate deploy` (run as a
+# one-shot deploy step, not here) and the prisma.config.ts loader are
+# devDependencies. node_modules is copied from `build` so it includes the
+# generated Prisma client.
+#
+# NOTE: migrations are intentionally NOT in CMD. With blue-green both colors
+# share one DB; migrations run once via the `migrate` compose service before
+# cutover. The same image runs as web (default) or worker (ROLE=worker).
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production

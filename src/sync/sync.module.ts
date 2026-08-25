@@ -7,6 +7,17 @@ import { ListsModule } from '../lists/lists.module';
 import { SyncCheckpointsRepository } from './sync-checkpoints.repository';
 import { BackfillService } from './backfill.service';
 import { SyncScheduler } from './sync.scheduler';
+import { isWorker } from '../config/role';
 
-@Module({ imports: [ScheduleModule, QueuesModule, ClickupModule, TasksModule, ListsModule], providers: [SyncCheckpointsRepository, BackfillService, SyncScheduler], exports: [SyncCheckpointsRepository, BackfillService] })
+const worker = isWorker();
+
+// ListsModule is imported unconditionally (both roles): it only provides
+// ListsRepository + ListCatalogService (no cron of its own). ScheduleModule and
+// SyncScheduler stay worker-gated so the daily crons fire in the single worker
+// container, never in the web colors.
+@Module({
+  imports: [...(worker ? [ScheduleModule] : []), QueuesModule, ClickupModule, TasksModule, ListsModule],
+  providers: [SyncCheckpointsRepository, BackfillService, ...(worker ? [SyncScheduler] : [])],
+  exports: [SyncCheckpointsRepository, BackfillService],
+})
 export class SyncModule {}

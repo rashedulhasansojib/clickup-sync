@@ -91,3 +91,53 @@ For a full server setup (Docker Compose + Caddy with automatic HTTPS on Ubuntu),
 - Keep Grafana read-only credentials separate from app credentials.
 - Enable HTTPS before setting the ClickUp webhook endpoint.
 - Add alerting on failed jobs, missing rates, and stale checkpoints.
+
+## Blue-green deployment
+
+The production stack runs two web colors — `app-web-blue` and `app-web-green` —
+behind Caddy. Caddy proxies to whichever color `active.conf` names. One color is
+live; the other is the warm rollback target running the previous image.
+
+### What a deploy does (push to `main`)
+
+`.github/workflows/deploy.yml`: `quality` → `e2e` → `build-and-push` (GHCR image
+tagged `:<sha>`) → `deploy`. The deploy job renders `.env` on the host from GitHub
+secrets, syncs compose/Caddyfile/scripts, then runs `scripts/deploy.sh`, which:
+
+1. Pulls the new image and ensures infra + Caddy are up.
+2. Runs migrations once (`docker compose --profile tools run --rm migrate`) — before any cutover.
+3. Detects the current live color from `active.conf` and targets the other.
+4. Starts the target color on the new image.
+5. Health-gates it on `/api/health` (30 × 2s). **If it never goes healthy, the
+   deploy fails and traffic is NOT flipped — the old color keeps serving.**
+6. Flips `active.conf` to the target and runs `caddy reload` (graceful).
+7. Recreates the singleton `app-worker` on the new image, then prunes old images.
+
+### Rolling back
+
+- **Immediately after a bad deploy** (old color still running the previous image):
+  on the host, in `DEPLOY_PATH`:
+  ```bash
+  # flip back to the other color
+  printf 'reverse_proxy app-web-blue:3000\n' > active.conf   # or -green
+  docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+  ```
+  This is instant — no rebuild.
+- **Later** (the idle color has since been overwritten): re-run the `Deploy`
+  workflow via `workflow_dispatch` from the previous good commit, or
+  `DEPLOY_PATH=<path> IMAGE_TAG=<previous-sha> bash scripts/deploy.sh` on the host (the image is
+  still in GHCR).
+
+### Migration discipline — expand/contract (REQUIRED)
+
+Blue and green share one Postgres, and the old color must keep working against the
+new schema during the rollback window. Therefore **every migration must be
+backward-compatible**:
+
+- **Expand**: add nullable columns, new tables, new indexes. Ship code that
+  tolerates both old and new shapes.
+- **Contract**: only in a *later* deploy, once no running color depends on the old
+  shape, drop/rename.
+- **Never** drop or rename a column in the same deploy that introduces its
+  replacement — that breaks instant rollback. Rollback flips *code*, never
+  un-migrates the schema.

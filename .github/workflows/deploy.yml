@@ -1,26 +1,24 @@
 name: Deploy
 
-# Push to main → run quality checks → build & push image to GHCR → deploy to server.
+# Push to main → quality + e2e gates → build & push image to GHCR → blue-green deploy.
 on:
   push:
     branches: [main]
   workflow_dispatch: {}
 
-# Never run two deploys to the same server at once; let an in-flight deploy finish.
+# Never run two deploys to the same host at once; let an in-flight deploy finish.
 concurrency:
   group: deploy-production
   cancel-in-progress: false
 
 env:
-  IMAGE: ghcr.io/rashedulhasansojib/clickup-sync
+  IMAGE: ghcr.io/rashedulhasannifty/clickup-sync
 
 jobs:
-  # ── 1. Quality gate ─────────────────────────────────────────────────────────
+  # ── 1. Quality gate (infra-free unit specs) ─────────────────────────────────
   quality:
     runs-on: ubuntu-latest
     env:
-      # Dummy values so `prisma generate`, the Nest build, and unit tests can
-      # load config. No real DB/Redis is contacted (all tests are unit specs).
       DATABASE_URL: postgresql://user:pass@localhost:5432/db?schema=public
       REDIS_URL: redis://localhost:6379
     steps:
@@ -36,10 +34,7 @@ jobs:
       - run: npm run build
       - run: npm run build:web
 
-  # ── 1b. E2E gate (needs real Postgres + Redis) ──────────────────────────────
-  # Kept separate from `quality` so the unit gate stays infra-free and fast, and
-  # so the e2e suite (which boots the full AppModule + BullMQ and writes to the
-  # DB) actually RUNS against services rather than being silently skipped.
+  # ── 1b. E2E gate (real Postgres + Redis) ────────────────────────────────────
   e2e:
     runs-on: ubuntu-latest
     services:
@@ -80,7 +75,7 @@ jobs:
       - run: npm run prisma:deploy
       - run: npm run test:e2e
 
-  # ── 2. Build the image and push to GHCR ─────────────────────────────────────
+  # ── 2. Build the image and push to GHCR (the artifact) ──────────────────────
   build-and-push:
     needs: [quality, e2e]
     runs-on: ubuntu-latest
@@ -105,7 +100,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── 3. Deploy: sync compose/Caddyfile, then pull image + restart on server ───
+  # ── 3. Blue-green deploy ────────────────────────────────────────────────────
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -115,8 +110,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Keep the server's compose file + Caddyfile in sync with the repo.
-      # The server keeps its own .env (never copied/overwritten).
+      # Sync deploy files to the host. The server keeps its own .env (rendered
+      # in the next step) and its own active.conf state once deployed — but we
+      # ship active.conf too so the very first deploy has a seed file.
       - name: Copy deploy files to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -124,31 +120,99 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
-          source: "docker-compose.prod.yml,Caddyfile"
+          source: "docker-compose.prod.yml,Caddyfile,scripts/deploy.sh"
           target: ${{ secrets.DEPLOY_PATH }}
 
-      - name: Pull image and restart
+      # Seed active.conf ONLY if the host doesn't already have one (don't clobber
+      # the live color on subsequent deploys).
+      - name: Seed active.conf on first deploy
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
-          # Forward these into the SSH session (GHCR_TOKEN is the ephemeral,
-          # job-scoped GITHUB_TOKEN — no long-lived registry secret on the box).
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+            if [ ! -f active.conf ]; then
+              echo "reverse_proxy app-web-blue:3000" > active.conf
+              echo "seeded active.conf -> blue"
+            fi
+            chmod +x scripts/deploy.sh
+
+      # Render .env on the host from GitHub secrets (atomic: write tmp, then mv).
+      # Values arrive via the envs: list so they are masked in logs and never
+      # appear as literal text in this YAML.
+      - name: Render .env from secrets
+        uses: appleboy/ssh-action@v1
+        env:
+          DOMAIN: ${{ secrets.DOMAIN }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          ALLOWED_ORIGINS: ${{ secrets.ALLOWED_ORIGINS }}
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          WEBHOOK_AUTOHEAL_ENABLED: ${{ secrets.WEBHOOK_AUTOHEAL_ENABLED }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          envs: DOMAIN,DATABASE_URL,POSTGRES_PASSWORD,REDIS_URL,APP_ENCRYPTION_KEY,ADMIN_API_KEY,ALLOWED_ORIGINS,APP_BASE_URL,SMTP_HOST,SMTP_PORT,SMTP_USER,SMTP_PASS,MAIL_FROM,WEBHOOK_AUTOHEAL_ENABLED
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+            umask 077
+            cat > .env.tmp <<EOF
+            NODE_ENV=production
+            DOMAIN=${DOMAIN}
+            DATABASE_URL=${DATABASE_URL}
+            POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+            REDIS_URL=${REDIS_URL}
+            APP_ENCRYPTION_KEY=${APP_ENCRYPTION_KEY}
+            ADMIN_API_KEY=${ADMIN_API_KEY}
+            ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+            APP_BASE_URL=${APP_BASE_URL}
+            SMTP_HOST=${SMTP_HOST}
+            SMTP_PORT=${SMTP_PORT}
+            SMTP_USER=${SMTP_USER}
+            SMTP_PASS=${SMTP_PASS}
+            MAIL_FROM=${MAIL_FROM}
+            EOF
+            # Optional vars are appended only when set. WEBHOOK_AUTOHEAL_ENABLED is
+            # a strict z.enum(['true','false']) in env.validation.ts — writing it
+            # empty fails validation and crashes both web and worker on boot, so an
+            # unset secret must leave the key absent and let the schema default apply.
+            if [ -n "${WEBHOOK_AUTOHEAL_ENABLED:-}" ]; then
+              echo "WEBHOOK_AUTOHEAL_ENABLED=${WEBHOOK_AUTOHEAL_ENABLED}" >> .env.tmp
+            fi
+            mv .env.tmp .env
+
+      - name: Blue-green deploy
+        uses: appleboy/ssh-action@v1
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
           envs: IMAGE_TAG,GHCR_TOKEN,GHCR_USER
           script: |
             set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            export DEPLOY_PATH="${{ secrets.DEPLOY_PATH }}"
             export IMAGE_TAG="$IMAGE_TAG"
-            docker compose -f docker-compose.prod.yml pull api
-            docker compose -f docker-compose.prod.yml up -d
+            bash scripts/deploy.sh
             docker logout ghcr.io
-            # Reclaim disk: drop unused images older than 7 days (per-SHA tags
-            # aren't dangling, so plain `prune -f` would leave them to pile up).
-            docker image prune -af --filter "until=168h"
-        env:
-          IMAGE_TAG: ${{ github.sha }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GHCR_USER: ${{ github.actor }}

@@ -4,6 +4,7 @@ import { isValidEncryptionKey } from '../settings/crypto.service';
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3000),
+  ROLE: z.enum(['web', 'worker']).default('web'),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   // ClickUp connection values are now UI-managed (stored in app_settings) and
